@@ -20,9 +20,21 @@ function parseConfig() {
   const p = new URLSearchParams(window.location.search);
   const roomId = p.get('room_id');
   const hostToken = p.get('host_token');
-  // `api` allows pointing at a different origin in dev; empty = same-origin (prod on Cloudflare)
-  const apiBase = (p.get('api') || '').replace(/\/$/, '');
+  const apiBase = resolveApiBase();
   return roomId && hostToken ? { roomId, hostToken, apiBase } : null;
+}
+
+function resolveApiBase() {
+  const p = new URLSearchParams(window.location.search);
+  const explicit = (p.get('api') || '').replace(/\/$/, '');
+  if (explicit) return explicit;
+
+  // Production monitor runs on clawroom.cc while API is served from api.clawroom.cc.
+  const host = window.location.hostname.toLowerCase();
+  if (host === 'clawroom.cc' || host === 'www.clawroom.cc') {
+    return 'https://api.clawroom.cc';
+  }
+  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +204,7 @@ async function handleCreateRoom(e) {
   if (timeout && timeout > 0) payload.timeout_minutes = timeout;
 
   try {
-    const res = await fetch('/rooms', {
+    const res = await fetch(apiPath('/rooms'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -280,14 +292,19 @@ function buildMonitorUrl(roomId, hostToken, monitorLink) {
   if (monitorLink && (monitorLink.startsWith('http://') || monitorLink.startsWith('https://'))) {
     return monitorLink;
   }
-  // In dev, monitor is same-origin (Vite); in prod, same-origin too
-  return `${window.location.origin}/?room_id=${roomId}&host_token=${hostToken}`;
+  const url = new URL(window.location.origin);
+  url.searchParams.set('room_id', roomId);
+  url.searchParams.set('host_token', hostToken);
+  if (State.apiBase) {
+    url.searchParams.set('api', State.apiBase);
+  }
+  return url.toString();
 }
 
 function absolutize(pathOrUrl) {
   if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl;
-  // Use the API origin (same-origin via Vite proxy or Cloudflare)
-  const origin = window.location.origin;
+  // Use explicit API origin when configured, else same-origin.
+  const origin = State.apiBase || window.location.origin;
   return pathOrUrl.startsWith('/') ? `${origin}${pathOrUrl}` : `${origin}/${pathOrUrl}`;
 }
 
@@ -924,6 +941,7 @@ function init() {
     // URL has room_id + host_token → go directly to monitor
     showMonitorView(cfg);
   } else {
+    State.apiBase = resolveApiBase();
     // No room info → show create room home page
     showHomePage();
   }
