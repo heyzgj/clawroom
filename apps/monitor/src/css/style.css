@@ -950,11 +950,49 @@ code {
     margin-bottom: var(--spacing-lg);
 }
 
-.modal-instruction {
+.modal-steps {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-bottom: var(--spacing-md);
+}
+
+@media (min-width: 560px) {
+    .modal-steps {
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+}
+
+.modal-step {
+    border: 1px solid var(--color-border-faint);
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.modal-step-kicker {
+    font-family: var(--font-family-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-accent-goal);
+    margin-bottom: 6px;
+}
+
+.modal-step-title {
+    font-family: var(--font-family-body);
+    font-size: var(--step-0);
+    font-weight: 650;
+    color: var(--color-text-primary);
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+}
+
+.modal-step-body {
+    font-family: var(--font-family-body);
     font-size: var(--step--1);
     color: var(--color-text-secondary);
-    margin-bottom: var(--spacing-md);
-    font-family: var(--font-family-body);
+    line-height: 1.55;
 }
 
 /* Invite cards */
@@ -1003,7 +1041,9 @@ code {
     font-family: var(--font-family-mono);
     font-size: 0.75rem;
     color: var(--color-text-secondary);
-    word-break: break-all;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: pre-wrap;
     line-height: 1.5;
     background: transparent;
     padding: 8px 10px;
@@ -1041,6 +1081,139 @@ code {
 
 .modal-footer {
     text-align: center;
+}
+
+/* -------------------------------------------------------------------------- */
+/* JOIN PAGE                                                                  */
+/* -------------------------------------------------------------------------- */
+.join-container {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: var(--spacing-xl) var(--spacing-md);
+}
+
+.join-hero {
+    text-align: center;
+    margin-bottom: var(--spacing-lg);
+    animation: fade-up 0.6s ease-out 0.15s both;
+}
+
+.join-title {
+    font-family: var(--font-family-display);
+    font-size: var(--step-3);
+    color: var(--color-text-hero);
+    font-weight: 750;
+    letter-spacing: -0.03em;
+}
+
+.join-subtitle {
+    margin-top: 10px;
+    font-family: var(--font-family-body);
+    color: var(--color-text-secondary);
+    font-size: var(--step--0);
+    line-height: 1.6;
+}
+
+.join-card {
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.01);
+    padding: var(--spacing-lg);
+    animation: modal-in 0.4s var(--ease-spring-1);
+}
+
+.join-meta {
+    border: 1px solid var(--color-border-faint);
+    padding: 10px 12px;
+    margin-bottom: var(--spacing-md);
+}
+
+.join-meta-row {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    gap: 10px;
+    padding: 6px 0;
+    border-top: 1px solid var(--color-border-faint);
+}
+
+.join-meta-row:first-child {
+    border-top: none;
+}
+
+.join-meta-label {
+    font-family: var(--font-family-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-tertiary);
+}
+
+.join-meta-value {
+    font-family: var(--font-family-body);
+    font-size: var(--step--0);
+    color: var(--color-text-primary);
+    overflow-wrap: anywhere;
+}
+
+.join-steps {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-bottom: var(--spacing-md);
+}
+
+.join-message {
+    margin-top: var(--spacing-md);
+}
+
+.join-footer {
+    margin-top: var(--spacing-md);
+    text-align: center;
+}
+
+.join-advanced {
+    margin-top: var(--spacing-md);
+    border: 1px solid var(--color-border-faint);
+    padding: 10px 12px;
+}
+
+.join-advanced summary {
+    cursor: pointer;
+    font-family: var(--font-family-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    user-select: none;
+}
+
+.join-advanced[open] summary {
+    color: var(--color-text-primary);
+}
+
+.join-advanced-hint {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    font-family: var(--font-family-body);
+    font-size: var(--step--1);
+    color: var(--color-text-secondary);
+    line-height: 1.55;
+}
+
+.join-link {
+    color: var(--color-text-primary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.kbd {
+    display: inline-block;
+    font-family: var(--font-family-mono);
+    font-size: 0.85em;
+    padding: 1px 6px;
+    border: 1px solid var(--color-border-faint);
+    border-radius: 999px;
+    color: var(--color-text-primary);
+    background: rgba(255, 255, 255, 0.04);
 }
 
 /* -------------------------------------------------------------------------- */

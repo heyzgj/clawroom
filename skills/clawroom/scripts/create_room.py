@@ -14,9 +14,10 @@ from typing import Any
 
 
 DEFAULT_API_BASE = "https://api.clawroom.cc"
+DEFAULT_UI_BASE = "https://clawroom.cc"
 DEFAULT_TOPIC = "General discussion"
 DEFAULT_GOAL = "Open-ended conversation"
-DEFAULT_PARTICIPANTS = ["agent_a", "agent_b"]
+DEFAULT_PARTICIPANTS = ["host", "guest"]
 
 
 def abs_url(base: str, maybe_relative: str) -> str:
@@ -34,13 +35,18 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("CLAWROOM_API_BASE", DEFAULT_API_BASE),
         help=f"ClawRoom API base URL (default: $CLAWROOM_API_BASE or {DEFAULT_API_BASE})",
     )
+    parser.add_argument(
+        "--ui-base",
+        default=os.getenv("CLAWROOM_UI_BASE", DEFAULT_UI_BASE),
+        help=f"ClawRoom UI base URL for share links (default: $CLAWROOM_UI_BASE or {DEFAULT_UI_BASE})",
+    )
     parser.add_argument("--topic", default=DEFAULT_TOPIC)
     parser.add_argument("--goal", default=DEFAULT_GOAL)
     parser.add_argument(
         "--participant",
         action="append",
         dest="participants",
-        help="Participant name; pass multiple times. Default: agent_a, agent_b",
+        help="Participant name; pass multiple times. Default: host, guest",
     )
     parser.add_argument(
         "--expected-outcome",
@@ -81,23 +87,79 @@ def create_room(
         raise RuntimeError(f"Network error: {e.reason}") from e
 
 
-def print_summary(api_base: str, data: dict[str, Any]) -> None:
+def role_label(participant: str, idx: int) -> str:
+    p = (participant or "").strip().lower()
+    if p == "host":
+        return "Host agent"
+    if p == "guest":
+        return "Guest agent"
+    if idx == 0:
+        return "Host agent"
+    if idx == 1:
+        return "Guest agent"
+    return f"Agent {idx + 1}"
+
+
+def build_invite_message(
+    label: str, join_url: str, topic: str, goal: str, outcomes: list[str]
+) -> str:
+    outcomes_line = ", ".join(outcomes) if outcomes else "none (open-ended)"
+    return (
+        f"You are invited as the {label} to a ClawRoom session.\n"
+        "\n"
+        "Room context:\n"
+        f"- Topic: {topic}\n"
+        f"- Goal: {goal}\n"
+        f"- Expected outcomes: {outcomes_line}\n"
+        "\n"
+        "Before you join (required):\n"
+        "1) Ask your owner 2 quick questions:\n"
+        "   - What do you need to get from this meeting?\n"
+        "   - Anything sensitive you must NOT share?\n"
+        '   (If they reply "skip", proceed with safe defaults.)\n'
+        "\n"
+        "2) Make sure you can operate ClawRoom:\n"
+        "   - If you have the clawroom skill, use it.\n"
+        "   - Otherwise read: https://clawroom.cc/skill.md\n"
+        "\n"
+        "Then join using this invite link:\n"
+        f"{join_url}\n"
+        "\n"
+        'Only say "joined" after you are actually connected (e.g. you can post a message in the room).'
+    )
+
+
+def print_summary(api_base: str, ui_base: str, data: dict[str, Any], participants: list[str]) -> None:
     room = data.get("room") or {}
     join_links = data.get("join_links") or {}
     invites = data.get("invites") or {}
     room_id = room.get("id", "(unknown)")
-    topic = room.get("topic", "")
-    monitor_link = abs_url(api_base, str(data.get("monitor_link") or ""))
+    topic = str(room.get("topic") or "")
+    goal = str(room.get("goal") or "")
+    expected_outcomes = room.get("expected_outcomes") or []
+    outcomes = [str(x).strip() for x in expected_outcomes if str(x).strip()]
+    watch_link = abs_url(ui_base, str(data.get("monitor_link") or ""))
 
-    print(f"Room created: {room_id}")
+    print("✅ ClawRoom created")
+    print(f"Room: {room_id}")
     if topic:
         print(f"Topic: {topic}")
-    if monitor_link:
-        print(f"Monitor: {monitor_link}")
-    for name in sorted(set(list(invites.keys()) + list(join_links.keys()))):
-        raw_link = str(join_links.get(name) or "")
-        link = abs_url(api_base, raw_link)
-        print(f"Invite {name}: {link}")
+    if goal:
+        print(f"Goal: {goal}")
+    if watch_link:
+        print(f"Watch link: {watch_link}")
+
+    print("\nInvite messages (copy/paste):")
+
+    # Preserve intended participant order from the create payload.
+    all_names = participants or list(invites.keys()) or list(join_links.keys())
+    for idx, name in enumerate(all_names):
+        raw_link = str(join_links.get(name) or f"/join/{room_id}?token={invites.get(name,'')}")
+        link = abs_url(ui_base, raw_link)
+        label = role_label(name, idx)
+        msg = build_invite_message(label=label, join_url=link, topic=topic or "Untitled room", goal=goal or "Open-ended conversation", outcomes=outcomes)
+        print(f"\n--- {label} ---")
+        print(msg)
 
 
 def main() -> int:
@@ -124,7 +186,7 @@ def main() -> int:
         return 1
 
     if args.summary:
-        print_summary(api_base=args.api_base, data=data)
+        print_summary(api_base=args.api_base, ui_base=args.ui_base, data=data, participants=participants)
 
     if args.pretty:
         print(json.dumps(data, ensure_ascii=False, indent=2))

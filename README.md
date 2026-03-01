@@ -27,7 +27,7 @@ Monitor runs at `http://127.0.0.1:5173`.
 uv run python apps/api/src/roombridge_api/cli.py create \
   --topic "Exchange ICP and primary KPI" \
   --goal "Fill required fields" \
-  --participants agent_a agent_b \
+  --participants host guest \
   --required-field ICP \
   --required-field primary_kpi
 ```
@@ -41,10 +41,10 @@ Output:
   📺 Monitor:
      http://127.0.0.1:5173/?room_id=room_abc123&host_token=host_...
 
-  🤖 agent_a:
+  🤖 host:
      uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "http://127.0.0.1:8787/join/room_abc123?token=inv_..."
 
-  🤖 agent_b:
+  🤖 guest:
      uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "http://127.0.0.1:8787/join/room_abc123?token=inv_..."
 
   📄 Raw JSON: /tmp/clawroom_room_abc123.json

@@ -9,6 +9,7 @@
 4. Responder preflight 的 owner 确认通道采用 `B 主 + A 回退`。
 5. Room 结果新增 `outcomes_filled / outcomes_missing / outcomes_completion`，让 host 一眼看懂目标完成度。
 6. 模板库（`icp_exchange` 等）进入 Phase 2，不阻塞 Phase 1 上线。
+7. invite 分享链接统一走 `clawroom.cc/join/...`（HTML landing page），避免 `api.clawroom.cc/join/...` 的 JSON 下载体验与误解。
 
 ## 2. 背景与问题
 1. 现状约束：
@@ -37,7 +38,7 @@
 
 3. Participants：
 1. Phase 1 UI 不展示 participants 输入。
-2. UI 默认提交 `participants = ["agent_a", "agent_b"]`（hidden/default）。
+2. UI 默认提交 `participants = ["host", "guest"]`（hidden/default，角色名）。
 3. 后端 contract 不改，保持 `participants >= 2`。
 
 4. Preflight 通道：
@@ -75,7 +76,7 @@
 {
   "topic": "General discussion",
   "goal": "Open-ended conversation",
-  "participants": ["agent_a", "agent_b"]
+  "participants": ["host", "guest"]
 }
 ```
 2. Topic/Goal 可编辑；participants Phase 1 不暴露给用户。
@@ -166,7 +167,7 @@
 | # | 任务 | 文件 | 依赖 |
 |---|---|---|---|
 | A1 | Home Create 表单（Topic/Goal 默认值） | `apps/monitor/index.html`, `apps/monitor/src/main.js`, `apps/monitor/src/css/style.css` | 无 |
-| A2 | Hidden participants 默认提交（`agent_a/agent_b`） | `apps/monitor/src/main.js` | A1 |
+| A2 | Hidden participants 默认提交（`host/guest`） | `apps/monitor/src/main.js` | A1 |
 | A3 | Advanced Settings（Expected Outcomes, Turn limit, Timeout） | `apps/monitor/src/main.js`, `apps/monitor/src/css/style.css` | A1 |
 | A4 | `POST /rooms` API 调用 + 错误处理 | `apps/monitor/src/main.js` | C1（API contract） |
 | A5 | Post-create Invite Modal（join link copy, Enter Monitor CTA） | `apps/monitor/index.html`, `apps/monitor/src/main.js`, `apps/monitor/src/css/style.css` | A4 |
@@ -182,7 +183,7 @@ Request:
 {
   topic,
   goal,
-  participants: ["agent_a","agent_b"],
+  participants: ["host","guest"],
   expected_outcomes?,
   turn_limit?,
   timeout_minutes?
@@ -276,7 +277,7 @@ Day 4:  联调 + E2E 全流程验证
 2. UI 默认值固定：
 1. `topic = "General discussion"`
 2. `goal = "Open-ended conversation"`
-3. `participants = ["agent_a","agent_b"]`（hidden）
+3. `participants = ["host","guest"]`（hidden）
 3. `Expected Outcomes` 仅出现在 Advanced settings。
 4. Phase 1 不引入模板与 NLU 映射。
 5. preflight 默认 `confirm` 且 `B 主 + A 回退`。
@@ -316,6 +317,11 @@ Day 4:  联调 + E2E 全流程验证
 1. `apps/monitor/vite.config.js` 新增 `/join` dev proxy，确保本地复制邀请命令可直接访问 `http://127.0.0.1:5173/join/...`。
 2. `apps/monitor/src/main.js` 修正 status 事件渲染：初始 `active` 状态不再错误显示为 `Completed`。
 3. `apps/edge/src/worker_room.ts` 新增 `GET /rooms/{id}/monitor/stream` SSE 端点，消除 monitor 首次连接的 `404 + reconnect` 噪音。
+4. `apps/monitor` Invite Modal 升级为 Step 1/2 明确流程，并将邀请文案从“裸 join 链接”升级为「确认意图 + 首次安装 skill + 再加入」的完整消息模板。
+5. `apps/monitor` 新增 `/join/{room}?token=...` 的 HTML landing page（避免 API `/join` JSON 在聊天软件中被当成附件下载）。
+6. `apps/monitor/public/_redirects` 增加 SPA fallback，保证 `/join/*` 路径在 Pages 上可用。
+7. 默认 participants 从工程名改为角色名：`host/guest`，避免用户看到 `agent_a/agent_b` 的语义断裂。
+8. `skills/clawroom` 的 `scripts/create_room.py` 增加 `--ui-base / CLAWROOM_UI_BASE`，输出 share-ready 的 Watch link + 两条 invite message（Host/Guest）。
 
 ### 11.3 证据
 1. UI 验收截图：`reports/a7_room_summary.png`。

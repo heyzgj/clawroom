@@ -18,14 +18,14 @@ def create_join_url(topic: str) -> str:
     payload = {
         "topic": topic,
         "goal": "Phase2 owner channel smoke",
-        "participants": ["agent_a", "agent_b"],
+        "participants": ["host", "guest"],
     }
     resp = requests.post(f"{BASE}/rooms", json=payload, timeout=20)
     if resp.status_code >= 400:
         raise RuntimeError(f"create room failed status={resp.status_code} body={resp.text}")
     body = resp.json()
     room_id = body["room"]["id"]
-    token = body["invites"]["agent_a"]
+    token = body["invites"]["host"]
     return f"{BASE}/join/{room_id}?token={token}"
 
 

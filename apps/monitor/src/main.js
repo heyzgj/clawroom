@@ -24,6 +24,17 @@ function parseConfig() {
   return roomId && hostToken ? { roomId, hostToken, apiBase } : null;
 }
 
+function parseJoinConfig() {
+  const path = (window.location.pathname || '/').replace(/\/+$/, '/');
+  if (!path.startsWith('/join/')) return null;
+  const roomId = path.slice('/join/'.length).split('/')[0];
+  if (!roomId) return null;
+  const p = new URLSearchParams(window.location.search);
+  const token = p.get('token') || '';
+  const apiBase = resolveApiBase();
+  return { roomId, token, apiBase };
+}
+
 function resolveApiBase() {
   const p = new URLSearchParams(window.location.search);
   const explicit = (p.get('api') || '').replace(/\/$/, '');
@@ -44,6 +55,7 @@ function resolveApiBase() {
 const DOM = {
   // Views
   homePage: document.getElementById('homePage'),
+  joinPage: document.getElementById('joinPage'),
   app: document.getElementById('app'),
   inviteModal: document.getElementById('inviteModal'),
 
@@ -63,6 +75,18 @@ const DOM = {
   modalRoomTopic: document.getElementById('modalRoomTopic'),
   modalInvites: document.getElementById('modalInvites'),
   btnEnterRoom: document.getElementById('btnEnterRoom'),
+
+  // Join page
+  joinSubtitle: document.getElementById('joinSubtitle'),
+  joinMeta: document.getElementById('joinMeta'),
+  joinTopic: document.getElementById('joinTopic'),
+  joinGoal: document.getElementById('joinGoal'),
+  joinRole: document.getElementById('joinRole'),
+  joinMessageText: document.getElementById('joinMessageText'),
+  btnCopyJoinMessage: document.getElementById('btnCopyJoinMessage'),
+  joinAdvanced: document.getElementById('joinAdvanced'),
+  joinApiUrlText: document.getElementById('joinApiUrlText'),
+  btnCopyJoinApiUrl: document.getElementById('btnCopyJoinApiUrl'),
 
   // Monitor view
   headerTopic: document.getElementById('headerTopic'),
@@ -134,6 +158,7 @@ function statusReasonLabel(reason) {
 
 function showHomePage() {
   DOM.homePage.hidden = false;
+  DOM.joinPage.hidden = true;
   DOM.app.hidden = true;
 
   // Advanced toggle
@@ -146,9 +171,22 @@ function showHomePage() {
   DOM.createForm.addEventListener('submit', handleCreateRoom);
 
   // Instruction block copy — the prompt to paste into your agent
-  const INSTRUCTION_TEXT = 'Read https://clawroom.cc/skill.md and create a ClawRoom for me.';
+  const INSTRUCTION_TEXT =
+    'Read https://clawroom.cc/skill.md and create a ClawRoom for me.\n' +
+    '\n' +
+    'Before you create the room, ask me (in plain language):\n' +
+    '1) What are we trying to learn or decide in this meeting?\n' +
+    '2) What should the agent bring back as a result? (optional)\n' +
+    '3) Who is joining? (default: Host + Guest)\n' +
+    '\n' +
+    'Then create the room with safe defaults, and return:\n' +
+    '- a Watch link (so I can see the conversation live)\n' +
+    '- 2 copy/paste invite messages (one for Host agent, one for Guest agent)\n' +
+    '- do not label participants as agent_a/agent_b in user-facing output.';
 
   const btnCopy = document.getElementById('btnCopyInstruction');
+  const instructionTextEl = document.getElementById('instructionText');
+  if (instructionTextEl) instructionTextEl.textContent = INSTRUCTION_TEXT;
   if (btnCopy) {
     btnCopy.addEventListener('click', () => {
       navigator.clipboard.writeText(INSTRUCTION_TEXT).then(() => {
@@ -187,7 +225,7 @@ async function handleCreateRoom(e) {
   // Build payload
   const topic = DOM.inputTopic.value.trim() || 'General discussion';
   const goal = DOM.inputGoal.value.trim() || 'Open-ended conversation';
-  const participants = ['agent_a', 'agent_b']; // hidden default (A2)
+  const participants = ['host', 'guest']; // hidden default (A2)
 
   const payload = { topic, goal, participants };
 
@@ -239,6 +277,8 @@ function showInviteModal(data) {
   const monitorLink = data.monitor_link || '';
   const hostToken = data.host_token || '';
   const topic = room.topic || 'Untitled room';
+  const goal = room.goal || 'Open-ended conversation';
+  const outcomes = Array.isArray(room.expected_outcomes) ? room.expected_outcomes.map(String).filter(Boolean) : [];
 
   // Subtitle shows the room topic
   DOM.modalRoomTopic.textContent = topic;
@@ -253,30 +293,38 @@ function showInviteModal(data) {
   const participantNames = Object.keys(invites);
   participantNames.forEach((name, i) => {
     const rawJoin = joinLinks[name] || `/join/${room.id}?token=${invites[name]}`;
-    const joinUrl = absolutize(rawJoin);
+    const joinUrl = absolutizeUi(rawJoin);
+
+    // Human-readable label (first slot is Host, second is Guest)
+    const label = i === 0 ? 'Host agent' : (i === 1 ? 'Guest agent' : `Agent ${i + 1}`);
+    const shareText = buildJoinMessage({ label, joinUrl, topic, goal, outcomes });
 
     const card = document.createElement('div');
     card.className = 'invite-card';
 
-    // Human-readable label (first slot is Host, second is Guest)
-    const label = i === 0 ? 'Your Agent' : 'Guest Agent';
+    const header = document.createElement('div');
+    header.className = 'invite-card-header';
 
-    // Build a natural language prompt for the user to message their agent
-    const shareText = `Please join this ClawRoom session: ${joinUrl}`;
+    const nameEl = document.createElement('span');
+    nameEl.className = 'invite-card-name';
+    nameEl.textContent = label;
 
-    card.innerHTML = `
-      <div class="invite-card-header">
-        <span class="invite-card-name">${escHtml(label)}</span>
-        <button class="btn-copy" data-copy="${escAttr(shareText)}">Copy prompt</button>
-      </div>
-      <div class="invite-code">${escHtml(shareText)}</div>
-    `;
-    DOM.modalInvites.appendChild(card);
-  });
-
-  // Copy buttons
-  DOM.modalInvites.querySelectorAll('.btn-copy').forEach(btn => {
+    const btn = document.createElement('button');
+    btn.className = 'btn-copy';
+    btn.textContent = 'Copy message';
+    btn.dataset.copy = shareText;
     btn.addEventListener('click', () => copyToClipboard(btn));
+
+    header.appendChild(nameEl);
+    header.appendChild(btn);
+
+    const code = document.createElement('pre');
+    code.className = 'invite-code';
+    code.textContent = shareText;
+
+    card.appendChild(header);
+    card.appendChild(code);
+    DOM.modalInvites.appendChild(card);
   });
 
   // Enter Room button
@@ -301,26 +349,31 @@ function buildMonitorUrl(roomId, hostToken, monitorLink) {
   return url.toString();
 }
 
-function absolutize(pathOrUrl) {
+function absolutizeUi(pathOrUrl) {
+  if (!pathOrUrl) return '';
   if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl;
-  // Use explicit API origin when configured, else same-origin.
-  const origin = State.apiBase || window.location.origin;
+  // Share links should be human-friendly (clawroom.cc), not api.clawroom.cc JSON endpoints.
+  const origin = window.location.origin;
   return pathOrUrl.startsWith('/') ? `${origin}${pathOrUrl}` : `${origin}/${pathOrUrl}`;
 }
 
 async function copyToClipboard(btn) {
   const text = btn.dataset.copy;
+  const originalLabel = btn.dataset.label || btn.textContent || 'Copy';
+  if (!btn.dataset.label) btn.dataset.label = originalLabel;
   try {
     await navigator.clipboard.writeText(text);
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
     setTimeout(() => {
-      btn.textContent = 'Copy';
+      btn.textContent = originalLabel;
       btn.classList.remove('copied');
     }, 2000);
   } catch {
     // Fallback: select text in code block
-    const code = btn.closest('.invite-card, .monitor-card')?.querySelector('.invite-code, .monitor-code');
+    const code = btn
+      .closest('.invite-card, .monitor-card, .join-message')
+      ?.querySelector('.invite-code, .monitor-code');
     if (code) {
       const range = document.createRange();
       range.selectNodeContents(code);
@@ -329,6 +382,36 @@ async function copyToClipboard(btn) {
       sel.addRange(range);
     }
   }
+}
+
+function buildJoinMessage({ label, joinUrl, topic, goal, outcomes }) {
+  const outcomesLine = outcomes && outcomes.length
+    ? outcomes.join(', ')
+    : 'none (open-ended)';
+
+  return (
+    `You are invited as the ${label} to a ClawRoom session.\n` +
+    `\n` +
+    `Room context:\n` +
+    `- Topic: ${topic}\n` +
+    `- Goal: ${goal}\n` +
+    `- Expected outcomes: ${outcomesLine}\n` +
+    `\n` +
+    `Before you join (required):\n` +
+    `1) Ask your owner 2 quick questions:\n` +
+    `   - What do you need to get from this meeting?\n` +
+    `   - Anything sensitive you must NOT share?\n` +
+    `   (If they reply "skip", proceed with safe defaults.)\n` +
+    `\n` +
+    `2) Make sure you can operate ClawRoom:\n` +
+    `   - If you have the clawroom skill, use it.\n` +
+    `   - Otherwise read: https://clawroom.cc/skill.md\n` +
+    `\n` +
+    `Then join using this invite link:\n` +
+    `${joinUrl}\n` +
+    `\n` +
+    `Only say "joined" after you are actually connected (e.g. you can post a message in the room).`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -904,6 +987,7 @@ async function maybeLoadRoomSummary(stopReasonFallback = '') {
 
 function showMonitorView(cfg) {
   DOM.homePage.hidden = true;
+  DOM.joinPage.hidden = true;
   DOM.app.hidden = false;
 
   State.roomId = cfg.roomId;
@@ -934,7 +1018,110 @@ function showMonitorView(cfg) {
   client.start();
 }
 
+async function showJoinPageView(cfg) {
+  DOM.homePage.hidden = true;
+  DOM.joinPage.hidden = false;
+  DOM.app.hidden = true;
+  DOM.inviteModal.hidden = true;
+
+  State.apiBase = cfg.apiBase || '';
+
+  const roomId = cfg.roomId;
+  const token = cfg.token || '';
+  const joinUrl = window.location.href;
+
+  DOM.joinSubtitle.textContent = 'Loading room details…';
+  DOM.joinMeta.hidden = true;
+  DOM.joinTopic.textContent = '—';
+  DOM.joinGoal.textContent = '—';
+  DOM.joinRole.textContent = '—';
+
+  DOM.joinMessageText.textContent = '';
+  if (DOM.btnCopyJoinMessage) {
+    DOM.btnCopyJoinMessage.dataset.copy = '';
+    DOM.btnCopyJoinMessage.textContent = 'Copy message';
+    DOM.btnCopyJoinMessage.classList.remove('copied');
+    DOM.btnCopyJoinMessage.dataset.label = 'Copy message';
+  }
+  if (DOM.joinAdvanced) DOM.joinAdvanced.hidden = true;
+  if (DOM.joinApiUrlText) DOM.joinApiUrlText.textContent = '';
+  if (DOM.btnCopyJoinApiUrl) {
+    DOM.btnCopyJoinApiUrl.dataset.copy = '';
+    DOM.btnCopyJoinApiUrl.textContent = 'Copy link';
+    DOM.btnCopyJoinApiUrl.classList.remove('copied');
+    DOM.btnCopyJoinApiUrl.dataset.label = 'Copy link';
+    DOM.btnCopyJoinApiUrl.onclick = null;
+  }
+
+  if (!token) {
+    DOM.joinSubtitle.textContent = 'This invite link is missing its token.';
+    DOM.joinMessageText.textContent = 'Ask the host to resend a fresh invite link.';
+    return;
+  }
+
+  try {
+    const res = await fetch(apiPath(`/join/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`), {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const msg = errBody.message || errBody.error || `HTTP ${res.status}`;
+      throw new Error(String(msg));
+    }
+
+    const data = await res.json();
+    const room = data.room || {};
+    const participant = String(data.participant || '').trim();
+
+    const topic = String(room.topic || 'Untitled room');
+    const goal = String(room.goal || 'Open-ended conversation');
+    const outcomes = Array.isArray(room.expected_outcomes) ? room.expected_outcomes.map(String).filter(Boolean) : [];
+
+    const roleLabel = participant === 'host'
+      ? 'Host agent'
+      : participant === 'guest'
+        ? 'Guest agent'
+        : (participant ? `Agent (${participant})` : 'Agent');
+
+    DOM.joinSubtitle.textContent = 'Copy the message below and send it to the invited agent.';
+    DOM.joinMeta.hidden = false;
+    DOM.joinTopic.textContent = topic;
+    DOM.joinGoal.textContent = goal;
+    DOM.joinRole.textContent = roleLabel;
+
+    const shareText = buildJoinMessage({ label: roleLabel, joinUrl, topic, goal, outcomes });
+    DOM.joinMessageText.textContent = shareText;
+
+    if (DOM.btnCopyJoinMessage) {
+      DOM.btnCopyJoinMessage.dataset.copy = shareText;
+      DOM.btnCopyJoinMessage.onclick = () => copyToClipboard(DOM.btnCopyJoinMessage);
+    }
+
+    // Advanced: JSON invite endpoint for tools (open by choice; hidden by default).
+    const apiJoinUrl = `${(State.apiBase || window.location.origin).replace(/\/$/, '')}/join/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`;
+    if (DOM.joinAdvanced && DOM.joinApiUrlText && DOM.btnCopyJoinApiUrl) {
+      DOM.joinAdvanced.hidden = false;
+      DOM.joinApiUrlText.textContent = apiJoinUrl;
+      DOM.btnCopyJoinApiUrl.dataset.copy = apiJoinUrl;
+      DOM.btnCopyJoinApiUrl.onclick = () => copyToClipboard(DOM.btnCopyJoinApiUrl);
+    }
+  } catch (err) {
+    DOM.joinSubtitle.textContent = 'This invite link could not be loaded.';
+    DOM.joinMessageText.textContent =
+      `Reason: ${String(err?.message || err)}\n\n` +
+      'Ask the host to resend a new invite link.';
+  }
+}
+
 function init() {
+  const joinCfg = parseJoinConfig();
+  if (joinCfg) {
+    showJoinPageView(joinCfg);
+    return;
+  }
+
   const cfg = parseConfig();
 
   if (cfg) {
