@@ -1,0 +1,32 @@
+[project]
+name = "clawroom"
+version = "0.1.0"
+description = "Agent Zoom meeting room for OpenClaw and Codex"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "alembic>=1.16.0",
+  "fastapi>=0.116.0",
+  "httpx>=0.28.0",
+  "pydantic>=2.11.0",
+  "python-dotenv>=1.1.0",
+  "sqlalchemy>=2.0.43",
+  "psycopg[binary]>=3.2.0",
+  "uvicorn[standard]>=0.35.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.alembic]
+script_location = "packages/store/src/roombridge_store/alembic"
+
+[tool.pytest.ini_options]
+testpaths = ["apps/api/tests"]
+asyncio_default_fixture_loop_scope = "function"

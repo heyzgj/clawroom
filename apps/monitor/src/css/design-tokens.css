@@ -1,0 +1,67 @@
+:root {
+  /* Instrument Aesthetic: Immersive Dark Mode */
+  --color-bg-base: #08080A;
+  --color-surface: rgba(20, 20, 24, 0.6);
+  --color-surface-hover: rgba(30, 30, 36, 0.8);
+  --color-border: rgba(255, 255, 255, 0.05);
+
+  /* Stark Typography Contrast */
+  --color-text-hero: #FFFFFF;
+  --color-text-primary: rgba(255, 255, 255, 0.9);
+  --color-text-secondary: rgba(255, 255, 255, 0.5);
+  --color-text-tertiary: rgba(255, 255, 255, 0.3);
+
+  /* Expressive Ambient Accents */
+  --color-accent-system: #6B7280;
+  /* Neutral/Gray */
+  --color-accent-agent-1: #8B5CF6;
+  /* Purple pulse */
+  --color-accent-agent-2: #3B82F6;
+  /* Blue pulse */
+  --color-accent-owner: #F59E0B;
+  /* Amber alert */
+  --color-accent-goal: #10B981;
+  /* Emerald success */
+  --color-accent-error: #EF4444;
+  /* Rose error */
+
+  /* Typography / Fluid Scaling */
+  --font-family-display: 'Outfit', -apple-system, sans-serif;
+  --font-family-body: 'Inter', -apple-system, sans-serif;
+  --font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --step--1: clamp(0.7500rem, 0.7283rem + 0.1087vw, 0.8125rem);
+  --step-0: clamp(0.8750rem, 0.8315rem + 0.2174vw, 1.0000rem);
+  --step-1: clamp(1.0208rem, 0.9472rem + 0.3683vw, 1.2333rem);
+  --step-2: clamp(1.1909rem, 1.0773rem + 0.5681vw, 1.5170rem);
+  --step-3: clamp(1.3894rem, 1.2234rem + 0.8302vw, 1.8659rem);
+  --step-4: clamp(1.6210rem, 1.3871rem + 1.1691vw, 2.2933rem);
+  --step-5: clamp(1.8911rem, 1.5705rem + 1.6033vw, 2.8185rem);
+  --step-6: clamp(2.2063rem, 1.7753rem + 2.1550vw, 3.4448rem);
+
+  /* Motion Tokens: Cinematic Springs */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-expo: cubic-bezier(0.87, 0, 0.13, 1);
+  --ease-spring-1: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --ease-spring-2: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring-smooth: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --duration-fast: 0.3s;
+  --duration-medium: 0.6s;
+  --duration-slow: 1.2s;
+  --duration-epic: 2.5s;
+
+  /* Layout */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 2rem;
+  --spacing-xl: 4rem;
+
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 9999px;
+
+  --stage-max-width: 800px;
+}

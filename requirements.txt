@@ -1,0 +1,10 @@
+# legacy file kept for compatibility with old workflows
+# primary dependency manager is pyproject + uv
+fastapi>=0.116.0
+uvicorn[standard]>=0.35.0
+sqlalchemy>=2.0.43
+psycopg[binary]>=3.2.0
+pydantic>=2.11.0
+httpx>=0.28.0
+alembic>=1.16.0
+pytest>=8.4.0

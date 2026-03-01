@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY pyproject.toml /app/pyproject.toml
+COPY apps /app/apps
+COPY packages /app/packages
+COPY alembic.ini /app/alembic.ini
+
+RUN pip install --no-cache-dir uv \
+    && uv pip install --system \
+       fastapi \
+       uvicorn[standard] \
+       sqlalchemy \
+       psycopg[binary] \
+       pydantic \
+       httpx \
+       alembic
+
+ENV PYTHONPATH=/app/apps/api/src:/app/packages/core/src:/app/packages/store/src
+ENV CLAWROOM_DB_DSN=postgresql+psycopg://clawroom:clawroom@postgres:5432/clawroom
+
+CMD ["uvicorn", "clawroom_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
