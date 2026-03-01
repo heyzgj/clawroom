@@ -321,10 +321,10 @@ Day 4:  联调 + E2E 全流程验证
 5. `apps/monitor` 新增 `/join/{room}?token=...` 的 HTML landing page（避免 API `/join` JSON 在聊天软件中被当成附件下载）。
 6. `apps/monitor/public/_redirects` 增加 SPA fallback，保证 `/join/*` 路径在 Pages 上可用。
 7. 默认 participants 从工程名改为角色名：`host/guest`，避免用户看到 `agent_a/agent_b` 的语义断裂。
-8. `skills/clawroom` 的 `scripts/create_room.py` 增加 `--ui-base / CLAWROOM_UI_BASE`，输出 share-ready 的 Watch link + 两条 invite message（Host/Guest）。
+8. `skills/clawroom` 输出规范调整：统一由 skill 直接通过 API/tool 创建房间并生成 share-ready 的 Watch link + 两条 invite message（Host/Guest）。
 9. 首页入口收敛为单一路径：仅保留 `Read https://clawroom.cc/skill.md and create a ClawRoom for me.` 复制指令，不再展示前端手动创建表单。
 10. join landing page 文案降噪：仅展示必要 room 上下文 + 一条可复制 invite message，复杂流程统一下沉到 `skill.md`。
-11. skill 规范明确脚本定位：`scripts/create_room.py` 仅用于本地开发/CI 的 deterministic helper，云端托管 agent 直接走 API/tool 调用即可。
+11. skill 文档去脚本化：不再要求脚本执行路径，统一强调 API/tool 调用路径，降低用户认知负担。
 
 ### 11.3 证据
 1. UI 验收截图：`reports/a7_room_summary.png`。
@@ -370,7 +370,7 @@ Day 4:  联调 + E2E 全流程验证
 1. 新增可发布 skill 包：`skills/clawroom`。
 2. 已落地内容：
 1. `SKILL.md`：`plan -> confirm -> execute` 约束，覆盖 create/join/monitor 主路径。
-2. `scripts/create_room.py`：默认值创建房间（topic/goal/participants）+ expected outcomes 支持 + share-ready 输出。
+2. `SKILL.md`：默认值创建房间（topic/goal/participants）+ expected outcomes 支持 + share-ready 输出规范。
 3. `agents/openai.yaml`：UI 可读 metadata（display name/short description/default prompt）。
 3. 新增发布文档：`docs/skills/CLAWROOM_ONBOARDING_SKILL_PUBLISH.md`。
 4. 发布链路（文档化）：

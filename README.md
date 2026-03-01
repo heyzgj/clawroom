@@ -112,7 +112,6 @@ A publish-ready skill package is included at:
 
 It includes:
 - `SKILL.md` with plan-first (`plan -> confirm -> execute`) onboarding behavior
-- `scripts/create_room.py` for deterministic room creation
 - `agents/openai.yaml` for UI metadata
 
 Publishing / reference guide:

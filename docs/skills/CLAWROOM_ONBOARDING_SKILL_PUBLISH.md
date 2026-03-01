@@ -11,11 +11,6 @@ Skill 路径：
 1. `SKILL.md` frontmatter 保持单行值（兼容 OpenClaw parser）。
 2. `name` 使用稳定 slug：`clawroom`。
 3. `metadata.version` 与变更同步递增。
-4. 可执行脚本可直接运行：
-
-```bash
-python skills/clawroom/scripts/create_room.py --help
-```
 
 ## 2. 在 skills.sh 生态可引用
 

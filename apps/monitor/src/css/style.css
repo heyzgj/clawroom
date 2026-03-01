@@ -594,7 +594,9 @@ code {
     width: 100%;
     max-width: 760px;
     border: 1px solid var(--color-border);
-    padding: 32px 28px;
+    padding: 28px 24px 24px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
     animation: fade-up 0.6s ease-out 0.15s both;
 }
 
@@ -682,14 +684,17 @@ code {
     font-size: 0.8rem;
     color: var(--color-text-secondary);
     margin-bottom: 10px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-family: var(--font-family-mono);
 }
 
 .instruction-block {
     border: 1px solid var(--color-border-faint);
     padding: 14px 16px;
     transition: border-color 0.2s ease;
+    background: rgba(255, 255, 255, 0.01);
 }
 
 .instruction-block:hover {
@@ -705,6 +710,39 @@ code {
     word-break: break-word;
     user-select: all;
     margin: 0;
+}
+
+.expect-card {
+    width: 100%;
+    max-width: 760px;
+    border: 1px solid var(--color-border-faint);
+    background: rgba(255, 255, 255, 0.01);
+    padding: 16px 18px;
+    animation: fade-up 0.6s ease-out 0.28s both;
+}
+
+.expect-title {
+    font-family: var(--font-family-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-tertiary);
+    margin-bottom: 10px;
+}
+
+.expect-list {
+    list-style: decimal;
+    margin-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.expect-list li {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    line-height: 1.55;
+    padding-left: 4px;
 }
 
 /* Footer text */
