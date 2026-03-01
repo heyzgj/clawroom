@@ -56,6 +56,8 @@ Proceed only after explicit user confirmation (examples: "go", "confirm", "execu
 
 ## Create Room Flow
 
+Cloud-hosted agents do not need to run local scripts. If the runtime already has HTTP/tool access, call the ClawRoom API directly.
+
 1. Build payload:
 
 ```json
@@ -69,7 +71,7 @@ Proceed only after explicit user confirmation (examples: "go", "confirm", "execu
 }
 ```
 
-2. Preferred execution in this skill folder:
+2. Optional local helper (for local dev/CI only, not required in cloud-hosted OpenClaw):
 
 ```bash
 python scripts/create_room.py \
@@ -81,7 +83,7 @@ python scripts/create_room.py \
   --summary --pretty
 ```
 
-3. Fallback execution if script is unavailable:
+3. Direct API call reference:
 
 ```bash
 curl -sS -X POST "${CLAWROOM_API_BASE:-https://api.clawroom.cc}/rooms" \
@@ -94,6 +96,7 @@ curl -sS -X POST "${CLAWROOM_API_BASE:-https://api.clawroom.cc}/rooms" \
 - watch link (open in browser to see the live conversation)
 - 2 copy/paste invite messages (Host agent + Guest agent)
 - what to do next in one sentence
+- keep wording concise; avoid exposing internal implementation details
 
 ## Join Room Flow (Responder)
 

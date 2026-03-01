@@ -589,148 +589,19 @@ code {
     letter-spacing: -0.005em;
 }
 
-/* Split Pane Layout */
-.split-pane {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    max-width: 760px;
+/* Single-path Home Card */
+.home-card {
     width: 100%;
+    max-width: 760px;
     border: 1px solid var(--color-border);
+    padding: 32px 28px;
     animation: fade-up 0.6s ease-out 0.15s both;
 }
 
-.pane {
-    padding: 36px 32px;
-    display: flex;
-    flex-direction: column;
-    min-height: 340px;
-}
-
-.pane+.pane {
-    border-left: 1px solid var(--color-border);
-}
-
-.pane-title {
-    font-family: var(--font-family-mono);
-    font-size: 0.76rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--color-text-primary);
-    margin-bottom: 28px;
-}
-
 @media (max-width: 640px) {
-    .split-pane {
-        grid-template-columns: 1fr;
+    .home-card {
+        padding: 24px 18px;
     }
-
-    .pane+.pane {
-        border-left: none;
-        border-top: 1px solid var(--color-border);
-    }
-}
-
-/* Form */
-#createRoomForm {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-}
-
-.form-group {
-    margin-bottom: var(--spacing-md);
-}
-
-.form-label {
-    display: block;
-    font-size: 0.78rem;
-    font-weight: 400;
-    color: var(--color-text-secondary);
-    margin-bottom: 6px;
-}
-
-.form-input {
-    width: 100%;
-    background: transparent;
-    border: none;
-    border-bottom: 1px solid var(--color-border);
-    padding: 10px 0;
-    font-size: 0.92rem;
-    font-family: var(--font-family-body);
-    color: var(--color-text-primary);
-    outline: none;
-    transition: border-color 0.2s ease;
-}
-
-.form-input::placeholder {
-    color: var(--color-text-tertiary);
-}
-
-.form-input:focus {
-    border-bottom-color: var(--color-text-primary);
-}
-
-.form-input[type="number"] {
-    appearance: textfield;
-    -moz-appearance: textfield;
-}
-
-.form-input[type="number"]::-webkit-inner-spin-button,
-.form-input[type="number"]::-webkit-outer-spin-button {
-    opacity: 1;
-}
-
-.form-hint {
-    display: block;
-    font-size: 0.75rem;
-    color: var(--color-text-tertiary);
-    margin-top: 4px;
-}
-
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-md);
-}
-
-/* Advanced toggle */
-.advanced-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--step--1);
-    color: var(--color-text-tertiary);
-    margin-bottom: var(--spacing-md);
-    padding: 4px 0;
-    transition: color 0.15s ease;
-}
-
-.advanced-toggle:hover {
-    color: var(--color-text-secondary);
-}
-
-.advanced-toggle-icon {
-    display: inline-block;
-    transition: transform 0.2s var(--ease-spring-1);
-    font-size: 0.7em;
-}
-
-.advanced-toggle.is-open .advanced-toggle-icon {
-    transform: rotate(90deg);
-}
-
-.advanced-section {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transition: max-height 0.4s var(--ease-out-expo),
-        opacity 0.2s ease;
-}
-
-.advanced-section.is-open {
-    max-height: 300px;
-    opacity: 1;
 }
 
 /* Primary button — White fill, inverts to outline on hover */
@@ -748,7 +619,7 @@ code {
     overflow: hidden;
     transition: all 0.2s ease;
     letter-spacing: 0.01em;
-    margin-top: auto;
+    margin-top: 16px;
 }
 
 .btn-primary:hover {
@@ -806,27 +677,18 @@ code {
     }
 }
 
-/* Form error */
-.form-error {
-    margin-top: var(--spacing-md);
-    padding: 10px 14px;
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    color: var(--color-accent-error);
-    font-size: var(--step--1);
-}
-
 /* Instruction block */
 .instruction-label {
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     color: var(--color-text-secondary);
-    margin-bottom: 16px;
-    font-weight: 300;
+    margin-bottom: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
 }
 
 .instruction-block {
     border: 1px solid var(--color-border-faint);
-    padding: 16px 18px;
+    padding: 14px 16px;
     transition: border-color 0.2s ease;
 }
 
@@ -836,10 +698,10 @@ code {
 
 .instruction-text {
     font-family: var(--font-family-mono);
-    font-size: 0.8rem;
-    line-height: 1.7;
+    font-size: 0.86rem;
+    line-height: 1.6;
     color: var(--color-text-primary);
-    white-space: pre-wrap;
+    white-space: normal;
     word-break: break-word;
     user-select: all;
     margin: 0;

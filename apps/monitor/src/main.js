@@ -8,7 +8,7 @@ import './css/style.css';
  *
  * Views:
  *   1. Home Page (#homePage)   — shown when no room_id in URL
- *   2. Invite Modal (#inviteModal) — shown after room creation
+ *   2. Join Page (#joinPage)   — shown for /join/:room_id?token=...
  *   3. Monitor View (#app)     — shown when room_id + host_token in URL
  */
 
@@ -57,24 +57,6 @@ const DOM = {
   homePage: document.getElementById('homePage'),
   joinPage: document.getElementById('joinPage'),
   app: document.getElementById('app'),
-  inviteModal: document.getElementById('inviteModal'),
-
-  // Home page
-  createForm: document.getElementById('createRoomForm'),
-  inputTopic: document.getElementById('inputTopic'),
-  inputGoal: document.getElementById('inputGoal'),
-  inputOutcomes: document.getElementById('inputOutcomes'),
-  inputTurnLimit: document.getElementById('inputTurnLimit'),
-  inputTimeout: document.getElementById('inputTimeout'),
-  advancedToggle: document.getElementById('advancedToggle'),
-  advancedSection: document.getElementById('advancedSection'),
-  btnCreate: document.getElementById('btnCreate'),
-  formError: document.getElementById('formError'),
-
-  // Invite modal
-  modalRoomTopic: document.getElementById('modalRoomTopic'),
-  modalInvites: document.getElementById('modalInvites'),
-  btnEnterRoom: document.getElementById('btnEnterRoom'),
 
   // Join page
   joinSubtitle: document.getElementById('joinSubtitle'),
@@ -84,9 +66,6 @@ const DOM = {
   joinRole: document.getElementById('joinRole'),
   joinMessageText: document.getElementById('joinMessageText'),
   btnCopyJoinMessage: document.getElementById('btnCopyJoinMessage'),
-  joinAdvanced: document.getElementById('joinAdvanced'),
-  joinApiUrlText: document.getElementById('joinApiUrlText'),
-  btnCopyJoinApiUrl: document.getElementById('btnCopyJoinApiUrl'),
 
   // Monitor view
   headerTopic: document.getElementById('headerTopic'),
@@ -116,8 +95,6 @@ const State = {
   seenEventIds: new Set(),  // prevent duplicate renders on SSE + poll overlap
   summaryLoading: false,
   summaryLoaded: false,
-  // Home page: stored after creation for "Enter Monitor" redirect
-  createdRoom: null,
 };
 
 // Assign distinct accent colors in participant join order
@@ -153,7 +130,7 @@ function statusReasonLabel(reason) {
 }
 
 // ---------------------------------------------------------------------------
-// HOME PAGE: Create Room Logic (A1-A5)
+// HOME PAGE: One-line instruction copy
 // ---------------------------------------------------------------------------
 
 function showHomePage() {
@@ -161,28 +138,8 @@ function showHomePage() {
   DOM.joinPage.hidden = true;
   DOM.app.hidden = true;
 
-  // Advanced toggle
-  DOM.advancedToggle.addEventListener('click', () => {
-    const isOpen = DOM.advancedSection.classList.toggle('is-open');
-    DOM.advancedToggle.classList.toggle('is-open', isOpen);
-  });
-
-  // Form submit
-  DOM.createForm.addEventListener('submit', handleCreateRoom);
-
   // Instruction block copy — the prompt to paste into your agent
-  const INSTRUCTION_TEXT =
-    'Read https://clawroom.cc/skill.md and create a ClawRoom for me.\n' +
-    '\n' +
-    'Before you create the room, ask me (in plain language):\n' +
-    '1) What are we trying to learn or decide in this meeting?\n' +
-    '2) What should the agent bring back as a result? (optional)\n' +
-    '3) Who is joining? (default: Host + Guest)\n' +
-    '\n' +
-    'Then create the room with safe defaults, and return:\n' +
-    '- a Watch link (so I can see the conversation live)\n' +
-    '- 2 copy/paste invite messages (one for Host agent, one for Guest agent)\n' +
-    '- do not label participants as agent_a/agent_b in user-facing output.';
+  const INSTRUCTION_TEXT = 'Read https://clawroom.cc/skill.md and create a ClawRoom for me.';
 
   const btnCopy = document.getElementById('btnCopyInstruction');
   const instructionTextEl = document.getElementById('instructionText');
@@ -193,7 +150,7 @@ function showHomePage() {
         btnCopy.textContent = 'Copied!';
         btnCopy.classList.add('copied');
         setTimeout(() => {
-          btnCopy.textContent = 'Copy Prompt';
+          btnCopy.textContent = 'Copy Instruction';
           btnCopy.classList.remove('copied');
         }, 2000);
       }).catch(() => {
@@ -209,152 +166,6 @@ function showHomePage() {
       });
     });
   }
-}
-
-async function handleCreateRoom(e) {
-  e.preventDefault();
-
-  // Disable button, show spinner
-  DOM.btnCreate.disabled = true;
-  const btnText = DOM.btnCreate.querySelector('.btn-text');
-  const btnSpinner = DOM.btnCreate.querySelector('.btn-spinner');
-  btnText.textContent = 'Creating…';
-  btnSpinner.hidden = false;
-  DOM.formError.hidden = true;
-
-  // Build payload
-  const topic = DOM.inputTopic.value.trim() || 'General discussion';
-  const goal = DOM.inputGoal.value.trim() || 'Open-ended conversation';
-  const participants = ['host', 'guest']; // hidden default (A2)
-
-  const payload = { topic, goal, participants };
-
-  // Advanced fields
-  const outcomesRaw = DOM.inputOutcomes.value.trim();
-  if (outcomesRaw) {
-    payload.expected_outcomes = outcomesRaw.split(',').map(s => s.trim()).filter(Boolean);
-  }
-
-  const turnLimit = parseInt(DOM.inputTurnLimit.value, 10);
-  if (turnLimit && turnLimit > 0) payload.turn_limit = turnLimit;
-
-  const timeout = parseInt(DOM.inputTimeout.value, 10);
-  if (timeout && timeout > 0) payload.timeout_minutes = timeout;
-
-  try {
-    const res = await fetch(apiPath('/rooms'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || errBody.message || `HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
-    State.createdRoom = data;
-    showInviteModal(data);
-  } catch (err) {
-    DOM.formError.textContent = `Failed to create room: ${err.message}`;
-    DOM.formError.hidden = false;
-  } finally {
-    DOM.btnCreate.disabled = false;
-    btnText.textContent = 'Create Room';
-    btnSpinner.hidden = true;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// INVITE MODAL (A4-A5)
-// ---------------------------------------------------------------------------
-
-function showInviteModal(data) {
-  const room = data.room || {};
-  const invites = data.invites || {};
-  const joinLinks = data.join_links || {};
-  const monitorLink = data.monitor_link || '';
-  const hostToken = data.host_token || '';
-  const topic = room.topic || 'Untitled room';
-  const goal = room.goal || 'Open-ended conversation';
-  const outcomes = Array.isArray(room.expected_outcomes) ? room.expected_outcomes.map(String).filter(Boolean) : [];
-
-  // Subtitle shows the room topic
-  DOM.modalRoomTopic.textContent = topic;
-
-  // Clear previous invites
-  DOM.modalInvites.innerHTML = '';
-
-  // Build monitor URL for "Enter Room" navigation
-  const monitorUrl = buildMonitorUrl(room.id, hostToken, monitorLink);
-
-  // Invite cards — one per participant
-  const participantNames = Object.keys(invites);
-  participantNames.forEach((name, i) => {
-    const rawJoin = joinLinks[name] || `/join/${room.id}?token=${invites[name]}`;
-    const joinUrl = absolutizeUi(rawJoin);
-
-    // Human-readable label (first slot is Host, second is Guest)
-    const label = i === 0 ? 'Host agent' : (i === 1 ? 'Guest agent' : `Agent ${i + 1}`);
-    const shareText = buildJoinMessage({ label, joinUrl, topic, goal, outcomes });
-
-    const card = document.createElement('div');
-    card.className = 'invite-card';
-
-    const header = document.createElement('div');
-    header.className = 'invite-card-header';
-
-    const nameEl = document.createElement('span');
-    nameEl.className = 'invite-card-name';
-    nameEl.textContent = label;
-
-    const btn = document.createElement('button');
-    btn.className = 'btn-copy';
-    btn.textContent = 'Copy message';
-    btn.dataset.copy = shareText;
-    btn.addEventListener('click', () => copyToClipboard(btn));
-
-    header.appendChild(nameEl);
-    header.appendChild(btn);
-
-    const code = document.createElement('pre');
-    code.className = 'invite-code';
-    code.textContent = shareText;
-
-    card.appendChild(header);
-    card.appendChild(code);
-    DOM.modalInvites.appendChild(card);
-  });
-
-  // Enter Room button
-  DOM.btnEnterRoom.onclick = () => {
-    window.location.href = monitorUrl;
-  };
-
-  // Show modal
-  DOM.inviteModal.hidden = false;
-}
-
-function buildMonitorUrl(roomId, hostToken, monitorLink) {
-  if (monitorLink && (monitorLink.startsWith('http://') || monitorLink.startsWith('https://'))) {
-    return monitorLink;
-  }
-  const url = new URL(window.location.origin);
-  url.searchParams.set('room_id', roomId);
-  url.searchParams.set('host_token', hostToken);
-  if (State.apiBase) {
-    url.searchParams.set('api', State.apiBase);
-  }
-  return url.toString();
-}
-
-function absolutizeUi(pathOrUrl) {
-  if (!pathOrUrl) return '';
-  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl;
-  // Share links should be human-friendly (clawroom.cc), not api.clawroom.cc JSON endpoints.
-  const origin = window.location.origin;
-  return pathOrUrl.startsWith('/') ? `${origin}${pathOrUrl}` : `${origin}/${pathOrUrl}`;
 }
 
 async function copyToClipboard(btn) {
@@ -385,33 +196,14 @@ async function copyToClipboard(btn) {
 }
 
 function buildJoinMessage({ label, joinUrl, topic, goal, outcomes }) {
-  const outcomesLine = outcomes && outcomes.length
-    ? outcomes.join(', ')
-    : 'none (open-ended)';
-
-  return (
-    `You are invited as the ${label} to a ClawRoom session.\n` +
-    `\n` +
-    `Room context:\n` +
-    `- Topic: ${topic}\n` +
-    `- Goal: ${goal}\n` +
-    `- Expected outcomes: ${outcomesLine}\n` +
-    `\n` +
-    `Before you join (required):\n` +
-    `1) Ask your owner 2 quick questions:\n` +
-    `   - What do you need to get from this meeting?\n` +
-    `   - Anything sensitive you must NOT share?\n` +
-    `   (If they reply "skip", proceed with safe defaults.)\n` +
-    `\n` +
-    `2) Make sure you can operate ClawRoom:\n` +
-    `   - If you have the clawroom skill, use it.\n` +
-    `   - Otherwise read: https://clawroom.cc/skill.md\n` +
-    `\n` +
-    `Then join using this invite link:\n` +
-    `${joinUrl}\n` +
-    `\n` +
-    `Only say "joined" after you are actually connected (e.g. you can post a message in the room).`
-  );
+  const parts = [
+    `Read https://clawroom.cc/skill.md and join this ClawRoom as the ${label}.`,
+    `Join link: ${joinUrl}`,
+  ];
+  if (topic) parts.push(`Topic: ${topic}`);
+  if (goal) parts.push(`Goal: ${goal}`);
+  if (outcomes?.length) parts.push(`Expected outcomes: ${outcomes.join(', ')}`);
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -835,16 +627,6 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// Escape string for use in HTML attribute
-function escAttr(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
 function renderSummaryList(container, rows, emptyText, isMissing = false) {
   container.innerHTML = '';
   if (!rows.length) {
@@ -1022,7 +804,6 @@ async function showJoinPageView(cfg) {
   DOM.homePage.hidden = true;
   DOM.joinPage.hidden = false;
   DOM.app.hidden = true;
-  DOM.inviteModal.hidden = true;
 
   State.apiBase = cfg.apiBase || '';
 
@@ -1042,15 +823,6 @@ async function showJoinPageView(cfg) {
     DOM.btnCopyJoinMessage.textContent = 'Copy message';
     DOM.btnCopyJoinMessage.classList.remove('copied');
     DOM.btnCopyJoinMessage.dataset.label = 'Copy message';
-  }
-  if (DOM.joinAdvanced) DOM.joinAdvanced.hidden = true;
-  if (DOM.joinApiUrlText) DOM.joinApiUrlText.textContent = '';
-  if (DOM.btnCopyJoinApiUrl) {
-    DOM.btnCopyJoinApiUrl.dataset.copy = '';
-    DOM.btnCopyJoinApiUrl.textContent = 'Copy link';
-    DOM.btnCopyJoinApiUrl.classList.remove('copied');
-    DOM.btnCopyJoinApiUrl.dataset.label = 'Copy link';
-    DOM.btnCopyJoinApiUrl.onclick = null;
   }
 
   if (!token) {
@@ -1085,7 +857,7 @@ async function showJoinPageView(cfg) {
         ? 'Guest agent'
         : (participant ? `Agent (${participant})` : 'Agent');
 
-    DOM.joinSubtitle.textContent = 'Copy the message below and send it to the invited agent.';
+    DOM.joinSubtitle.textContent = 'Copy and send this message to the invited agent.';
     DOM.joinMeta.hidden = false;
     DOM.joinTopic.textContent = topic;
     DOM.joinGoal.textContent = goal;
@@ -1097,15 +869,6 @@ async function showJoinPageView(cfg) {
     if (DOM.btnCopyJoinMessage) {
       DOM.btnCopyJoinMessage.dataset.copy = shareText;
       DOM.btnCopyJoinMessage.onclick = () => copyToClipboard(DOM.btnCopyJoinMessage);
-    }
-
-    // Advanced: JSON invite endpoint for tools (open by choice; hidden by default).
-    const apiJoinUrl = `${(State.apiBase || window.location.origin).replace(/\/$/, '')}/join/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`;
-    if (DOM.joinAdvanced && DOM.joinApiUrlText && DOM.btnCopyJoinApiUrl) {
-      DOM.joinAdvanced.hidden = false;
-      DOM.joinApiUrlText.textContent = apiJoinUrl;
-      DOM.btnCopyJoinApiUrl.dataset.copy = apiJoinUrl;
-      DOM.btnCopyJoinApiUrl.onclick = () => copyToClipboard(DOM.btnCopyJoinApiUrl);
     }
   } catch (err) {
     DOM.joinSubtitle.textContent = 'This invite link could not be loaded.';

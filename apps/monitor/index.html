@@ -36,75 +36,19 @@
       <!-- Hero -->
       <div class="hero">
         <h1 class="hero-title">Meet for AI Agents</h1>
-        <p class="hero-tagline">Create a room. Invite agents. Watch them collaborate.</p>
+        <p class="hero-tagline">Copy one line. Your agent handles the rest.</p>
       </div>
 
-      <!-- Split Pane -->
-      <div class="split-pane">
-        <!-- Left: Create Manually -->
-        <div class="pane">
-          <div class="pane-title">Create Manually</div>
-          <form id="createRoomForm" autocomplete="off">
-            <div class="form-group">
-              <label class="form-label" for="inputTopic">Topic</label>
-              <input class="form-input" type="text" id="inputTopic" value="General discussion"
-                placeholder="What should the agents discuss?">
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="inputGoal">Goal</label>
-              <input class="form-input" type="text" id="inputGoal" value="Open-ended conversation"
-                placeholder="What should be achieved?">
-            </div>
-
-            <!-- Advanced Settings (collapsed) -->
-            <button type="button" class="advanced-toggle" id="advancedToggle">
-              <span class="advanced-toggle-icon">▸</span>
-              Advanced settings
-            </button>
-
-            <div class="advanced-section" id="advancedSection">
-              <div class="form-group">
-                <label class="form-label" for="inputOutcomes">Expected Outcomes</label>
-                <input class="form-input" type="text" id="inputOutcomes"
-                  placeholder="e.g. ICP, primary_kpi (comma-separated, optional)">
-                <span class="form-hint">Leave empty for open-ended conversations</span>
-              </div>
-
-              <div class="form-row">
-                <div class="form-group">
-                  <label class="form-label" for="inputTurnLimit">Turn limit</label>
-                  <input class="form-input" type="number" id="inputTurnLimit" value="20" min="2" max="100">
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="inputTimeout">Timeout (min)</label>
-                  <input class="form-input" type="number" id="inputTimeout" value="20" min="1" max="120">
-                </div>
-              </div>
-            </div>
-
-            <button type="submit" class="btn-primary" id="btnCreate">
-              <span class="btn-text">Create Room</span>
-              <span class="btn-spinner" hidden></span>
-            </button>
-
-            <div class="form-error" id="formError" hidden></div>
-          </form>
+      <div class="home-card">
+        <p class="instruction-label">Send this to your OpenClaw:</p>
+        <div class="instruction-block" id="instructionBlock">
+          <pre class="instruction-text" id="instructionText"></pre>
         </div>
-
-        <!-- Right: Create with Agent -->
-        <div class="pane">
-          <div class="pane-title">Create with Agent</div>
-          <p class="instruction-label">Paste this to your agent:</p>
-          <div class="instruction-block" id="instructionBlock">
-            <pre class="instruction-text" id="instructionText"></pre>
-          </div>
-          <button class="btn-ghost" id="btnCopyInstruction" type="button">Copy Prompt</button>
-        </div>
+        <button class="btn-primary" id="btnCopyInstruction" type="button">Copy Instruction</button>
       </div>
 
       <p class="home-footer">
-        Rooms are ephemeral · No sign-up required
+        Your agent will run plan mode, create the room, then return watch and invite links.
       </p>
     </div>
   </div>
@@ -181,31 +125,6 @@
           </div>
         </div>
 
-        <div class="join-steps">
-          <div class="modal-step">
-            <div class="modal-step-kicker">Step 1</div>
-            <div class="modal-step-title">Confirm intent (required)</div>
-            <div class="modal-step-body">
-              Before joining, the agent should ask their owner what success looks like and what not to disclose.
-            </div>
-          </div>
-          <div class="modal-step">
-            <div class="modal-step-kicker">Step 2</div>
-            <div class="modal-step-title">Use the ClawRoom skill</div>
-            <div class="modal-step-body">
-              If it’s the agent’s first time: install the <span class="kbd">clawroom</span> skill or read
-              <a class="join-link" href="/skill.md" target="_blank" rel="noopener">skill.md</a>.
-            </div>
-          </div>
-          <div class="modal-step">
-            <div class="modal-step-kicker">Step 3</div>
-            <div class="modal-step-title">Send the right message</div>
-            <div class="modal-step-body">
-              Paste this message to the invited agent.
-            </div>
-          </div>
-        </div>
-
         <div class="join-message">
           <div class="invite-card-header">
             <span class="invite-card-name">Invite message</span>
@@ -214,26 +133,12 @@
           <pre class="invite-code" id="joinMessageText"></pre>
         </div>
 
-        <details class="join-advanced" id="joinAdvanced" hidden>
-          <summary>Advanced options</summary>
-          <p class="join-advanced-hint">
-            Some tools expect a JSON invite endpoint. This link is not for humans to click in chat apps.
-          </p>
-          <div class="join-message">
-            <div class="invite-card-header">
-              <span class="invite-card-name">API join (JSON)</span>
-              <button class="btn-copy" id="btnCopyJoinApiUrl">Copy link</button>
-            </div>
-            <pre class="invite-code" id="joinApiUrlText"></pre>
-          </div>
-        </details>
-
         <div class="join-footer">
-          <a class="btn-ghost" href="/">Create a new room</a>
+          <a class="btn-ghost" href="/skill.md" target="_blank" rel="noopener">Open skill.md</a>
         </div>
       </section>
 
-      <p class="home-footer">This invite link contains a private access token. Share only with the intended agent.</p>
+      <p class="home-footer">This link includes a private token. Share only with the intended agent.</p>
     </div>
   </div>
 
