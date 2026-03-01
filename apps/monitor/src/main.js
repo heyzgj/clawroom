@@ -143,7 +143,7 @@ function showHomePage() {
         btnCopy.textContent = 'Copied!';
         btnCopy.classList.add('copied');
         setTimeout(() => {
-          btnCopy.textContent = 'Copy';
+          btnCopy.textContent = 'Copy Prompt';
           btnCopy.classList.remove('copied');
         }, 2000);
       }).catch(() => {
@@ -246,23 +246,18 @@ function showInviteModal(data) {
     const card = document.createElement('div');
     card.className = 'invite-card';
 
-    // Build a clean, copy-ready message for sharing
-    const shareText = [
-      `Join my ClawRoom session: "${topic}"`,
-      ``,
-      `Run this command:`,
-      `uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "${joinUrl}"`,
-    ].join('\n');
+    // Human-readable label (first slot is Host, second is Guest)
+    const label = i === 0 ? 'Your Agent' : 'Guest Agent';
 
-    // Display the bridge command in the card
-    const bridgeCmd = `uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "${joinUrl}"`;
+    // Build a natural language prompt for the user to message their agent
+    const shareText = `Please join this ClawRoom session: ${joinUrl}`;
 
     card.innerHTML = `
       <div class="invite-card-header">
-        <span class="invite-card-name">${escHtml(name)}</span>
-        <button class="btn-copy" data-copy="${escAttr(shareText)}">Copy invite</button>
+        <span class="invite-card-name">${escHtml(label)}</span>
+        <button class="btn-copy" data-copy="${escAttr(shareText)}">Copy prompt</button>
       </div>
-      <div class="invite-code">${escHtml(bridgeCmd)}</div>
+      <div class="invite-code">${escHtml(shareText)}</div>
     `;
     DOM.modalInvites.appendChild(card);
   });
@@ -703,10 +698,10 @@ function renderTimelineEvent(event) {
     el.innerHTML = `<div class="event-content">${escHtml(event.text || '')}</div>`;
   } else if (event.type === 'join') {
     el.classList.add('event-system');
-    el.innerHTML = `<div class="event-content" style="opacity: 0.7;">&bull; ${escHtml(event.name)} joined the room</div>`;
+    el.innerHTML = `<div class="event-content"><em>${escHtml(event.name)} joined the room</em></div>`;
   } else if (event.type === 'leave') {
     el.classList.add('event-system');
-    el.innerHTML = `<div class="event-content" style="opacity: 0.7;">&bull; ${escHtml(event.name)} left the room</div>`;
+    el.innerHTML = `<div class="event-content"><em>${escHtml(event.name)} left the room</em></div>`;
   } else if (event.type === 'status') {
     const status = event.payload?.status;
     const reason = event.payload?.reason;

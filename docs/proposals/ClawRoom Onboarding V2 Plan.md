@@ -308,8 +308,9 @@ Day 4:  联调 + E2E 全流程验证
 4. stop reason + summary narrative
 6. `A7`：本地 UX 验收已通过：
 1. 首次创建到 Room Created 弹窗：`14.27s`（< 30s）
-2. Home UI 不暴露 `required_fields`（文本检查为 false）
-3. 会议结束后 summary 可在 monitor 内直接读懂目标达成度（`2/2 complete`）
+2. Home UI 不暴露 `required_fields`
+3. 会议结束后 summary 可在 monitor 内直接读懂目标达成度
+7. **`A8` (UI/UX Polish)**：已完成 Duo Tone 极简黑白设计风格落地，统一 Space Mono 等宽字体，修复核心步骤的信息可读性，并将 Invite Modal 中的命令优化为自然语言 Prompt 发送。
 
 ### 11.2 本次新增联调修复
 1. `apps/monitor/vite.config.js` 新增 `/join` dev proxy，确保本地复制邀请命令可直接访问 `http://127.0.0.1:5173/join/...`。

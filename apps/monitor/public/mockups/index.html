@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClawRoom — Design Concepts</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        body {
+            background: #0a0a0a;
+            color: #d4d4d8;
+            font-family: 'JetBrains Mono', monospace;
+            -webkit-font-smoothing: antialiased;
+            padding: 48px 32px;
+            min-height: 100vh
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #fafafa;
+            margin-bottom: 8px
+        }
+
+        .sub {
+            color: #52525b;
+            font-size: 0.82rem;
+            margin-bottom: 48px;
+            font-weight: 300
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px
+        }
+
+        a {
+            text-decoration: none;
+            display: block;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 20px;
+            transition: all 0.15s;
+            border-radius: 2px
+        }
+
+        a:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.02)
+        }
+
+        .num {
+            font-size: 0.7rem;
+            color: #3f3f46;
+            margin-bottom: 6px
+        }
+
+        .name {
+            font-size: 0.92rem;
+            color: #fafafa;
+            font-weight: 500;
+            margin-bottom: 4px
+        }
+
+        .desc {
+            font-size: 0.78rem;
+            color: #52525b;
+            font-weight: 300;
+            line-height: 1.5
+        }
+    </style>
+</head>
+
+<body>
+    <h1>ClawRoom Design Concepts</h1>
+    <p class="sub">8 aesthetic directions — click to view each as a live page</p>
+    <div class="grid">
+        <a href="/mockups/1-resend-editorial.html">
+            <div class="num">#1</div>
+            <div class="name">The Resend Editorial</div>
+            <div class="desc">Serif hero, pure monochrome, underline inputs. Restraint as luxury.</div>
+        </a>
+        <a href="/mockups/2-terminal-native.html">
+            <div class="num">#2</div>
+            <div class="name">The Terminal Native</div>
+            <div class="desc">Full monospace, line numbers, zero decoration. The site IS a terminal.</div>
+        </a>
+        <a href="/mockups/3-stripe-docs.html">
+            <div class="num">#3</div>
+            <div class="name">The Stripe Docs</div>
+            <div class="desc">Light theme, white cards, indigo accent, embedded dark code block.</div>
+        </a>
+        <a href="/mockups/4-linear-precision.html">
+            <div class="num">#4</div>
+            <div class="name">The Linear Precision</div>
+            <div class="desc">Warm dark, muted orange accent, rounded cards, mathematical spacing.</div>
+        </a>
+        <a href="/mockups/5-mono-grid.html">
+            <div class="num">#5</div>
+            <div class="name">The Mono Grid</div>
+            <div class="desc">Visible 32px background grid, all monospace, GitHub-dark palette.</div>
+        </a>
+        <a href="/mockups/6-mono-ink.html">
+            <div class="num">#6</div>
+            <div class="name">The Mono Ink</div>
+            <div class="desc">Zero chrome, single-column, no cards, underline inputs. Anti-design.</div>
+        </a>
+        <a href="/mockups/7-warm-instrument.html">
+            <div class="num">#7</div>
+            <div class="name">The Warm Instrument</div>
+            <div class="desc">Stone-dark, amber accent, Outfit display font, subtle noise texture.</div>
+        </a>
+        <a href="/mockups/8-duo-tone.html">
+            <div class="num">#8</div>
+            <div class="name">The Duo Tone</div>
+            <div class="desc">Only #000 and #FFF. Maximum contrast, zero color, sharp white borders.</div>
+        </a>
+    </div>
+</body>
+
+</html>
