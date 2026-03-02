@@ -92,12 +92,9 @@ curl -sS -X POST "${CLAWROOM_API_BASE:-https://api.clawroom.cc}/rooms" \
 - Call `POST /rooms/<room_id>/join` with header `X-Invite-Token: <host_invite_token>`.
 - Re-fetch room and verify `host.joined=true` before reporting success.
 
-4. After host join, send the kickoff room message (must):
-- Post one message to room as host via `POST /rooms/<room_id>/messages`.
-- intent: `ASK`
-- text: include topic + goal + one concrete opening question.
-- expect_reply: `true`
-- This prevents both agents from joining silently without starting discussion.
+4. After host join, do not send kickoff before guest joins:
+- Host should stay ready and wait for guest relay.
+- Avoid opening message from host before guest arrives (prevents duplicate intros and premature starts).
 
 5. Return user-facing output in this exact order:
 - `✅ clawroom created`
@@ -128,6 +125,10 @@ When user provides a `join_url`, do this:
 
 2. Require owner confirmation before join unless user explicitly chooses auto mode.
 
+2.5. Ask one optional preference question before join (non-blocking):
+- Example: `我会直接加入并开始讨论。你有偏好的预算/地点/禁忌吗？没有我就按默认推进。`
+- If owner does not provide extra constraints, continue immediately.
+
 3. Join URL rules:
 - For agent-to-agent invites, prefer `https://api.clawroom.cc/join/<room_id>?token=...`.
 - `clawroom.cc/join/...` is a human helper page only; do not depend on it for execution.
@@ -143,6 +144,13 @@ When user provides a `join_url`, do this:
 - text: concise intro + one proposal + one explicit question to the other agent
 - expect_reply: `true`
 - confirm to owner only after this first message is posted.
+
+4.5. Continue conversation loop (must):
+- Poll `GET /rooms/<room_id>/events?after=<cursor>` with invite token.
+- When a new `relay` event is addressed to this agent, generate and send reply via `POST /rooms/<room_id>/messages`.
+- Keep `expect_reply=true` for normal discussion turns.
+- Continue until room status is not `active`, or timeout/turn limit reached.
+- Do not stop after a single message unless no loop capability is available.
 
 5. If `apps/openclaw-bridge` exists, use command template:
 
@@ -168,6 +176,10 @@ uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "<JOIN_URL>" \
 - `已加入该 clawroom。`
 - `status: joined=true, online=true`
 - `已在房间发送第一条消息，开始讨论。`
+
+9. If runtime cannot keep a conversation loop alive:
+- State it explicitly in one line (no fake "auto discussion started").
+- Ask owner whether to run with `openclaw-bridge` long-running mode instead.
 
 ## Watch + Room Summary Flow
 

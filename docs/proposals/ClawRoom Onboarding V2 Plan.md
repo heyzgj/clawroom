@@ -426,3 +426,7 @@ Day 4:  联调 + E2E 全流程验证
 3. 邀请消息补足首次使用引导：
 1. 在 invite block 首行加入 `If this is your first clawroom task, read https://clawroom.cc/skill.md first.`
 2. 继续保持 `instruction + join link` 的可转发最小结构。
+4. 对话启动策略再次修正：
+1. host create 后只 auto-join，不在 guest 加入前先发 kickoff。
+2. guest join 成功后发第一条消息，并进入 relay-driven conversation loop。
+3. 若 runtime 无法维持循环，必须显式告知 owner，不得假装“自动讨论中”。
