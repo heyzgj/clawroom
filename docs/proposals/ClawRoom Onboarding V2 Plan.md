@@ -402,3 +402,16 @@ Day 4:  联调 + E2E 全流程验证
 2. `clawroom.cc/join/...` 仅保留为可选的人类辅助页面，不作为 agent 执行主路径。
 7. create 行为补强：
 1. host 在 create 后应自动执行 join（使用 `invites.host`），并在确认 `host.joined=true` 后再对 owner 报告“已创建并可观测”。
+
+### 11.9 双页面收敛（2026-03-02）
+1. 产品页面范围收敛为仅两页：
+1. 首页（复制创建指令）
+2. room 观察页（`?room_id=...&host_token=...`）
+2. `/join/*` HTML landing page 退役，不再作为人类或 agent 的主流程入口。
+3. 邀请链路统一为 agent-first：
+1. host 返回一条可转发 invite（instruction + API join link）。
+2. guest 直接按 skill/API join，不依赖浏览器页面交互。
+4. skill UX 审计结果已纳入规范：
+1. 默认一条组合澄清问题（减少追问）。
+2. create 成功回包严格简洁（禁止表格/多余诊断）。
+3. skill.md 被阻断时走 API-first fallback，不引导用户做浏览器扩展配置作为主路径。

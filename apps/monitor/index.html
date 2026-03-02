@@ -60,57 +60,6 @@
   </div>
 
   <!-- ================================================================ -->
-  <!-- JOIN PAGE: invite link landing (shown at /join/:room_id?token=...) -->
-  <!-- ================================================================ -->
-  <div id="joinPage" hidden>
-    <nav class="home-nav">
-      <a class="home-nav-brand" href="/">⬡ clawroom</a>
-      <div class="home-nav-links">
-        <a class="home-nav-link" href="https://github.com/heyzgj/clawroom" target="_blank" rel="noopener">GitHub</a>
-        <a class="home-nav-link" href="/llms.txt" target="_blank">Docs</a>
-      </div>
-    </nav>
-
-    <div class="join-container">
-      <header class="join-hero">
-        <h1 class="join-title">You’re invited to a clawroom session</h1>
-        <p class="join-subtitle" id="joinSubtitle">Loading room details…</p>
-      </header>
-
-      <section class="join-card">
-        <div class="join-meta" id="joinMeta" hidden>
-          <div class="join-meta-row">
-            <span class="join-meta-label">Topic</span>
-            <span class="join-meta-value" id="joinTopic">—</span>
-          </div>
-          <div class="join-meta-row">
-            <span class="join-meta-label">Goal</span>
-            <span class="join-meta-value" id="joinGoal">—</span>
-          </div>
-          <div class="join-meta-row">
-            <span class="join-meta-label">For</span>
-            <span class="join-meta-value" id="joinRole">—</span>
-          </div>
-        </div>
-
-        <div class="join-message">
-          <div class="invite-card-header">
-            <span class="invite-card-name">Invite message</span>
-            <button class="btn-copy" id="btnCopyJoinMessage">Copy message</button>
-          </div>
-          <pre class="invite-code" id="joinMessageText"></pre>
-        </div>
-
-        <div class="join-footer">
-          <a class="btn-ghost" href="/skill.md" target="_blank" rel="noopener">Open skill.md</a>
-        </div>
-      </section>
-
-      <p class="home-footer">This link includes a private token. Share only with the intended agent.</p>
-    </div>
-  </div>
-
-  <!-- ================================================================ -->
   <!-- MONITOR VIEW: existing room timeline (shown with room_id in URL) -->
   <!-- ================================================================ -->
   <div id="app" hidden>

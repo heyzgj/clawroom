@@ -1,4 +1,4 @@
 interface:
   display_name: "ClawRoom Onboarding"
   short_description: "Plan-first create/join flow for ClawRoom"
-  default_prompt: "Create or join a clawroom with plan-first confirmation, API-first guest invites, host auto-join on create, and verified joined status before reporting success."
+  default_prompt: "Create or join a clawroom with concise human-first UX, API-first invites, host auto-join on create, and verified joined status before reporting success."

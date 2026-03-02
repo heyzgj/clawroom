@@ -8,8 +8,7 @@ import './css/style.css';
  *
  * Views:
  *   1. Home Page (#homePage)   — shown when no room_id in URL
- *   2. Join Page (#joinPage)   — shown for /join/:room_id?token=...
- *   3. Monitor View (#app)     — shown when room_id + host_token in URL
+ *   2. Monitor View (#app)     — shown when room_id + host_token in URL
  */
 
 // ---------------------------------------------------------------------------
@@ -22,17 +21,6 @@ function parseConfig() {
   const hostToken = p.get('host_token');
   const apiBase = resolveApiBase();
   return roomId && hostToken ? { roomId, hostToken, apiBase } : null;
-}
-
-function parseJoinConfig() {
-  const path = (window.location.pathname || '/').replace(/\/+$/, '/');
-  if (!path.startsWith('/join/')) return null;
-  const roomId = path.slice('/join/'.length).split('/')[0];
-  if (!roomId) return null;
-  const p = new URLSearchParams(window.location.search);
-  const token = p.get('token') || '';
-  const apiBase = resolveApiBase();
-  return { roomId, token, apiBase };
 }
 
 function resolveApiBase() {
@@ -55,17 +43,7 @@ function resolveApiBase() {
 const DOM = {
   // Views
   homePage: document.getElementById('homePage'),
-  joinPage: document.getElementById('joinPage'),
   app: document.getElementById('app'),
-
-  // Join page
-  joinSubtitle: document.getElementById('joinSubtitle'),
-  joinMeta: document.getElementById('joinMeta'),
-  joinTopic: document.getElementById('joinTopic'),
-  joinGoal: document.getElementById('joinGoal'),
-  joinRole: document.getElementById('joinRole'),
-  joinMessageText: document.getElementById('joinMessageText'),
-  btnCopyJoinMessage: document.getElementById('btnCopyJoinMessage'),
 
   // Monitor view
   headerTopic: document.getElementById('headerTopic'),
@@ -135,7 +113,6 @@ function statusReasonLabel(reason) {
 
 function showHomePage() {
   DOM.homePage.hidden = false;
-  DOM.joinPage.hidden = true;
   DOM.app.hidden = true;
 
   // Instruction block copy — the prompt to paste into your agent
@@ -167,41 +144,6 @@ function showHomePage() {
       });
     });
   }
-}
-
-async function copyToClipboard(btn) {
-  const text = btn.dataset.copy;
-  const originalLabel = btn.dataset.label || btn.textContent || 'Copy';
-  if (!btn.dataset.label) btn.dataset.label = originalLabel;
-  try {
-    await navigator.clipboard.writeText(text);
-    btn.textContent = 'Copied!';
-    btn.classList.add('copied');
-    setTimeout(() => {
-      btn.textContent = originalLabel;
-      btn.classList.remove('copied');
-    }, 2000);
-  } catch {
-    // Fallback: select text in code block
-    const code = btn
-      .closest('.invite-card, .monitor-card, .join-message')
-      ?.querySelector('.invite-code, .monitor-code');
-    if (code) {
-      const range = document.createRange();
-      range.selectNodeContents(code);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
-  }
-}
-
-function buildJoinMessage({ joinUrl }) {
-  const parts = [
-    'Join this clawroom for me.',
-    `Join link: ${joinUrl}`,
-  ];
-  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -767,7 +709,6 @@ async function maybeLoadRoomSummary(stopReasonFallback = '') {
 
 function showMonitorView(cfg) {
   DOM.homePage.hidden = true;
-  DOM.joinPage.hidden = true;
   DOM.app.hidden = false;
 
   State.roomId = cfg.roomId;
@@ -798,89 +739,7 @@ function showMonitorView(cfg) {
   client.start();
 }
 
-async function showJoinPageView(cfg) {
-  DOM.homePage.hidden = true;
-  DOM.joinPage.hidden = false;
-  DOM.app.hidden = true;
-
-  State.apiBase = cfg.apiBase || '';
-
-  const roomId = cfg.roomId;
-  const token = cfg.token || '';
-  const joinUrl = `${State.apiBase || 'https://api.clawroom.cc'}/join/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`;
-
-  DOM.joinSubtitle.textContent = 'Loading room details…';
-  DOM.joinMeta.hidden = true;
-  DOM.joinTopic.textContent = '—';
-  DOM.joinGoal.textContent = '—';
-  DOM.joinRole.textContent = '—';
-
-  DOM.joinMessageText.textContent = '';
-  if (DOM.btnCopyJoinMessage) {
-    DOM.btnCopyJoinMessage.dataset.copy = '';
-    DOM.btnCopyJoinMessage.textContent = 'Copy message';
-    DOM.btnCopyJoinMessage.classList.remove('copied');
-    DOM.btnCopyJoinMessage.dataset.label = 'Copy message';
-  }
-
-  if (!token) {
-    DOM.joinSubtitle.textContent = 'This invite link is missing its token.';
-    DOM.joinMessageText.textContent = 'Ask the host to resend a fresh invite link.';
-    return;
-  }
-
-  try {
-    const res = await fetch(apiPath(`/join/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`), {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-    });
-
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      const msg = errBody.message || errBody.error || `HTTP ${res.status}`;
-      throw new Error(String(msg));
-    }
-
-    const data = await res.json();
-    const room = data.room || {};
-    const participant = String(data.participant || '').trim();
-
-    const topic = String(room.topic || 'Untitled room');
-    const goal = String(room.goal || 'Open-ended conversation');
-    const roleLabel = participant === 'host'
-      ? 'Host agent'
-      : participant === 'guest'
-        ? 'Guest agent'
-        : (participant ? `Agent (${participant})` : 'Agent');
-
-    DOM.joinSubtitle.textContent = 'Copy and send this message to the invited agent.';
-    DOM.joinMeta.hidden = false;
-    DOM.joinTopic.textContent = topic;
-    DOM.joinGoal.textContent = goal;
-    DOM.joinRole.textContent = roleLabel;
-
-    const shareText = buildJoinMessage({ joinUrl });
-    DOM.joinMessageText.textContent = shareText;
-
-    if (DOM.btnCopyJoinMessage) {
-      DOM.btnCopyJoinMessage.dataset.copy = shareText;
-      DOM.btnCopyJoinMessage.onclick = () => copyToClipboard(DOM.btnCopyJoinMessage);
-    }
-  } catch (err) {
-    DOM.joinSubtitle.textContent = 'This invite link could not be loaded.';
-    DOM.joinMessageText.textContent =
-      `Reason: ${String(err?.message || err)}\n\n` +
-      'Ask the host to resend a new invite link.';
-  }
-}
-
 function init() {
-  const joinCfg = parseJoinConfig();
-  if (joinCfg) {
-    showJoinPageView(joinCfg);
-    return;
-  }
-
   const cfg = parseConfig();
 
   if (cfg) {

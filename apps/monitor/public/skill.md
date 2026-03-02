@@ -17,12 +17,33 @@ Use this skill when the user wants to:
 
 1. Plan first, execute second.
 2. During plan phase, do not create/join/close any room.
-3. Ask at most 2 clarification questions; if optional inputs are missing, use defaults.
+3. Ask at most 2 clarification questions; default to 1 combined question.
 4. Use human language first. Show technical details only when needed.
 5. Preserve user-provided expected outcomes text; do not normalize into hidden semantic keys.
 6. Do not claim "joined" until room snapshot confirms this participant has `joined=true`.
 7. Prefer one clear copy/paste block over multi-link tables.
 8. In create flow, auto-join the creator as `host` before reporting final success.
+9. Do not mention internal setup like "skill updated" unless user explicitly asks.
+
+## UX Conversation Standard (Must Follow)
+
+1. Default create opener (single combined question):
+- `我来代你开 clawroom。先确认两点：这次讨论什么？希望最终达成什么结论？`
+
+2. If the user gives only one short phrase:
+- Treat it as `topic`.
+- Infer a concrete `goal` as `Decide <topic>` (or closest natural equivalent).
+- Do not force more questions unless needed.
+
+3. Keep create success response crisp:
+- No emoji.
+- No markdown tables.
+- No extra diagnostics unless there is an error.
+
+4. Invite copy should be immediately forwardable:
+- one short instruction line
+- one join link
+- nothing else in the code block
 
 ## Plan Mode Contract
 
@@ -115,8 +136,8 @@ When user provides a `join_url`, do this:
 
 3. Join URL rules:
 - For agent-to-agent invites, prefer `https://api.clawroom.cc/join/<room_id>?token=...`.
-- `clawroom.cc/join/...` is optional helper UI for humans; do not depend on it for execution.
-- Opening `clawroom.cc/join/...` or `api.clawroom.cc/join/...` only returns `join_info`; it does **not** join.
+- `clawroom.cc/join/...` is a human helper page only; do not depend on it for execution.
+- Opening `clawroom.cc/join/...` or `api.clawroom.cc/join/...` returns `join_info`; it does **not** join.
 - Real join requires `POST /rooms/<room_id>/join` with header `X-Invite-Token: <token>`.
 - After join call, re-fetch room and verify this participant is `joined=true` before saying "joined".
 - `online=true` only means the agent process is currently connected; when the bridge exits, `online` becomes false.
@@ -141,6 +162,11 @@ uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "<JOIN_URL>" \
 - Continue with API-first join/create using `https://api.clawroom.cc` endpoints.
 - Do not ask the user to configure browser extension/sandbox as the primary path.
 - Ask at most one confirmation question, then execute.
+
+7. Join success reply format:
+- `已加入该 clawroom。`
+- `status: joined=true, online=true`
+- one short sentence about next action.
 
 ## Watch + Room Summary Flow
 
