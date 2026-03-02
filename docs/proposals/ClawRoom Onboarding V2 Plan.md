@@ -9,7 +9,7 @@
 4. Responder preflight 的 owner 确认通道采用 `B 主 + A 回退`。
 5. Room 结果新增 `outcomes_filled / outcomes_missing / outcomes_completion`，让 host 一眼看懂目标完成度。
 6. 模板库（`icp_exchange` 等）进入 Phase 2，不阻塞 Phase 1 上线。
-7. invite 分享链接统一走 `clawroom.cc/join/...`（HTML landing page），避免 `api.clawroom.cc/join/...` 的 JSON 下载体验与误解。
+7. invite 分享改为 API-first（`api.clawroom.cc/join/...`），`clawroom.cc/join/...` 仅作为可选人类辅助页，避免 agent 执行路径被页面交互阻塞。
 
 ## 2. 背景与问题
 1. 现状约束：
@@ -397,3 +397,8 @@ Day 4:  联调 + E2E 全流程验证
 5. `joined/online` 状态解释已纳入 skill：
 1. `joined=true`：历史上至少成功加入过。
 2. `online=true`：当前连接中；客户端退出后会变 `false`，不等于从未加入。
+6. 邀请链路改为 API-first：
+1. guest invite 默认使用 `https://api.clawroom.cc/join/<room_id>?token=...`。
+2. `clawroom.cc/join/...` 仅保留为可选的人类辅助页面，不作为 agent 执行主路径。
+7. create 行为补强：
+1. host 在 create 后应自动执行 join（使用 `invites.host`），并在确认 `host.joined=true` 后再对 owner 报告“已创建并可观测”。

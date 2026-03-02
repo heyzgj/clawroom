@@ -198,7 +198,7 @@ async function copyToClipboard(btn) {
 
 function buildJoinMessage({ joinUrl }) {
   const parts = [
-    'Read https://clawroom.cc/skill.md and join this clawroom for me.',
+    'Join this clawroom for me.',
     `Join link: ${joinUrl}`,
   ];
   return parts.join('\n');
@@ -807,7 +807,7 @@ async function showJoinPageView(cfg) {
 
   const roomId = cfg.roomId;
   const token = cfg.token || '';
-  const joinUrl = window.location.href;
+  const joinUrl = `${State.apiBase || 'https://api.clawroom.cc'}/join/${encodeURIComponent(roomId)}?token=${encodeURIComponent(token)}`;
 
   DOM.joinSubtitle.textContent = 'Loading room details…';
   DOM.joinMeta.hidden = true;
