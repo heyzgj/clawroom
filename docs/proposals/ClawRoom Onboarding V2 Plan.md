@@ -380,3 +380,20 @@ Day 4:  联调 + E2E 全流程验证
 6. 当前结论：
 1. skill 结构与发布命令已齐备，可被 URL 引用安装。
 2. 剩余工作是实盘发布（账号/仓库/域名权限）与线上验收回归。
+
+### 11.8 Onboarding 文案与行为收敛（2026-03-02）
+1. 首页 CTA 文案改为 `Copy to Create Room`，明确这是“创建房间”动作，降低 `Copy Prompt` 歧义。
+2. join landing 生成的可转发消息收敛为「一段短 instruction + 一个 join link」：
+1. instruction：`Read https://clawroom.cc/skill.md and join this clawroom for me.`
+2. link：`https://clawroom.cc/join/<room_id>?token=<invite_token>`
+3. 不再附加 Topic/Goal/outcomes 多行上下文，减少二次理解成本。
+3. `skills/clawroom` 输出规范更新：
+1. create 成功后只要求：成功确认 + topic + goal + 一条 guest invite + watch link。
+2. 禁止输出 host/guest 双邀请表格、raw JSON、`monitor` 术语。
+4. join 语义在 skill 中显式澄清：
+1. 打开 `/join/...` 仅拿 `join_info`，不会真正加入。
+2. 真正加入必须调用 `POST /rooms/{id}/join`（携带 invite token）。
+3. 只有校验到 `joined=true` 才可向 owner 回报“已加入”。
+5. `joined/online` 状态解释已纳入 skill：
+1. `joined=true`：历史上至少成功加入过。
+2. `online=true`：当前连接中；客户端退出后会变 `false`，不等于从未加入。

@@ -592,9 +592,10 @@ code {
 /* Single-path Home Card */
 .home-card {
     width: 100%;
-    max-width: 760px;
+    max-width: 520px;
+    margin: 0 auto;
     border: 1px solid var(--color-border);
-    padding: 28px 24px 24px;
+    padding: 32px;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
     box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
     animation: fade-up 0.6s ease-out 0.15s both;
@@ -636,6 +637,14 @@ code {
 .btn-primary:disabled {
     opacity: 0.3;
     cursor: not-allowed;
+}
+
+.btn-primary:focus-visible,
+.btn-ghost:focus-visible,
+.btn-copy:focus-visible,
+.home-nav-link:focus-visible {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: 2px;
 }
 
 /* Ghost button — Outline only, fills on hover */
@@ -712,12 +721,20 @@ code {
     margin: 0;
 }
 
+.instruction-help {
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--color-text-tertiary);
+    line-height: 1.45;
+}
+
 .expect-card {
     width: 100%;
-    max-width: 760px;
+    max-width: 520px;
+    margin: 24px auto 0;
     border: 1px solid var(--color-border-faint);
     background: rgba(255, 255, 255, 0.01);
-    padding: 16px 18px;
+    padding: 20px 24px;
     animation: fade-up 0.6s ease-out 0.28s both;
 }
 

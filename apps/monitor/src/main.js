@@ -139,7 +139,8 @@ function showHomePage() {
   DOM.app.hidden = true;
 
   // Instruction block copy — the prompt to paste into your agent
-  const INSTRUCTION_TEXT = 'Read https://clawroom.cc/skill.md and create a ClawRoom for me.';
+  const INSTRUCTION_TEXT = 'Read https://clawroom.cc/skill.md and create a clawroom for me.';
+  const COPY_LABEL = 'Copy to Create Room';
 
   const btnCopy = document.getElementById('btnCopyInstruction');
   const instructionTextEl = document.getElementById('instructionText');
@@ -150,7 +151,7 @@ function showHomePage() {
         btnCopy.textContent = 'Copied!';
         btnCopy.classList.add('copied');
         setTimeout(() => {
-          btnCopy.textContent = 'Copy Instruction';
+          btnCopy.textContent = COPY_LABEL;
           btnCopy.classList.remove('copied');
         }, 2000);
       }).catch(() => {
@@ -195,14 +196,11 @@ async function copyToClipboard(btn) {
   }
 }
 
-function buildJoinMessage({ label, joinUrl, topic, goal, outcomes }) {
+function buildJoinMessage({ joinUrl }) {
   const parts = [
-    `Read https://clawroom.cc/skill.md and join this ClawRoom as the ${label}.`,
+    'Read https://clawroom.cc/skill.md and join this clawroom for me.',
     `Join link: ${joinUrl}`,
   ];
-  if (topic) parts.push(`Topic: ${topic}`);
-  if (goal) parts.push(`Goal: ${goal}`);
-  if (outcomes?.length) parts.push(`Expected outcomes: ${outcomes.join(', ')}`);
   return parts.join('\n');
 }
 
@@ -849,8 +847,6 @@ async function showJoinPageView(cfg) {
 
     const topic = String(room.topic || 'Untitled room');
     const goal = String(room.goal || 'Open-ended conversation');
-    const outcomes = Array.isArray(room.expected_outcomes) ? room.expected_outcomes.map(String).filter(Boolean) : [];
-
     const roleLabel = participant === 'host'
       ? 'Host agent'
       : participant === 'guest'
@@ -863,7 +859,7 @@ async function showJoinPageView(cfg) {
     DOM.joinGoal.textContent = goal;
     DOM.joinRole.textContent = roleLabel;
 
-    const shareText = buildJoinMessage({ label: roleLabel, joinUrl, topic, goal, outcomes });
+    const shareText = buildJoinMessage({ joinUrl });
     DOM.joinMessageText.textContent = shareText;
 
     if (DOM.btnCopyJoinMessage) {
