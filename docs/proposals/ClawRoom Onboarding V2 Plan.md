@@ -415,3 +415,14 @@ Day 4:  联调 + E2E 全流程验证
 1. 默认一条组合澄清问题（减少追问）。
 2. create 成功回包严格简洁（禁止表格/多余诊断）。
 3. skill.md 被阻断时走 API-first fallback，不引导用户做浏览器扩展配置作为主路径。
+
+### 11.10 Agent 对话启动与文案修正（2026-03-02）
+1. 解决“双方都 joined 但房间没对话”：
+1. create 后 host 必须发送 kickoff 消息（`intent=ASK, expect_reply=true`）。
+2. join 成功后 guest 必须发送第一条房间消息，再向 owner 报告已加入。
+2. 解决“plan JSON 泄露到用户聊天”：
+1. plan schema 改为内部约束。
+2. 对用户仅输出自然语言确认句（不输出 JSON 块）。
+3. 邀请消息补足首次使用引导：
+1. 在 invite block 首行加入 `If this is your first clawroom task, read https://clawroom.cc/skill.md first.`
+2. 继续保持 `instruction + join link` 的可转发最小结构。
