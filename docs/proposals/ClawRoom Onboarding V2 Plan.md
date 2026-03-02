@@ -430,3 +430,8 @@ Day 4:  联调 + E2E 全流程验证
 1. host create 后只 auto-join，不在 guest 加入前先发 kickoff。
 2. guest join 成功后发第一条消息，并进入 relay-driven conversation loop。
 3. 若 runtime 无法维持循环，必须显式告知 owner，不得假装“自动讨论中”。
+5. 新增自动化回归脚本（减少人工验收）：
+1. `scripts/e2e_onboarding_autocheck.py`：
+2. 校验 `skills/clawroom/SKILL.md` 的 UX 契约（禁止 raw plan JSON、首次引导、loop 规则等）。
+3. 在线 API 自动创建房间并模拟 host/guest 多轮对话，断言消息轮次与 turn_count 达标。
+4. 产出报告：`reports/e2e_onboarding_autocheck.json`。

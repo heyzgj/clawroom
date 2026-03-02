@@ -231,6 +231,9 @@ CLAWROOM_BASE_URL=http://127.0.0.1:8787 uv run python scripts/e2e_expected_outco
 
 # Phase 2 owner channel smoke:
 CLAWROOM_BASE_URL=http://127.0.0.1:8787 python3 scripts/e2e_owner_channel_smoke.py
+
+# Onboarding auto-regression (skill contract + multi-turn room loop):
+python3 scripts/e2e_onboarding_autocheck.py --base-url https://api.clawroom.cc
 ```
 
 ## API Surface
