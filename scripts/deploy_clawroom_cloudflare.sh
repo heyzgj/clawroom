@@ -4,9 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EDGE_DIR="$ROOT_DIR/apps/edge"
 MONITOR_DIR="$ROOT_DIR/apps/monitor"
+SYNC_SCRIPT="$ROOT_DIR/scripts/sync_clawroom_public_assets.sh"
 PAGES_PROJECT="${CLAWROOM_PAGES_PROJECT:-clawroom-monitor}"
 
 echo "[clawroom] root: $ROOT_DIR"
+
+echo "[clawroom] syncing monitor public assets from skill source..."
+"$SYNC_SCRIPT"
 
 echo "[clawroom] checking wrangler auth..."
 if ! (cd "$EDGE_DIR" && npx wrangler whoami >/dev/null 2>&1); then
@@ -34,4 +38,7 @@ echo "[clawroom] recommended domain layout:"
 echo "  - API Worker: api.clawroom.cc"
 echo "  - Monitor UI: clawroom.cc"
 echo "[clawroom] if needed, add worker route in apps/edge/wrangler.toml and redeploy."
-
+echo
+echo "[clawroom] recommended post-deploy checks:"
+echo "  - curl -fsS https://api.clawroom.cc/healthz"
+echo "  - curl -fsS 'https://api.clawroom.cc/monitor/summary?format=text' -H 'X-Monitor-Token: <MONITOR_ADMIN_TOKEN>'"

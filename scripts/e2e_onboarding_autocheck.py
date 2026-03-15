@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,78 @@ class Bot:
     token: str
     cursor: int = 0
     sent: int = 0
+
+
+def scripted_reply(bot: Bot, incoming: str) -> tuple[str, str, dict[str, str], bool]:
+    """Deterministic multi-turn script with progressive content and structured closure."""
+    step = bot.sent + 1
+    incoming_short = incoming[:60].strip()
+
+    if bot.name == "host":
+        if step == 1:
+            return (
+                "ANSWER",
+                "Nice kickoff. Alternative option: riverside cycling with a coffee stop. "
+                "Do you prefer a calm nature route or a lively city route?",
+                {},
+                True,
+            )
+        if step == 2:
+            return (
+                "ANSWER",
+                "Let's cap total budget around CNY 300 including transport and snacks. "
+                "If that works, I can refine the route and timing.",
+                {"budget_cny": "300"},
+                True,
+            )
+        if step == 3:
+            return (
+                "ANSWER",
+                "Given your preference, primary plan can be West Lake sunset walk plus a tea house stop. "
+                "Any hard constraints for timing?",
+                {},
+                True,
+            )
+        if step == 4:
+            return (
+                "ANSWER",
+                "Final proposal: West Lake sunset walk (90 min) + tea house (45 min), under CNY 300 total. "
+                "This balances scenery, pace, and budget.",
+                {"decision_summary": "West Lake sunset walk + tea house under CNY 300"},
+                True,
+            )
+    else:
+        if step == 2:
+            return (
+                "ANSWER",
+                "I prefer calm scenery and photo-friendly places. "
+                "City noise should be minimal.",
+                {"vibe": "calm_scenic"},
+                True,
+            )
+        if step == 3:
+            return (
+                "ANSWER",
+                "Budget CNY 300 is acceptable. "
+                "I prefer late afternoon to sunset timing.",
+                {},
+                True,
+            )
+        if step == 4:
+            return (
+                "ANSWER",
+                "Confirmed. Destination should be West Lake, and the tea house stop sounds good.",
+                {"destination": "West Lake"},
+                True,
+            )
+
+    # Fallback for unexpected extra turns.
+    return (
+        "ANSWER",
+        f"Received your point: {incoming_short}. I agree with the direction and can continue.",
+        {},
+        True,
+    )
 
 
 def req(
@@ -46,13 +119,20 @@ def normalize(text: str) -> str:
 def check_skill_contract(skill_path: Path) -> dict[str, Any]:
     text = skill_path.read_text(encoding="utf-8")
     compact = normalize(text)
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", text))
 
     required = [
+        "Keep this skill file in English.",
+        "When replying to humans, match the user's language.",
         "Never print raw planning JSON to the user.",
+        "Keep the host runtime alive in a relay loop.",
+        "`bash` tool access",
+        "prefer the shell relay runner first (no Python/uv required).",
+        "https://clawroom.cc/openclaw-shell-bridge.sh",
         "If this is your first clawroom task, read https://clawroom.cc/skill.md first.",
         "After successful join, immediately send the first in-room message (must):",
         "Continue conversation loop (must):",
-        "do not send kickoff before guest joins",
+        "Do not send kickoff before the guest has joined",
     ]
     missing = [s for s in required if s not in text]
 
@@ -63,9 +143,10 @@ def check_skill_contract(skill_path: Path) -> dict[str, Any]:
     present_forbidden = [s for s in forbidden if s in text or s in compact]
 
     return {
-        "ok": not missing and not present_forbidden,
+        "ok": not missing and not present_forbidden and not has_cjk,
         "missing": missing,
         "forbidden_present": present_forbidden,
+        "has_cjk": has_cjk,
     }
 
 
@@ -78,6 +159,7 @@ def post_message(
     intent: str,
     text: str,
     expect_reply: bool,
+    fills: dict[str, str] | None = None,
     meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return req(
@@ -88,7 +170,7 @@ def post_message(
         payload={
             "intent": intent,
             "text": text,
-            "fills": {},
+            "fills": fills or {},
             "facts": [],
             "questions": [],
             "expect_reply": expect_reply,
@@ -131,8 +213,9 @@ def run_live_loop_check(base: str, min_round_messages: int, max_seconds: int) ->
             f"{base}/rooms",
             payload={
                 "topic": "auto-e2e onboarding",
-                "goal": "verify multi-turn loop",
+                "goal": "pick a practical outing plan and close automatically when fields are complete",
                 "participants": ["host", "guest"],
+                "required_fields": ["destination", "budget_cny", "vibe", "decision_summary"],
                 "turn_limit": max(12, min_round_messages + 2),
                 "timeout_minutes": 20,
                 "stall_limit": max(4, min_round_messages),
@@ -161,7 +244,7 @@ def run_live_loop_check(base: str, min_round_messages: int, max_seconds: int) ->
             room_id,
             guest.token,
             intent="ASK",
-            text="我们来快速确定明天去哪玩。我先提议去湖边散步，你有什么备选建议？",
+            text="Let's choose tomorrow's outing. I suggest a lake walk, but I need one strong alternative and a clear budget target.",
             expect_reply=True,
             meta={"source": "e2e_onboarding_autocheck", "kickoff": "guest"},
         )
@@ -183,22 +266,28 @@ def run_live_loop_check(base: str, min_round_messages: int, max_seconds: int) ->
                         continue
                     payload = evt.get("payload") or {}
                     incoming = (payload.get("message") or {}).get("text") or ""
-                    reply_text = (
-                        f"[{bot.name} reply #{bot.sent + 1}] 收到你的建议：{incoming[:36]}。"
-                        "我补充一个备选，并请你给出最终推荐。"
-                    )
-                    post_message(
-                        client,
-                        base,
-                        room_id,
-                        bot.token,
-                        intent="ANSWER",
-                        text=reply_text,
-                        expect_reply=True,
-                        meta={"source": "e2e_onboarding_autocheck"},
-                    )
+                    intent, reply_text, fills, expect_reply = scripted_reply(bot, incoming)
+                    try:
+                        post_message(
+                            client,
+                            base,
+                            room_id,
+                            bot.token,
+                            intent=intent,
+                            text=reply_text,
+                            expect_reply=expect_reply,
+                            fills=fills,
+                            meta={"source": "e2e_onboarding_autocheck"},
+                        )
+                    except RuntimeError as exc:
+                        if "room not active" in str(exc).lower():
+                            room_status = "closed"
+                            break
+                        raise
                     bot.sent += 1
                     progressed = True
+                if room_status != "active":
+                    break
 
             monitor_events, monitor_cursor, monitor_room = fetch_monitor_events(
                 client, base, room_id, host_token, monitor_cursor
@@ -211,9 +300,6 @@ def run_live_loop_check(base: str, min_round_messages: int, max_seconds: int) ->
 
             if progressed:
                 last_progress_ts = time.time()
-
-            if total_msg_seen >= min_round_messages:
-                break
 
             if room_status != "active":
                 break
@@ -246,15 +332,28 @@ def run_live_loop_check(base: str, min_round_messages: int, max_seconds: int) ->
         except Exception:
             pass
 
-    ok = len(msg_events) >= min_round_messages and final_room.get("turn_count", 0) >= min_round_messages
+    host_sent = host.sent
+    guest_sent = guest.sent
+    stop_reason = str(final_room.get("stop_reason") or "")
+    allowed_stop_reasons = {"goal_done", "mutual_done"}
+    ok = (
+        len(msg_events) >= min_round_messages
+        and final_room.get("turn_count", 0) >= min_round_messages
+        and final_room.get("status") == "closed"
+        and stop_reason in allowed_stop_reasons
+        and host_sent >= 3
+        and guest_sent >= 3
+    )
     return {
         "ok": ok,
         "room_id": room_id,
         "base": base,
         "msg_events": len(msg_events),
         "turn_count": final_room.get("turn_count"),
+        "room_status": final_room.get("status"),
+        "stop_reason": stop_reason,
         "participants": final_room.get("participants"),
-        "bot_sent": {"host": host.sent, "guest": guest.sent},
+        "bot_sent": {"host": host_sent, "guest": guest_sent},
         "log_tail": log[-3:],
     }
 
@@ -291,4 +390,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
