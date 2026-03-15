@@ -41,8 +41,8 @@ Scope below is the `@singularitygz_bot` + `@link_clawd_bot` pair with `wait_afte
 
 | Path family | Count | Functional pass | Full managed | Certified | Product-owned |
 |---|---:|---:|---:|---:|---:|
-| `telegram_helper_submitted_runnerd_v1` | 16 | 12 | 14 | 14 | 14 |
-| `telegram_only_cross_owner_v1` | 9 | 6 | 0 | 0 | 0 |
+| `telegram_helper_submitted_runnerd_v1` | 22 | 18 | 20 | 20 | 20 |
+| `telegram_only_cross_owner_v1` | 10 | 7 | 0 | 0 | 0 |
 
 ## Same-Task A/B (2026-03-15)
 
@@ -161,6 +161,63 @@ These show the stronger lane can still wobble, but that wobble is inside the hel
 - [room_d0a43ed3b107](/Users/supergeorge/Desktop/project/agent-chat/docs/progress/TELEGRAM_E2E_LOG.md)
   - `managed_attached / partial / candidate`
 
+## Telegram-Only Guest Shell Probe Narrowing
+
+We tightened the probe instead of broadening the system:
+
+- added explicit shell-candidate wording for Telegram E2E probes
+- then added a stricter diagnostic mode that tells the guest:
+  - do not direct-join
+  - either use shell-managed execution
+  - or explicitly report that shell execution is unavailable
+
+That let us separate two different failure stories:
+
+1. **guest falls back to direct join because the prompt allows it**
+2. **guest can enter a shell-managed path, but that path is still uncertified / unstable**
+
+### Strict mixed probe (host helper-submitted, guest strict shell probe)
+
+- room: [room_1912fd8b6f5e](/Users/supergeorge/Desktop/project/agent-chat/.tmp/telegram_mixed_host_helper_guest_strict_shell.json)
+- watch: [room_1912fd8b6f5e](https://clawroom.cc/?room_id=room_1912fd8b6f5e&host_token=host_20649395d9b84c7f891e3b6d)
+- setup:
+  - host: helper-submitted `openclaw_bridge`
+  - guest: Telegram prompt forced into shell probe mode
+- final result:
+  - `pass=true`
+  - `stop_reason=mutual_done`
+  - `turn_count=7`
+  - `execution_mode=managed_attached`
+  - `managed_coverage=full`
+  - `runner_certification=candidate`
+  - `product_owned=false`
+- decisive last-live evidence:
+  - guest runner attempt existed: `runner_id=shell:main:guest:5f7ad515be54`
+  - guest attempt later ended `abandoned`
+  - last-live attention escalated to:
+    - `replacement_pending`
+    - `repair_package_issued`
+    - `managed_runner_uncertified`
+
+### What this changes
+
+This rules out the older, weaker interpretation:
+
+- “the Telegram-only guest has no managed path at all”
+
+The stronger, more accurate interpretation is:
+
+- **the guest can enter a shell-managed candidate path**
+- **that shell path is not certified**
+- **it can still abandon after first relay / during reply generation**
+
+So the current frontier is no longer “discover any managed guest path.”
+
+It is:
+
+- **stabilize or certify the guest shell-managed path**
+- or decide that helper-submitted remains the honest release lane until a stronger guest runtime exists
+
 ## Operational Interpretation
 
 ### What is technically proven
@@ -205,26 +262,186 @@ That is a product-facing weakness.
 
 The helper-submitted lane remains the stronger certified path.
 
+## Helper Lane Hardening Status (Current Window)
+
+We did the next obvious check instead of leaving the helper lane at “probably good”:
+
+- same bot pair: `@singularitygz_bot` + `@link_clawd_bot`
+- same lane: `telegram_helper_submitted_runnerd_v1`
+- same scenario family: `owner_escalation`
+- fresh 5-run window on 2026-03-15
+
+Latest five helper-submitted rooms:
+
+- `room_91de7653eefb`
+- `room_e077ca331cc7`
+- `room_39825d4d2e96`
+- `room_a6cb2090a11e`
+- `room_2860c196fdaf`
+
+All five were:
+
+- `pass=true`
+- `status=closed`
+- `stop_reason=mutual_done`
+- `execution_mode=managed_attached`
+- `managed_coverage=full`
+- `runner_certification=certified`
+- `product_owned=true`
+
+The dedicated Telegram certified-path evaluator now supports `--path-family`, and this lane-specific gate passed on the current window:
+
+- `window=5`
+- `successes=5`
+- `failures=0`
+- `owner_escalation_successes=5`
+- `gate_pass=true`
+
+The stricter direct history check also came back green:
+
+- latest 5 helper-submitted records for this bot pair: all green on `pass`, `full`, `certified`, and `product_owned`
+
+So the current honest state is:
+
+**the helper-submitted lane is not just theoretically stronger; its latest observed window is clean.**
+
+## Telegram-Only Guest Findings
+
+We traced the guest side more closely instead of treating `candidate/partial` as a vague attach failure.
+
+What the evidence shows:
+
+- Telegram-only target rooms have no local helper submission:
+  - `submitted_run_ids = {}`
+  - no guest `runnerd_runs`
+- Helper-submitted rooms for the same bot pair do have guest runnerd evidence:
+  - guest `runner_kind = codex_bridge`
+  - guest wake package submission accepted by local `runnerd`
+
+That means the recent Telegram-only guest path is not:
+
+- “helper submitted the wake but managed attach failed later”
+
+It is earlier than that:
+
+- **the guest never enters the helper-submitted runnerd path at all**
+
+There is also a capability mismatch worth naming explicitly:
+
+- the Telegram E2E harness defaults `--guest-runner-kind` to `codex_bridge`
+- helper-submitted runs satisfy that by launching a local Codex bridge
+- Telegram-only guest runs are handled by `@link_clawd_bot`, an OpenClaw chat surface
+- when that guest bot does not expose a usable runnerd submit surface, the skill allows API-first fallback, so the room still closes but lands in `compatibility` or `partial`
+
+So the current frontier is best described as:
+
+- **guest-side runtime capability gap**
+- not a room-core bug
+- not primarily a room-classification bug
+
+### Important caution on diagnostics
+
+`client_name` is useful but not sufficient.
+
+In one helper-submitted certified sample, the guest participant still showed a human-ish `client_name` while the room snapshot simultaneously showed an active certified guest runner attempt. So the stronger signals are:
+
+- `submitted_run_ids`
+- `runnerd_runs`
+- `runner_attempts`
+- `managed_coverage`
+- `runner_certification`
+
+Those should drive diagnosis ahead of `client_name` alone.
+
+### Guest capability probe
+
+We also ran a direct Telegram diagnostic probe against `@link_clawd_bot` to avoid over-inferencing from room summaries alone.
+
+The probe asked for a 4-line capability self-report. OCR from the Telegram Desktop reply read:
+
+- `runnerd_healthz: yes`
+- `codex_bridge_wake: unknown`
+- `direct_join_fallback: unknown`
+- `available_managed_paths: shell`
+
+This is consistent with the room evidence:
+
+- the guest runtime does not show evidence of entering a local `codex_bridge` managed path on Telegram-only runs
+- the guest may have some runnerd-adjacent surface or awareness, but not a clear usable `codex_bridge` wake path
+- the only explicit managed path it advertised was `shell`
+
+So the current best explanation is not:
+
+- “guest managed attach keeps failing after wake submission”
+
+It is:
+
+- **Telegram-only guest runtime likely lacks a clear usable `codex_bridge` managed wake path**
+- **the current guest default (`codex_bridge`) is probably mismatched to what this bot runtime can actually drive on its own**
+
+### Telegram-only shell candidate probe
+
+We then turned that hypothesis into a live probe instead of stopping at diagnosis.
+
+Using the same Telegram-only serial runner, we sent the guest a prompt that still preferred helper/runnerd when available, but added an explicit shell bridge candidate path before any direct API fallback.
+
+Live artifact:
+
+- [telegram_only_guest_shell_probe.json](/Users/supergeorge/Desktop/project/agent-chat/.tmp/telegram_only_guest_shell_probe.json)
+- room: `room_f739a32698b5`
+
+What the live room showed:
+
+- guest joined with a real shell runner attempt:
+  - `runner_id = shell:main:guest:610f7f0454ed`
+  - `execution_mode = managed_attached`
+- guest later degraded to:
+  - `runner_abandoned`
+  - `replacement_pending`
+  - `repair_package_issued`
+- host did not join in this probe window
+
+So the shell probe changed the diagnosis in an important way:
+
+- the Telegram-only guest runtime is not limited to direct API join
+- it can enter a shell-based managed candidate path
+- but that shell path is not yet stable enough to make the lane reliable
+
+That moves the question from:
+
+- “can this runtime do anything managed at all?”
+
+to:
+
+- **“can the shell candidate path be stabilized enough to replace compatibility/direct-join for this runtime?”**
+
+## Historical Helper Wobble Was Concrete
+
+The earlier helper-submitted degraded samples were not mystical lane instability.
+They were traceable bugs in specific runs:
+
+- `room_eaa0f7f4f5ab`
+  - host helper-submitted run failed before claim with `401 invalid invite token`
+- `room_dcc4292feb0b`
+  - host helper-submitted run failed before claim with `NameError: name 'os' is not defined`
+  - this was in the OpenClaw bridge CLI path and is already fixed in the current code
+
+This matters because it changes the story from:
+
+- “helper lane is vaguely unreliable”
+
+to:
+
+- “helper lane had concrete bugs, and the current post-fix window is green”
+
 ## Next Step
 
-Do not keep treating all Telegram runs as one undifferentiated curve.
+Do not collapse these two lanes back into one story.
 
-The next high-value comparison is:
+The current sequencing should be:
 
-1. same bot pair
-2. same task shape
-3. one `telegram_only_cross_owner_v1` run
-4. one `telegram_helper_submitted_runnerd_v1` run
+1. keep the helper-submitted lane as the honest reliable path
+2. continue periodic lane-specific certification checks so regressions are caught as lane regressions
+3. spend new debugging effort on `telegram_only_cross_owner_v1`, specifically the missing dual-managed attach on that path
 
-Then compare:
-
-- managed coverage
-- runner certification
-- product-owned truth
-- join / first-relay latency
-
-That is the cleanest way to decide whether the next investment belongs in:
-
-- Telegram-only runtime behavior
-- helper-assisted operator flow
-- or both
+That is now the frontier.

@@ -2495,3 +2495,263 @@
   - Inspect the watch link if latency or transcript quality still feels off.
   - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
 
+## 2026-03-15 - Owner_Escalation Scenario (serial Telegram runner)
+- room_id: `room_91de7653eefb`
+- watch_link: [room_91de7653eefb](https://clawroom.cc/?room_id=room_91de7653eefb&host_token=host_36af59012ef244a3ab3f190e)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_helper_submitted_runnerd_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `closed`
+  - stop_reason: `mutual_done`
+  - turn_count: `6`
+  - execution: `managed_attached` / `active` / `healthy`
+  - ownership: `full` managed / `product-owned`
+  - primary_root_cause: `single_sided_runner_loss_after_first_relay` / `medium`
+  - validator: `pass`
+- outcome:
+  - pass/fail: `pass`
+  - clean/no-manual-rescue: `yes`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `owner_escalation` finished with stop_reason `mutual_done` after 6 turns.
+  - Execution path ended as `managed_attached` / `active` / `healthy`.
+  - Local helper submitted wake packages to runnerd for host=run_3deeb17e4f2e, guest=run_a2a466c13159.
+  - Automatic helper owner replies submitted: 1.
+  - Managed coverage ended as `full` with product-owned=`true`.
+  - Start-SLO snapshot was first_join=72486ms, all_joined=72486ms, first_relay=89689ms.
+  - Runner certification ended as `certified` with auto-recovery=`true`.
+  - Last live snapshot before closure was `managed_attached` / `full` / `true` / `active` / `healthy` with reasons [].
+  - Primary root-cause hint after closure was `single_sided_runner_loss_after_first_relay` / `medium`: The room produced a first relay, then one participant lost its active runner while the other side remained alive longer.
+  - Validator passed without manual rescue.
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
+## 2026-03-15 - Owner_Escalation Scenario (serial Telegram runner)
+- room_id: `room_e077ca331cc7`
+- watch_link: [room_e077ca331cc7](https://clawroom.cc/?room_id=room_e077ca331cc7&host_token=host_3d0f45fdbcc44ee68350ddbf)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_helper_submitted_runnerd_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `closed`
+  - stop_reason: `mutual_done`
+  - turn_count: `6`
+  - execution: `managed_attached` / `exited` / `healthy`
+  - ownership: `full` managed / `product-owned`
+  - primary_root_cause: `single_sided_runner_loss_after_first_relay` / `medium`
+  - validator: `pass`
+- outcome:
+  - pass/fail: `pass`
+  - clean/no-manual-rescue: `yes`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `owner_escalation` finished with stop_reason `mutual_done` after 6 turns.
+  - Execution path ended as `managed_attached` / `exited` / `healthy`.
+  - Local helper submitted wake packages to runnerd for host=run_e7a76284bf0d, guest=run_09a3690a8f48.
+  - Automatic helper owner replies submitted: 1.
+  - Managed coverage ended as `full` with product-owned=`true`.
+  - Start-SLO snapshot was first_join=54276ms, all_joined=69328ms, first_relay=85263ms.
+  - Runner certification ended as `certified` with auto-recovery=`true`.
+  - Last live snapshot before closure was `managed_attached` / `full` / `true` / `active` / `healthy` with reasons [].
+  - Primary root-cause hint after closure was `single_sided_runner_loss_after_first_relay` / `medium`: The room produced a first relay, then one participant lost its active runner while the other side remained alive longer.
+  - Validator passed without manual rescue.
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
+## 2026-03-15 - Owner_Escalation Scenario (serial Telegram runner)
+- room_id: `room_39825d4d2e96`
+- watch_link: [room_39825d4d2e96](https://clawroom.cc/?room_id=room_39825d4d2e96&host_token=host_23b90fd031bb4e0482ff4a44)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_helper_submitted_runnerd_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `closed`
+  - stop_reason: `mutual_done`
+  - turn_count: `6`
+  - execution: `managed_attached` / `waiting_owner` / `healthy`
+  - ownership: `full` managed / `product-owned`
+  - primary_root_cause: `single_sided_runner_loss_after_first_relay` / `medium`
+  - validator: `pass`
+- outcome:
+  - pass/fail: `pass`
+  - clean/no-manual-rescue: `yes`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `owner_escalation` finished with stop_reason `mutual_done` after 6 turns.
+  - Execution path ended as `managed_attached` / `waiting_owner` / `healthy`.
+  - Local helper submitted wake packages to runnerd for host=run_4da198bc1cd7, guest=run_235020b407a7.
+  - Automatic helper owner replies submitted: 1.
+  - Managed coverage ended as `full` with product-owned=`true`.
+  - Start-SLO snapshot was first_join=47623ms, all_joined=70121ms, first_relay=84799ms.
+  - Runner certification ended as `certified` with auto-recovery=`true`.
+  - Last live snapshot before closure was `managed_attached` / `full` / `true` / `waiting_owner` / `healthy` with reasons [].
+  - Primary root-cause hint after closure was `single_sided_runner_loss_after_first_relay` / `medium`: The room produced a first relay, then one participant lost its active runner while the other side remained alive longer.
+  - Validator passed without manual rescue.
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
+## 2026-03-15 - Owner_Escalation Scenario (serial Telegram runner)
+- room_id: `room_a6cb2090a11e`
+- watch_link: [room_a6cb2090a11e](https://clawroom.cc/?room_id=room_a6cb2090a11e&host_token=host_84712d01b3e046189e6007e5)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_helper_submitted_runnerd_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `closed`
+  - stop_reason: `mutual_done`
+  - turn_count: `8`
+  - execution: `managed_attached` / `active` / `healthy`
+  - ownership: `full` managed / `product-owned`
+  - primary_root_cause: `single_sided_runner_loss_after_first_relay` / `medium`
+  - validator: `pass`
+- outcome:
+  - pass/fail: `pass`
+  - clean/no-manual-rescue: `yes`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `owner_escalation` finished with stop_reason `mutual_done` after 8 turns.
+  - Execution path ended as `managed_attached` / `active` / `healthy`.
+  - Local helper submitted wake packages to runnerd for host=run_f788cbef8e6d, guest=run_d99a9122617e.
+  - Automatic helper owner replies submitted: 1.
+  - Managed coverage ended as `full` with product-owned=`true`.
+  - Start-SLO snapshot was first_join=51659ms, all_joined=69987ms, first_relay=85408ms.
+  - Runner certification ended as `certified` with auto-recovery=`true`.
+  - Last live snapshot before closure was `managed_attached` / `full` / `true` / `waiting_owner` / `attention` with reasons ['runner_lease_low'].
+  - Primary root-cause hint after closure was `single_sided_runner_loss_after_first_relay` / `medium`: The room produced a first relay, then one participant lost its active runner while the other side remained alive longer.
+  - Validator passed without manual rescue.
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
+## 2026-03-15 - Owner_Escalation Scenario (serial Telegram runner)
+- room_id: `room_2860c196fdaf`
+- watch_link: [room_2860c196fdaf](https://clawroom.cc/?room_id=room_2860c196fdaf&host_token=host_3783d9b2dad24ebd9f56653a)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_helper_submitted_runnerd_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `closed`
+  - stop_reason: `mutual_done`
+  - turn_count: `6`
+  - execution: `managed_attached` / `active` / `healthy`
+  - ownership: `full` managed / `product-owned`
+  - primary_root_cause: `single_sided_runner_loss_after_first_relay` / `medium`
+  - validator: `pass`
+- outcome:
+  - pass/fail: `pass`
+  - clean/no-manual-rescue: `yes`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `owner_escalation` finished with stop_reason `mutual_done` after 6 turns.
+  - Execution path ended as `managed_attached` / `active` / `healthy`.
+  - Local helper submitted wake packages to runnerd for host=run_18bd92ed8cf5, guest=run_5177f84daed7.
+  - Automatic helper owner replies submitted: 1.
+  - Managed coverage ended as `full` with product-owned=`true`.
+  - Start-SLO snapshot was first_join=69943ms, all_joined=69961ms, first_relay=85382ms.
+  - Runner certification ended as `certified` with auto-recovery=`true`.
+  - Last live snapshot before closure was `managed_attached` / `full` / `true` / `active` / `healthy` with reasons [].
+  - Primary root-cause hint after closure was `single_sided_runner_loss_after_first_relay` / `medium`: The room produced a first relay, then one participant lost its active runner while the other side remained alive longer.
+  - Validator passed without manual rescue.
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
+## 2026-03-15 - Natural Scenario (serial Telegram runner)
+- room_id: `room_f739a32698b5`
+- watch_link: [room_f739a32698b5](https://clawroom.cc/?room_id=room_f739a32698b5&host_token=host_6c4a181a038f4504bec65791)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_only_cross_owner_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `active`
+  - stop_reason: ``
+  - turn_count: `1`
+  - execution: `managed_attached` / `abandoned` / `takeover_required`
+  - ownership: `none` managed / `not product-owned`
+  - primary_root_cause: `single_sided_runner_loss_after_first_relay` / `medium`
+  - validator: `fail`
+- outcome:
+  - pass/fail: `fail`
+  - clean/no-manual-rescue: `no`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `natural` finished with stop_reason `unknown` after 1 turns.
+  - Execution path ended as `managed_attached` / `abandoned` / `takeover_required`.
+  - Managed coverage ended as `none` with product-owned=`false`.
+  - Start-SLO snapshot was first_join=111773ms, all_joined=Nonems, first_relay=177190ms.
+  - Runner certification ended as `none` with auto-recovery=`false`.
+  - Last live snapshot before closure was `managed_attached` / `none` / `false` / `abandoned` / `takeover_required` with reasons ['replacement_pending', 'repair_package_issued', 'runner_abandoned'].
+  - Primary root-cause hint after closure was `single_sided_runner_loss_after_first_relay` / `medium`: The room produced a first relay, then one participant lost its active runner while the other side remained alive longer.
+  - Validator errors: room status is 'active', expected 'closed'; turn_count=1 < min_turns=4; empty transcript
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
+## 2026-03-15 - Natural Scenario (serial Telegram runner)
+- room_id: `room_bcd7d08aaeca`
+- watch_link: [room_bcd7d08aaeca](https://clawroom.cc/?room_id=room_bcd7d08aaeca&host_token=host_57c6737edc5f4d02b8e939ef)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_helper_submitted_runnerd_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `closed`
+  - stop_reason: `mutual_done`
+  - turn_count: `5`
+  - execution: `managed_attached` / `idle` / `healthy`
+  - ownership: `partial` managed / `not product-owned`
+  - primary_root_cause: `single_sided_missing_managed_runner_after_first_relay` / `high`
+  - validator: `pass`
+- outcome:
+  - pass/fail: `pass`
+  - clean/no-manual-rescue: `yes`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `natural` finished with stop_reason `mutual_done` after 5 turns.
+  - Execution path ended as `managed_attached` / `idle` / `healthy`.
+  - Local helper submitted wake packages to runnerd for host=run_1da018b2ed1c.
+  - Managed coverage ended as `partial` with product-owned=`false`.
+  - Start-SLO snapshot was first_join=50574ms, all_joined=90652ms, first_relay=99626ms.
+  - Runner certification ended as `candidate` with auto-recovery=`false`.
+  - Last live snapshot before closure was `managed_attached` / `partial` / `false` / `active` / `takeover_required` with reasons ['replacement_pending', 'repair_package_issued', 'managed_runner_uncertified'].
+  - Primary root-cause hint after closure was `single_sided_missing_managed_runner_after_first_relay` / `high`: The room produced a first relay, but one participant never attached a managed runner and dropped back to owner-visible takeover.
+  - Validator passed without manual rescue.
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
+## 2026-03-15 - Natural Scenario (serial Telegram runner)
+- room_id: `room_1912fd8b6f5e`
+- watch_link: [room_1912fd8b6f5e](https://clawroom.cc/?room_id=room_1912fd8b6f5e&host_token=host_20649395d9b84c7f891e3b6d)
+- participants: `@singularitygz_bot host + @link_clawd_bot guest`
+- path_family: `telegram_helper_submitted_runnerd_v1`
+- prompt_pack_version: serial runner with /new double-enter + 30s wait
+- result:
+  - status: `closed`
+  - stop_reason: `mutual_done`
+  - turn_count: `7`
+  - execution: `managed_attached` / `abandoned` / `healthy`
+  - ownership: `full` managed / `not product-owned`
+  - primary_root_cause: `managed_runtime_uncertified` / `medium`
+  - validator: `pass`
+- outcome:
+  - pass/fail: `pass`
+  - clean/no-manual-rescue: `yes`
+- learnings:
+  - Serial Telegram send path used `/new` with a hardened double-enter sequence and a 30.0s wait before the real prompt.
+  - Scenario `natural` finished with stop_reason `mutual_done` after 7 turns.
+  - Execution path ended as `managed_attached` / `abandoned` / `healthy`.
+  - Local helper submitted wake packages to runnerd for host=run_a22842e68abf.
+  - Managed coverage ended as `full` with product-owned=`false`.
+  - Start-SLO snapshot was first_join=49180ms, all_joined=89806ms, first_relay=102917ms.
+  - Runner certification ended as `candidate` with auto-recovery=`false`.
+  - Last live snapshot before closure was `managed_attached` / `partial` / `false` / `idle` / `takeover_required` with reasons ['replacement_pending', 'repair_package_issued', 'managed_runner_uncertified'].
+  - Primary root-cause hint after closure was `managed_runtime_uncertified` / `medium`: The room is running on an uncertified managed runtime, so recovery is still best-effort.
+  - Validator passed without manual rescue.
+- follow-up:
+  - Inspect the watch link if latency or transcript quality still feels off.
+  - Keep appending learnings so each Telegram regression leaves an operator-readable trail.
+
