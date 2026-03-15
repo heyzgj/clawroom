@@ -61,3 +61,21 @@ export function conflict(message: string): Response {
   return json({ error: "conflict", message }, { status: 409 });
 }
 
+export function normalizePlatformError(error: unknown): Response | null {
+  const message = String((error as Error)?.message || error || "").trim();
+  if (!message) return null;
+  if (/Exceeded allowed .* in Durable Objects free tier/i.test(message)) {
+    return json(
+      {
+        error: "capacity_exhausted",
+        message: "Cloudflare Durable Objects free-tier capacity has been exhausted for this operation.",
+        provider: "cloudflare",
+        subsystem: "durable_objects_sqlite_free_tier",
+        retryable: true,
+        detail: message,
+      },
+      { status: 503 }
+    );
+  }
+  return null;
+}

@@ -1,10 +1,19 @@
 import { RoomDurableObject } from "./worker_room";
-import { json, notFound, readJson, route, text } from "./worker_util";
+import { RoomRegistryDurableObject } from "./worker_registry";
+import { MissionDurableObject } from "./worker_mission";
+import { TeamRegistryDurableObject } from "./worker_teams";
+import { json, normalizePlatformError, notFound, readJson, route, text } from "./worker_util";
 
 export { RoomDurableObject };
+export { RoomRegistryDurableObject };
+export { MissionDurableObject };
+export { TeamRegistryDurableObject };
 
 type Env = {
   ROOMS: DurableObjectNamespace;
+  ROOM_REGISTRY: DurableObjectNamespace;
+  MISSIONS: DurableObjectNamespace;
+  TEAM_REGISTRY: DurableObjectNamespace;
   CLAWROOM_DEFAULT_TURN_LIMIT?: string;
   CLAWROOM_DEFAULT_STALL_LIMIT?: string;
   CLAWROOM_DEFAULT_TIMEOUT_MINUTES?: string;
@@ -13,6 +22,8 @@ type Env = {
   ROOMBRIDGE_DEFAULT_STALL_LIMIT?: string;
   ROOMBRIDGE_DEFAULT_TIMEOUT_MINUTES?: string;
   ROOMBRIDGE_DEFAULT_TTL_MINUTES?: string;
+  MONITOR_ADMIN_TOKEN?: string;
+  CLAWROOM_MONITOR_ADMIN_TOKEN?: string;
 };
 
 function buildCorsHeaders(request: Request): Headers {
@@ -20,7 +31,7 @@ function buildCorsHeaders(request: Request): Headers {
   const origin = request.headers.get("Origin");
   headers.set("access-control-allow-origin", origin || "*");
   headers.set("access-control-allow-methods", "GET,POST,OPTIONS");
-  headers.set("access-control-allow-headers", "content-type,authorization");
+  headers.set("access-control-allow-headers", "content-type,authorization,x-monitor-token");
   headers.set("access-control-max-age", "86400");
   headers.set("vary", "Origin");
   return headers;
@@ -44,6 +55,31 @@ function envNum(env: Env, primary: keyof Env, legacy: keyof Env, fallback: numbe
   return parsed;
 }
 
+function monitorToken(request: Request): string {
+  const url = new URL(request.url);
+  return (
+    request.headers.get("x-monitor-token")
+    || request.headers.get("X-Monitor-Token")
+    || url.searchParams.get("admin_token")
+    || ""
+  ).trim();
+}
+
+function requireMonitorAuth(request: Request, env: Env): Response | null {
+  const expected = String(env.MONITOR_ADMIN_TOKEN || env.CLAWROOM_MONITOR_ADMIN_TOKEN || "").trim();
+  if (!expected) {
+    return json(
+      { error: "monitor_not_configured", message: "monitor admin token is not configured" },
+      { status: 503 },
+    );
+  }
+  const provided = monitorToken(request);
+  if (!provided || provided !== expected) {
+    return json({ error: "unauthorized", message: "invalid monitor admin token" }, { status: 401 });
+  }
+  return null;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") {
@@ -55,6 +91,60 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/healthz") {
         return withCors(request, text("ok"));
+      }
+
+      if (
+        request.method === "GET"
+        && (
+          url.pathname === "/monitor/overview"
+          || url.pathname === "/monitor/summary"
+          || url.pathname === "/monitor/rooms"
+          || url.pathname === "/monitor/events"
+        )
+      ) {
+        const authFailure = requireMonitorAuth(request, env);
+        if (authFailure) return withCors(request, authFailure);
+        const registryId = env.ROOM_REGISTRY.idFromName("global");
+        const registry = env.ROOM_REGISTRY.get(registryId);
+        const registryReq = new Request(`https://registry${url.pathname}${url.search}`, { method: "GET" });
+        const response = await registry.fetch(registryReq);
+        return withCors(request, response);
+      }
+
+      // --- Mission routes: /missions/* → Mission DO ---
+      if (url.pathname.startsWith("/missions/") || url.pathname === "/missions") {
+        if (url.pathname === "/missions" && request.method === "POST") {
+          // Create mission: generate ID, forward to Mission DO
+          const body = await readJson(request);
+          const missionId = String(body.mission_id || `mission_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`);
+          const id = env.MISSIONS.idFromName(missionId);
+          const stub = env.MISSIONS.get(id);
+          const initReq = new Request("https://mission/init", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...body, mission_id: missionId }),
+          });
+          return withCors(request, await stub.fetch(initReq));
+        }
+        if (url.pathname.startsWith("/missions/")) {
+          const parts = url.pathname.slice("/missions/".length).split("/");
+          const missionId = parts[0];
+          if (!missionId) return withCors(request, notFound());
+          const id = env.MISSIONS.idFromName(missionId);
+          const stub = env.MISSIONS.get(id);
+          const suffix = "/" + parts.slice(1).join("/") || "/status";
+          const fwdUrl = new URL(`https://mission${suffix === "/" ? "/status" : suffix}`);
+          const forwarded = new Request(fwdUrl, request);
+          return withCors(request, await stub.fetch(forwarded));
+        }
+      }
+
+      // --- Team/Agent routes: /teams/*, /agents/* → Team Registry DO (global singleton) ---
+      if (url.pathname.startsWith("/teams") || url.pathname.startsWith("/agents") || url.pathname.startsWith("/assignments")) {
+        const registryId = env.TEAM_REGISTRY.idFromName("global");
+        const stub = env.TEAM_REGISTRY.get(registryId);
+        const forwarded = new Request(new URL(`https://teams${url.pathname}${url.search}`), request);
+        return withCors(request, await stub.fetch(forwarded));
       }
 
       const match = route(url.pathname);
@@ -96,6 +186,8 @@ export default {
       const response = await stub.fetch(forwarded);
       return withCors(request, response);
     } catch (error) {
+      const normalized = normalizePlatformError(error);
+      if (normalized) return withCors(request, normalized);
       if (error instanceof Response) return withCors(request, error);
       throw error;
     }

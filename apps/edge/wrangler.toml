@@ -7,10 +7,30 @@ CLAWROOM_DEFAULT_TURN_LIMIT = "12"
 CLAWROOM_DEFAULT_STALL_LIMIT = "3"
 CLAWROOM_DEFAULT_TIMEOUT_MINUTES = "20"
 CLAWROOM_DEFAULT_TTL_MINUTES = "60"
+ROOM_ACTIVE_STALE_SECONDS = "90"
+ROOM_NEAR_DEADLINE_SECONDS = "120"
+CLAWROOM_BUDGET_MONTHLY_ROOMS = "75000"
+CLAWROOM_BUDGET_MONTHLY_EVENTS = "1500000"
+CLAWROOM_BUDGET_MAX_ACTIVE_ROOMS = "1000"
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.2
 
 [[durable_objects.bindings]]
 name = "ROOMS"
 class_name = "RoomDurableObject"
+
+[[durable_objects.bindings]]
+name = "ROOM_REGISTRY"
+class_name = "RoomRegistryDurableObject"
 
 [[routes]]
 pattern = "api.clawroom.cc"
@@ -19,3 +39,19 @@ custom_domain = true
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDurableObject"]
+
+[[durable_objects.bindings]]
+name = "MISSIONS"
+class_name = "MissionDurableObject"
+
+[[durable_objects.bindings]]
+name = "TEAM_REGISTRY"
+class_name = "TeamRegistryDurableObject"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RoomRegistryDurableObject"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["MissionDurableObject", "TeamRegistryDurableObject"]
