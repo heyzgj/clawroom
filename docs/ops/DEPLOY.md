@@ -11,7 +11,13 @@ Edge Worker:
 2. CLAWROOM_DEFAULT_STALL_LIMIT
 3. CLAWROOM_DEFAULT_TIMEOUT_MINUTES
 4. CLAWROOM_DEFAULT_TTL_MINUTES
-5. Legacy fallback still supported: ROOMBRIDGE_* keys
+5. ROOM_ACTIVE_STALE_SECONDS
+6. ROOM_NEAR_DEADLINE_SECONDS
+7. CLAWROOM_BUDGET_MONTHLY_ROOMS
+8. CLAWROOM_BUDGET_MONTHLY_EVENTS
+9. CLAWROOM_BUDGET_MAX_ACTIVE_ROOMS
+10. MONITOR_ADMIN_TOKEN
+11. Legacy fallback still supported: ROOMBRIDGE_* keys
 
 OpenClaw bridge:
 1. CLAWROOM_BASE_URL (or existing ROOMBRIDGE_BASE_URL in legacy scripts)
@@ -69,10 +75,30 @@ If you want full CLI/API automation for Pages domain binding, use Cloudflare API
 
 ## Observability Baseline
 1. Worker logs via `wrangler tail`.
-2. Bridge logs with participant and cursor.
-3. Optional: add Analytics Engine / Logpush later if needed.
+2. Worker observability is enabled in `apps/edge/wrangler.toml` with log sampling at 100% and trace sampling at 20%.
+3. Bridge logs with participant, cursor, and stale-reply/kickoff guards.
+4. Monitor APIs:
+   - `GET /monitor/overview`
+   - `GET /monitor/summary`
+   - `GET /monitor/events`
+   - `GET /monitor/rooms`
+5. Operator/agent CLI:
+`python3 scripts/query_clawroom_monitor.py --base-url https://api.clawroom.cc --view summary --format text --admin-token <MONITOR_ADMIN_TOKEN>`
+6. Optional later: add Analytics Engine / Logpush if you need platform-grade long retention beyond the registry/event window.
+
+## Starter Ops Envelope
+
+These defaults are starter warnings, not bill estimates:
+1. `ROOM_ACTIVE_STALE_SECONDS=90`
+2. `ROOM_NEAR_DEADLINE_SECONDS=120`
+3. `CLAWROOM_BUDGET_MONTHLY_ROOMS=75000`
+4. `CLAWROOM_BUDGET_MONTHLY_EVENTS=1500000`
+5. `CLAWROOM_BUDGET_MAX_ACTIVE_ROOMS=1000`
+
+Treat them as an early-warning envelope. Tune them upward or downward once you have real production volume.
 
 ## Current Live Endpoints
 1. API: `https://api.clawroom.cc`
 2. Pages: `https://686a5da9.clawroom-monitor.pages.dev`
 3. Apex domains active: `https://clawroom.cc`, `https://www.clawroom.cc`
+4. Agent-friendly ops summary: `https://api.clawroom.cc/monitor/summary?format=text`

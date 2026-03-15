@@ -1,0 +1,386 @@
+{
+  "result": {
+    "room_id": "room_5e33c8f822ac",
+    "status": "closed",
+    "stop_reason": "goal_done",
+    "stop_detail": "required fields complete and completion signal present",
+    "execution_mode": "managed_attached",
+    "managed_coverage": "partial",
+    "product_owned": false,
+    "runner_certification": "candidate",
+    "automatic_recovery_eligible": false,
+    "attempt_status": "exited",
+    "active_runner_id": null,
+    "last_recovery_reason": "room_closed:goal_done",
+    "execution_attention": {
+      "state": "healthy",
+      "reasons": [],
+      "summary": null,
+      "next_action": null,
+      "takeover_required": false
+    },
+    "root_cause_hints": [
+      {
+        "code": "managed_runtime_uncertified",
+        "confidence": "medium",
+        "summary": "The room is running on an uncertified managed runtime, so recovery is still best-effort.",
+        "evidence": [
+          "runner_certification=candidate",
+          "automatic_recovery_eligible=false"
+        ]
+      }
+    ],
+    "repair_hint": {
+      "available": false,
+      "strategy": null,
+      "summary": null,
+      "endpoint_template": null,
+      "invalidates_previous_invite": false,
+      "participants": []
+    },
+    "recovery_actions": [
+      {
+        "action_id": "raction_38eb514ec8d74c7382ad2ff2",
+        "participant": "host",
+        "kind": "repair_invite_reissue",
+        "delivery_mode": "manual",
+        "status": "resolved",
+        "reason": "no_managed_runner",
+        "summary": "Replacement runner still needed for host.",
+        "package_ready": false,
+        "created_at": "2026-03-13T14:54:27.390Z",
+        "updated_at": "2026-03-13T14:54:28.109Z",
+        "issued_at": null,
+        "resolved_at": "2026-03-13T14:54:28.109Z",
+        "issue_count": 0,
+        "current": false
+      },
+      {
+        "action_id": "raction_73eb3a311b4447a399ec39b8",
+        "participant": "guest",
+        "kind": "repair_invite_reissue",
+        "delivery_mode": "manual",
+        "status": "superseded",
+        "reason": "no_managed_runner",
+        "summary": "Replacement runner still needed for guest.",
+        "package_ready": true,
+        "created_at": "2026-03-13T14:59:57.651Z",
+        "updated_at": "2026-03-13T15:01:21.265Z",
+        "issued_at": "2026-03-13T15:00:13.003Z",
+        "resolved_at": "2026-03-13T15:01:21.265Z",
+        "issue_count": 1,
+        "current": false
+      },
+      {
+        "action_id": "raction_af854fdf4f574926a21c8e12",
+        "participant": "host",
+        "kind": "repair_invite_reissue",
+        "delivery_mode": "automatic",
+        "status": "resolved",
+        "reason": "runner_stalled_or_abandoned",
+        "summary": "Replacement runner still needed for host.",
+        "package_ready": true,
+        "created_at": "2026-03-13T15:00:45.575Z",
+        "updated_at": "2026-03-13T15:00:49.986Z",
+        "issued_at": "2026-03-13T15:00:45.575Z",
+        "resolved_at": "2026-03-13T15:00:49.986Z",
+        "issue_count": 1,
+        "current": false
+      }
+    ],
+    "start_slo": {
+      "room_created_at": "2026-03-13T14:52:34.232Z",
+      "first_joined_at": "2026-03-13T14:54:27.390Z",
+      "all_joined_at": "2026-03-13T14:59:57.651Z",
+      "first_relay_at": "2026-03-13T15:00:17.078Z",
+      "join_latency_ms": 113158,
+      "full_join_latency_ms": 443419,
+      "first_relay_latency_ms": 462846
+    },
+    "turn_count": 3,
+    "required_total": 1,
+    "required_filled": 1,
+    "expected_outcomes": [
+      "cto_objections"
+    ],
+    "outcomes_filled": {
+      "cto_objections": "[{'objection': 'Security & Data Privacy - Our data cannot leave our infrastructure', 'rebuttal': 'Self-hosted runnerd keeps all data local. Gateway only coordinates; execution is local.'}, {'objection': 'Integration Complexity - Adds another tool to manage', 'rebuttal': 'Thin coordination layer. Connects existing agents across environments with minimal overhead.'}, {'objection': 'Reliability - Unproven for production', 'rebuttal': 'Auto-recovery, checkpointing, idempotent ops. Enterprise-grade v"
+    },
+    "outcomes_missing": [],
+    "outcomes_completion": {
+      "filled": 1,
+      "total": 1
+    },
+    "fields": {
+      "cto_objections": {
+        "value": "[{'objection': 'Security & Data Privacy - Our data cannot leave our infrastructure', 'rebuttal': 'Self-hosted runnerd keeps all data local. Gateway only coordinates; execution is local.'}, {'objection': 'Integration Complexity - Adds another tool to manage', 'rebuttal': 'Thin coordination layer. Connects existing agents across environments with minimal overhead.'}, {'objection': 'Reliability - Unproven for production', 'rebuttal': 'Auto-recovery, checkpointing, idempotent ops. Enterprise-grade v",
+        "updated_at": "2026-03-13T15:01:21.265Z",
+        "by": "host"
+      }
+    },
+    "transcript_included": true,
+    "transcript": [
+      {
+        "id": 74,
+        "sender": "host",
+        "intent": "ASK",
+        "text": "For the cross-runtime test, I need to compile the top 3 CTO objections to adopting ClawRoom with concrete rebuttals. What do you think are the biggest objections we'd face? Security and vendor lock-in usually come up\u2014any others you'd add?",
+        "fills": {},
+        "facts": [
+          "Topic involves listing CTO objections to ClawRoom adoption",
+          "This is for a cross-runtime test scenario"
+        ],
+        "questions": [
+          "What do you think are the biggest objections we'd face?"
+        ],
+        "expect_reply": true,
+        "meta": {
+          "preflight": {
+            "mode": "off",
+            "status": "off"
+          }
+        },
+        "created_at": "2026-03-13T15:00:17.078Z"
+      },
+      {
+        "id": 83,
+        "sender": "guest",
+        "intent": "ANSWER",
+        "text": "CTO Objections to ClawRoom:\n\n1. Security & Data Privacy\n   - Objection: Our data cannot leave our infrastructure\n   - Rebuttal: Self-hosted runnerd keeps all data local. Gateway only coordinates; execution is local.\n\n2. Integration Complexity  \n   - Objection: Adds another tool to manage\n   - Rebuttal: Thin coordination layer. Connects existing agents across environments with minimal overhead.\n\n3. Reliability\n   - Objection: Unproven for production\n   - Rebuttal: Auto-recovery, checkpointing, idempotent ops. Enterprise-grade via certification program.",
+        "fills": {},
+        "facts": [],
+        "questions": [],
+        "expect_reply": true,
+        "meta": {},
+        "created_at": "2026-03-13T15:01:02.935Z"
+      },
+      {
+        "id": 91,
+        "sender": "host",
+        "intent": "DONE",
+        "text": "This covers it. The three objections with rebuttals are ready for the cross-runtime test. Security/infrastructure, integration overhead, and production reliability are the classic trio\u2014good framework.",
+        "fills": {
+          "cto_objections": "[{'objection': 'Security & Data Privacy - Our data cannot leave our infrastructure', 'rebuttal': 'Self-hosted runnerd keeps all data local. Gateway only coordinates; execution is local.'}, {'objection': 'Integration Complexity - Adds another tool to manage', 'rebuttal': 'Thin coordination layer. Connects existing agents across environments with minimal overhead.'}, {'objection': 'Reliability - Unproven for production', 'rebuttal': 'Auto-recovery, checkpointing, idempotent ops. Enterprise-grade v"
+        },
+        "facts": [
+          "Top 3 CTO objections compiled with rebuttals"
+        ],
+        "questions": [],
+        "expect_reply": false,
+        "meta": {
+          "preflight": {
+            "mode": "off",
+            "status": "off"
+          },
+          "in_reply_to_event_id": 84
+        },
+        "created_at": "2026-03-13T15:01:21.265Z"
+      }
+    ],
+    "summary": "Room ended with status=closed reason=goal_done after 3 turns. Filled 1/1 expected outcomes."
+  },
+  "room": {
+    "id": "room_5e33c8f822ac",
+    "topic": "CTO objections to ClawRoom (cross-runtime test)",
+    "goal": "List the top 3 CTO objections to adopting ClawRoom and provide concrete rebuttals for each",
+    "protocol_version": 1,
+    "capabilities": [
+      "relay_done_even_if_expect_reply_false",
+      "strict_required_fields_v1",
+      "idempotent_reply_v1",
+      "joined_gate_v1",
+      "strict_goal_done_v2",
+      "close_idempotent_v1",
+      "message_bounds_v1",
+      "participant_stream_v1",
+      "runner_plane_v1",
+      "execution_attention_v1",
+      "runner_certification_v1",
+      "managed_coverage_v1",
+      "product_owned_v1",
+      "repair_invites_v1",
+      "recovery_action_packages_v1",
+      "repair_claim_overdue_v1",
+      "root_cause_hints_v1",
+      "runner_checkpoints_v1"
+    ],
+    "execution_mode": "managed_attached",
+    "runner_certification": "candidate",
+    "managed_coverage": "partial",
+    "supervision_origins": [
+      "runnerd"
+    ],
+    "product_owned": false,
+    "automatic_recovery_eligible": false,
+    "attempt_status": "exited",
+    "active_runner_id": null,
+    "active_runner_count": 0,
+    "last_recovery_reason": "room_closed:goal_done",
+    "execution_attention": {
+      "state": "healthy",
+      "reasons": [],
+      "summary": null,
+      "next_action": null,
+      "takeover_required": false
+    },
+    "root_cause_hints": [
+      {
+        "code": "managed_runtime_uncertified",
+        "confidence": "medium",
+        "summary": "The room is running on an uncertified managed runtime, so recovery is still best-effort.",
+        "evidence": [
+          "runner_certification=candidate",
+          "automatic_recovery_eligible=false"
+        ]
+      }
+    ],
+    "repair_hint": {
+      "available": false,
+      "strategy": null,
+      "summary": null,
+      "endpoint_template": null,
+      "invalidates_previous_invite": false,
+      "participants": []
+    },
+    "recovery_actions": [
+      {
+        "action_id": "raction_38eb514ec8d74c7382ad2ff2",
+        "participant": "host",
+        "kind": "repair_invite_reissue",
+        "delivery_mode": "manual",
+        "status": "resolved",
+        "reason": "no_managed_runner",
+        "summary": "Replacement runner still needed for host.",
+        "package_ready": false,
+        "created_at": "2026-03-13T14:54:27.390Z",
+        "updated_at": "2026-03-13T14:54:28.109Z",
+        "issued_at": null,
+        "resolved_at": "2026-03-13T14:54:28.109Z",
+        "issue_count": 0,
+        "current": false
+      },
+      {
+        "action_id": "raction_73eb3a311b4447a399ec39b8",
+        "participant": "guest",
+        "kind": "repair_invite_reissue",
+        "delivery_mode": "manual",
+        "status": "superseded",
+        "reason": "no_managed_runner",
+        "summary": "Replacement runner still needed for guest.",
+        "package_ready": true,
+        "created_at": "2026-03-13T14:59:57.651Z",
+        "updated_at": "2026-03-13T15:01:21.265Z",
+        "issued_at": "2026-03-13T15:00:13.003Z",
+        "resolved_at": "2026-03-13T15:01:21.265Z",
+        "issue_count": 1,
+        "current": false
+      },
+      {
+        "action_id": "raction_af854fdf4f574926a21c8e12",
+        "participant": "host",
+        "kind": "repair_invite_reissue",
+        "delivery_mode": "automatic",
+        "status": "resolved",
+        "reason": "runner_stalled_or_abandoned",
+        "summary": "Replacement runner still needed for host.",
+        "package_ready": true,
+        "created_at": "2026-03-13T15:00:45.575Z",
+        "updated_at": "2026-03-13T15:00:49.986Z",
+        "issued_at": "2026-03-13T15:00:45.575Z",
+        "resolved_at": "2026-03-13T15:00:49.986Z",
+        "issue_count": 1,
+        "current": false
+      }
+    ],
+    "start_slo": {
+      "room_created_at": "2026-03-13T14:52:34.232Z",
+      "first_joined_at": "2026-03-13T14:54:27.390Z",
+      "all_joined_at": "2026-03-13T14:59:57.651Z",
+      "first_relay_at": "2026-03-13T15:00:17.078Z",
+      "join_latency_ms": 113158,
+      "full_join_latency_ms": 443419,
+      "first_relay_latency_ms": 462846
+    },
+    "lifecycle_state": "completed",
+    "required_fields": [
+      "cto_objections"
+    ],
+    "expected_outcomes": [
+      "cto_objections"
+    ],
+    "fields": {
+      "cto_objections": {
+        "value": "[{'objection': 'Security & Data Privacy - Our data cannot leave our infrastructure', 'rebuttal': 'Self-hosted runnerd keeps all data local. Gateway only coordinates; execution is local.'}, {'objection': 'Integration Complexity - Adds another tool to manage', 'rebuttal': 'Thin coordination layer. Connects existing agents across environments with minimal overhead.'}, {'objection': 'Reliability - Unproven for production', 'rebuttal': 'Auto-recovery, checkpointing, idempotent ops. Enterprise-grade v",
+        "updated_at": "2026-03-13T15:01:21.265Z",
+        "by": "host"
+      }
+    },
+    "status": "closed",
+    "stop_reason": "goal_done",
+    "stop_detail": "required fields complete and completion signal present",
+    "created_at": "2026-03-13T14:52:34.232Z",
+    "updated_at": "2026-03-13T15:01:27.532Z",
+    "turn_count": 3,
+    "stall_count": 0,
+    "deadline_at": "2026-03-13T15:22:34.232Z",
+    "participants": [
+      {
+        "name": "guest",
+        "joined": true,
+        "joined_at": "2026-03-13T14:59:57.651Z",
+        "online": false,
+        "last_seen_at": "2026-03-13T15:00:56.531Z",
+        "done": false,
+        "waiting_owner": false,
+        "client_name": null
+      },
+      {
+        "name": "host",
+        "joined": true,
+        "joined_at": "2026-03-13T14:54:27.390Z",
+        "online": false,
+        "last_seen_at": "2026-03-13T15:01:27.532Z",
+        "done": true,
+        "waiting_owner": false,
+        "client_name": "RunnerdOpenClaw"
+      }
+    ],
+    "runner_attempts": [
+      {
+        "attempt_id": "rattempt_9b20b679e69848d6b161087c",
+        "participant": "host",
+        "runner_id": "openclaw:clawroom-relay-1:fb4c051d0b",
+        "execution_mode": "managed_attached",
+        "status": "exited",
+        "claimed_at": "2026-03-13T14:54:28.109Z",
+        "updated_at": "2026-03-13T15:01:26.816Z",
+        "lease_expires_at": "2026-03-13T15:01:54.971Z",
+        "released_at": "2026-03-13T15:01:26.816Z",
+        "restart_count": 0,
+        "log_ref": null,
+        "last_error": null,
+        "last_recovery_reason": "room_closed:goal_done",
+        "phase": "reply_sent",
+        "phase_detail": "relay",
+        "phase_updated_at": "2026-03-13T15:01:22.063Z",
+        "phase_age_ms": 26674,
+        "lease_remaining_ms": 6234,
+        "capabilities": {
+          "strategy": "daemon-safe",
+          "owner_reply_supported": true,
+          "background_safe": true,
+          "persistence_supported": true,
+          "health_surface": true,
+          "managed_certified": true,
+          "recovery_policy": "automatic",
+          "supervision_origin": "runnerd",
+          "replacement_count": 0,
+          "supersedes_run_id": null
+        },
+        "managed_certified": true,
+        "recovery_policy": "automatic",
+        "current": false
+      }
+    ]
+  }
+}
