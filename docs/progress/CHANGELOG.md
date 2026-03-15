@@ -1,0 +1,219 @@
+# Changelog
+
+> **更新规则**：每次有重要变更（bugfix / 新功能 / 协议变更 / 架构决策）加一条。
+> 格式：`YYYY-MM-DD - [类型] 描述`
+> 类型：`fix` / `feat` / `protocol` / `arch` / `infra`
+
+---
+
+## 2026-03
+
+- 2026-03-15 - [infra] Telegram E2E history/logging now distinguishes `telegram_helper_submitted_runnerd_v1` from `telegram_only_cross_owner_v1`; recent history was backfilled so operator analysis no longer mixes helper-submitted certified runs with weaker Telegram-only compatibility/partial-managed runs
+- 2026-03-12 - [infra] Fixed `runnerd` replacement-lineage propagation so spawned bridges receive stable `replacement_count` / `supersedes_run_id` metadata during both initial replacement creation and in-place restart; replacement tests now follow the real supersede chain instead of asserting on already-replaced runs
+- 2026-03-12 - [arch] added [`docs/proposals/technical_route_2026_03_12.md`](/Users/supergeorge/Desktop/project/agent-chat/docs/proposals/technical_route_2026_03_12.md), explicitly freezing the current repo's role as a lead/gateway supervised worker-execution substrate and deferring control-plane / artifact-hub / marketplace layers
+- 2026-03-12 - [docs] refreshed roadmap / architecture / PRD / docs index to align the whole repo around foundation-first execution truth: gateway + runnerd + worker bridges now form the active product scope, while project/artifact/network layers are documented as later upper layers
+- 2026-03-12 - [arch] added engineering baseline assessment at [`docs/proposals/engineering_assessment_2026_03_12.md`](/Users/supergeorge/Desktop/project/agent-chat/docs/proposals/engineering_assessment_2026_03_12.md), classifying the current repo as over-engineered mostly in monolith file structure/future-layer narrative density, under-engineered mainly in `runnerd`/replacement/authoritative ops, and well-engineered in room truth, path grading, and test philosophy
+- 2026-03-12 - [research] evaluated OpenAI Symphony as an upper-layer orchestration influence rather than a replacement for ClawRoom's current Runner Plane / Release Truth foundation work
+- 2026-03-12 - [docs] roadmap now has explicit per-phase DoD and a phase overview so we stop navigating by vibes; current execution is explicitly constrained to Phase 1-3 foundation work until certified path / replacement plane / ops truth are all clearly over the line
+- 2026-03-12 - [infra] `runnerd` now proactively reports after-claim bridge crashes back into room truth via `runner/release`, preserving precise incident codes like `runnerd_lost_after_claim` and `runnerd_restart_exhausted_after_claim` instead of waiting for room-side lease-expiry inference to blur the root cause
+- 2026-03-12 - [observability] room root-cause hints now surface explicit `runnerd_*_after_claim` failures, so operator/debug views keep the distinction between “runnerd already tried to self-heal and still failed” vs generic relay-wait / reply-generation loss
+- 2026-03-12 - [observability] runnerd bridge E2E history now records recovery semantics (`clean`, `success_after_restart`, `success_after_replacement`, `restart_exhausted`) plus structured replacement lineage fields, so certified-path regressions explain whether a pass was straightforward or survived via replacement-plane behavior
+- 2026-03-12 - [protocol] Deterministic `runnerd` failures (`runner_not_claimed_after_wake`, `runnerd_lost_*`, `runnerd_restart_exhausted_*`) now bypass the generic manual repair grace window and immediately issue a manual repair package; production conformance confirms this shortens the path from failure detection to actionable recovery
+- 2026-03-11 - [infra] `runnerd` now performs one controlled automatic bridge restart on unexpected bridge exit; before-claim and after-claim crashes enter `restarting` first, making replacement plane v1 a real behavior path instead of pure diagnosis
+- 2026-03-11 - [infra] `runnerd` now emits explicit `runnerd_restart_exhausted_before_claim|after_claim` incident codes after its single automatic restart budget is consumed, so replacement/repair logic can distinguish “dropped once” from “self-heal already tried and failed”
+- 2026-03-11 - [infra] retrying the same wake package after a terminal run now creates a fresh `run_id` and marks the old run as `replaced`, so replacement-plane history is explicit and debuggable instead of accumulating unrelated abandoned runs
+- 2026-03-11 - [infra] runnerd run payloads now expose structured replacement lineage (`supersedes_run_id` / `superseded_by_run_id`), making it possible for gateway/debug tooling to follow replacement chains without string parsing
+- 2026-03-11 - [infra] `scripts/evaluate_zero_silent_failure.py` is now current-contract-aware by default: it filters to `foundation-certified-v1` records and current path families (`bridge_pair_direct_v1`, `runnerd_gateway_local_v1`, `telegram_gateway_owner_forward_v1`), so the generic foundation evaluator no longer gets dragged red by legacy pre-contract history
+- 2026-03-11 - [protocol] Room snapshots/results now expose `supervision_origins`, and certified product-owned coverage only counts managed attempts supervised by approved origins (`runnerd` or `direct`); shell-supervised attempts remain candidate/fallback even if they ever advertise managed capabilities
+- 2026-03-11 - [infra] `runnerd` now stamps spawned bridges with `CLAWROOM_SUPERVISION_ORIGIN=runnerd`, and OpenClaw/Codex bridges report their supervision origin so ops and root-cause analysis can distinguish daemon-supervised paths from direct or shell-driven ones
+- 2026-03-11 - [protocol] Managed rooms now promote long-stalled owner escalations into first-class truth: `execution_attention.reasons` can include `owner_reply_overdue`, and root-cause hints now prefer `owner_reply_not_returned` over generic `waiting_on_owner_input` once the owner-reply grace window is exceeded
+- 2026-03-11 - [ops] Monitor summary / alerts now surface overdue owner escalations explicitly via `owner_reply_overdue_rooms` and a dedicated `owner_reply_overdue` alert, so waiting on humans becomes a visible incident instead of disappearing into generic runner attention
+- 2026-03-11 - [infra] Added `scripts/evaluate_telegram_certified_path.py`; the Telegram-specific certified path for `@singularitygz_bot <-> @link_clawd_bot` is now green on a 5-run clean owner-escalation-heavy window even though the generic all-history evaluator can still remain red until older product-owned failures age out
+- 2026-03-11 - [fix] Telegram owner-escalation scenario no longer asks the owner on the opening turn: scenario contracts and shared prompting now require at least one real in-room exchange before `ASK_OWNER`, which eliminated the earlier false-start takeover pattern
+- 2026-03-11 - [infra] Telegram E2E tooling now refreshes `runnerd` run state before final artifact synthesis and uses a 30s post-`/new` settle window by default, reducing false "still active" summaries during room closure
+- 2026-03-11 - [infra] Telegram-first certified path V1 now passes real Telegram E2E with the two production bots (`@singularitygz_bot` + `@link_clawd_bot`) when the gateways hand wake packages to local `runnerd` and execution runs on `openclaw-bridge/codex-bridge`
+- 2026-03-11 - [fix] `runnerd` now launches OpenClaw bridge turns on the dedicated `clawroom-relay` OpenClaw agent instead of reusing the owner's `main` agent or inventing unknown agent ids, eliminating the host-side session-lock / unknown-agent failures seen in earlier Telegram certified-path runs
+- 2026-03-11 - [infra] Telegram-first certified path V1 now passes the current-phase DoD on production: `scripts/evaluate_zero_silent_failure.py --format text` reports `product_owned_gate_pass=true`, `certified_runtime_gate_pass=true`, `dod_pass=true` after a clean 20-run certified window on the `runnerd + openclaw-bridge/codex-bridge` path
+- 2026-03-11 - [fix] `run_runnerd_bridge_e2e.py` now retries local `runnerd` run/owner-reply requests and falls back to the last known run payload after room closure, so local daemon query jitter no longer creates fake certified-path failures
+- 2026-03-11 - [fix] Codex bridge now retries one local model invocation when the CLI transiently fails during owner-reply generation, preventing a previously observed `runnerd_lost_after_claim` flake from poisoning the certified DoD window
+- 2026-03-11 - [protocol] Opening-turn and terminal-turn coercion hardened for the certified path: opening messages always invite a reply, and no-reply terminal `ANSWER/NOTE` messages are promoted to `DONE` when required outcomes are already complete
+- 2026-03-11 - [arch] Telegram-first V0 path is now explicitly corrected: gateway-generated wake packages are still the main entry artifact, but the reliable local activation step is `owner forward -> local helper -> runnerd`, not “assume the Telegram/OpenClaw chat runtime can directly POST localhost /wake”
+- 2026-03-11 - [feat] Added `apps/runnerd/src/runnerd/submit_cli.py` and `owner_reply_cli.py` so wake packages and owner replies can be handed to local `runnerd` deterministically outside the chat runtime
+- 2026-03-11 - [feat] Added `apps/runnerd`, a local/cloud managed runner daemon for the Telegram-first certified path with explicit `wake / run status / owner reply / cancel` HTTP endpoints
+- 2026-03-11 - [infra] Added `scripts/run_runnerd_bridge_e2e.py` to exercise the new gateway -> runnerd -> bridge path without depending on Telegram transport itself
+- 2026-03-11 - [arch] README / roadmap / skill docs now consistently describe Telegram/OpenClaw as gateway-first on the preferred path, with `runnerd` as the long-running worker launcher and shell relay as candidate-only fallback
+- 2026-03-10 - [arch] Added `docs/proposals/telegram_gateway_to_runner_flow.md`, detailing the Telegram-first gateway -> external runner path, owner escalation round-trip, wake-up patterns, and per-hop failure/debug checkpoints
+- 2026-03-10 - [infra] Zero-silent-failure current-phase DoD is now green: `scripts/evaluate_zero_silent_failure.py --format text` reports `product_owned_records=20`, `product_owned_gate_pass=true`, `certified_runtime_gate_pass=true`, `dod_pass=true`
+- 2026-03-10 - [infra] First certified product-owned path established on production API: `local openclaw-bridge host + local codex-bridge guest` repeatedly closed rooms as `managed_attached / certified / product_owned=true / automatic_recovery_eligible=true`
+- 2026-03-10 - [arch] DoD path selection is now explicit: Telegram/OpenClaw shell runner remains `candidate managed` for diagnostics and compatibility, but the current release-grade path is the Python bridge pair rather than shell-managed Telegram runtime
+- 2026-03-10 - [infra] Added `scripts/run_certified_bridge_e2e.py` and `docs/progress/CERTIFIED_E2E_LOG.md` so certified live runs can be generated, logged, and counted toward DoD without depending on Telegram candidate history
+- 2026-03-09 - [infra] Room hot-path reduction is now locally verified instead of assumed: synthetic diagnostics on local worker confirmed snapshot cache hits, debounced participant touch persistence, debounced runner reconcile/expiry catch-up, and skipped registry publishes under realistic bridge cadence
+- 2026-03-09 - [fix] Registry `/monitor/summary|overview|rooms` now uses short-lived in-memory derived-view caches with explicit invalidation on material room changes; repeated operator polling no longer forces a full rooms-table aggregation/query pass every time
+- 2026-03-09 - [ops] Monitor summary text/json now expose registry cache counters (`room_list_hits/misses`, `overview_hits/misses`, `derived_invalidations`) so we can prove the global registry cache is actually reducing hot reads
+- 2026-03-09 - [infra] API Worker redeployed after registry cache landing (Version ID: `8b38b9f1-54e9-4aab-9289-aa9dd12f0a97`); production healthz remained healthy, but live create/monitor probes still returned `503 capacity_exhausted`, confirming the current blocker is still daily free-tier DO SQLite rows-read exhaustion rather than a deploy regression
+- 2026-03-09 - [infra] Production now classifies Cloudflare DO SQLite free-tier exhaustion as `503 capacity_exhausted` instead of a generic internal error; room create and monitor probes clearly surface `durable_objects_sqlite_free_tier`
+- 2026-03-09 - [fix] `POST /rooms` no longer builds a full DB-backed snapshot during init; it now returns and publishes a seeded snapshot directly from the create payload to reduce room-birth hot-path reads
+- 2026-03-09 - [infra] Live production probes confirmed that the current blocker is now explicitly infrastructural (`capacity_exhausted` on `POST /rooms` and `/monitor/summary`), which means Cloudflare DO SQLite free tier can no longer be treated as a valid DoD foundation assumption
+- 2026-03-09 - [infra] Room registry summary no longer depends on full event-table aggregations for headline metrics; it now uses meta counters plus a bounded recent-event sample, reducing one of the major DO row-read hot paths
+- 2026-03-09 - [protocol] Manual recovery now auto-prepares a repair package after a short grace window when a participant is missing its live runner; owner-facing recovery actions can move from `pending` to `issued` without waiting for a separate repair POST
+- 2026-03-09 - [fix] Snapshot execution attention is now recomputed after recovery packages are issued, so `repair_package_issued` and its follow-up next action show up immediately instead of lagging behind recovery state
+- 2026-03-09 - [infra] Live API smoke room `room_604ce27641c8` verified the new manual-repair path end-to-end: `replacement_pending -> repair_package_issued` with an issued package and updated takeover guidance on production
+- 2026-03-09 - [protocol] Managed runner attempts now expose `phase_age_ms` and `lease_remaining_ms`; execution attention and root-cause hints can surface `runner_lease_low` and `first_relay_at_risk` before the room fully degrades
+- 2026-03-09 - [ops] Monitor/API summary now aggregates `first_relay_risk_rooms` and `runner_lease_low_rooms`, and room rows show a runner checkpoint summary with current phase, phase age, and lease remaining
+- 2026-03-09 - [infra] Live API smoke room `room_fa28204c0482` verified the new pre-failure runner signals (`runner_lease_low`, `phase_age_ms`, `lease_remaining_ms`) on production
+- 2026-03-09 - [infra] Real Telegram/OpenClaw run `room_8ed2f65ea922` was captured as a non-silent `takeover_required` candidate failure and now seeds the machine-readable DoD history/evaluator pipeline
+- 2026-03-09 - [infra] Worker deployed to Cloudflare (API Worker Version: `1b791fd9-4beb-4c4d-93f5-00d4cba599c4`); Monitor Pages build succeeded locally but automatic Pages deploy was blocked in this non-interactive environment because `CLOUDFLARE_API_TOKEN` is not set
+- 2026-03-09 - [infra] Telegram E2E runner now appends machine-readable history (`TELEGRAM_E2E_HISTORY.jsonl`) with outcome class, silent-failure flag, runner certification, and root-cause metadata; added `scripts/evaluate_zero_silent_failure.py` as a DoD gate reporter
+- 2026-03-09 - [arch] Added a formal current-phase DoD and success criteria: zero-silent-failure for product-owned paths, certified runtime pass bar, recovery-chain requirements, and ops truth requirements
+- 2026-03-09 - [arch] Added `docs/proposals/project_control_plane_thesis.md`, reframing ClawRoom from a bounded room product toward an owner-visible project control plane built from rooms, runner truth, and future interop
+- 2026-03-09 - [arch] Promoted "Project Control Plane" into the main architecture/roadmap, clarifying that room is the atomic collaboration primitive while project becomes the owner-facing orchestration surface
+- 2026-03-09 - [arch] Added ADR `0003-project-control-plane-layering.md` to lock the layering decision: Room Core -> Runner Plane -> Project Control Plane -> Interop Plane
+- 2026-03-09 - [arch] Reaffirmed execution priority: Project Control Plane is the north star, but `Room Core + Runner Plane + Release Truth` remain the active build surface until zero-silent-failure foundations are in place
+- 2026-03-08 - [protocol] Managed runner attempts now expose `phase / phase_detail / phase_updated_at`; bridges and shell fallback report checkpoints such as `event_polling`, `reply_generating`, `reply_ready`, and `reply_sent`
+- 2026-03-08 - [protocol] Root-cause hints can now narrow pre-first-relay loss into more specific phases such as `runner_lost_before_event_poll`, `runner_lost_during_reply_generation`, and `runner_lost_during_reply_send`
+- 2026-03-08 - [protocol] Bridges and shell fallback now classify signal-driven exits (`signal_term`, `signal_hup`, `signal_int`); room root-cause hints can surface `runner_received_termination_signal` instead of collapsing everything into generic `client_exit`
+- 2026-03-08 - [protocol] Root-cause hints now also classify lease-expired failures by runner phase (`lease_expired_before_event_poll`, `lease_expired_during_relay_wait`, `lease_expired_during_reply_generation`, `lease_expired_during_reply_send`, `lease_expired_around_owner_wait`)
+- 2026-03-08 - [infra] Live Telegram/OpenClaw diagnostic `room_1cd2d960d90c` narrowed the current dominant managed-candidate failure from generic pre-first-relay loss to `lease_expired_during_relay_wait`, confirming survivability/lease is the immediate blocker
+- 2026-03-08 - [protocol] Room snapshots and result payloads now expose `root_cause_hints`, a ranked shortlist of likely execution failures (for example `runner_lost_before_first_relay`, `repair_package_sent_unclaimed`, `repair_claim_overdue`)
+- 2026-03-08 - [ops] Registry / monitor now persist and display a primary root cause for each room so priority queues and room rows no longer rely on generic `replacement_pending` alone
+- 2026-03-08 - [ops] Monitor summary now aggregates `root_causes.active_top` and `root_causes.recent_24h_top`, and emits a `dominant_root_cause` alert so operators can see system-wide failure patterns without reading each room one by one
+- 2026-03-08 - [infra] Edge now emits structured JSON incident logs (`clawroom_room_incident`) for runner / repair / takeover paths, carrying execution attention, primary root cause, and room-level evidence in one record
+- 2026-03-08 - [infra] Telegram E2E artifacts/logs now preserve `root_cause_hints` / `primary_root_cause`, so diagnostic manual-close runs still leave a reliable root-cause summary even when last-live polling misses the final active snapshot
+- 2026-03-08 - [infra] Live Telegram diagnostic room `room_54b5dd2c273a` confirmed that the current dominant failure pattern is still `runner_lost_before_first_relay`; after issuing a repair package, the room narrowed further to `repair_package_sent_unclaimed` before manual cleanup
+- 2026-03-07 - [protocol] Recovery backlog now distinguishes `delivery_mode=manual|automatic`; host-auth `GET /rooms/{id}/recovery_actions` exposes private recovery packages while public room snapshots only expose `package_ready`
+- 2026-03-07 - [fix] Replacement attention now follows the missing participant's last certified automatic attempt instead of the room's currently live runner set, so partial managed failures no longer get mislabeled as manual-only recovery
+- 2026-03-07 - [infra] Added conformance coverage for certified auto-issued recovery packages and host-only access to recovery package payloads
+- 2026-03-07 - [feat] Repair plane v0 landed: host can now `POST /rooms/{id}/repair_invites/{participant}` to rotate a participant invite, get a fresh join link + shell repair command, and mark the old attempt as `replaced`
+- 2026-03-07 - [fix] Runner-plane snapshots now keep `repair_hint` alive for the missing side of a partially recovered managed room, and room-level `attempt_status` now reflects the best live attempt instead of being permanently dominated by historical abandoned attempts
+- 2026-03-07 - [protocol] Room stop rules now infer `goal_done` for 1:1 rooms when one side sends a terminal `expect_reply=false` final message and the counterpart immediately sends `DONE`, eliminating a real Telegram half-closed case
+- 2026-03-07 - [infra] Telegram E2E validator now falls back to `curl --retry-all-errors` after repeated `httpx` TLS EOF failures, reducing false negatives from local polling noise
+- 2026-03-07 - [infra] Internal Telegram E2E prompt pack now includes the exact managed shell relay command; real Telegram/OpenClaw runs can now be distinguished as `compatibility` vs `managed_attached/candidate` instead of relying on vague shell-runner hints
+- 2026-03-07 - [arch] Runner Plane semantics tightened: `managed_attached` no longer implies one reliability tier; room/result/ops now distinguish `runner_certification=certified|candidate|none` and `automatic_recovery_eligible`
+- 2026-03-07 - [protocol] OpenClaw/Codex bridges now declare certified managed capabilities (`managed_certified=true`, `recovery_policy=automatic`), while shell bridge is explicitly tracked as candidate managed (`managed_certified=false`, `recovery_policy=takeover_only`)
+- 2026-03-07 - [infra] Added conformance + harness coverage for runner certification / recovery-policy propagation across room snapshots, result payloads, and ops summary
+- 2026-03-07 - [feat] Runner Plane v1 landed in Edge: per-participant attempt records, `runner/claim|renew|release|status` endpoints, room/result execution metadata, and start-SLO timestamps
+- 2026-03-07 - [feat] Active rooms now expose structured `execution_attention` takeover guidance; ops summary tracks unmanaged compatibility rooms and takeover-needed rooms instead of letting compatibility stalls stay implicit
+- 2026-03-07 - [fix] Room DO active alarms now also wake on participant presence expiry, and read-only room/result views publish `presence_reconciled` snapshots so ops sees takeover transitions without waiting for a new user message
+- 2026-03-07 - [protocol] `execution_attention` now explicitly flags half-closed compatibility rooms (`awaiting_mutual_completion` / `terminal_turn_without_room_close`) instead of only noticing the problem after both participants disappear
+- 2026-03-07 - [infra] Re-ran live Telegram/OpenClaw serial E2E on the runner-plane/takeover build: diagnostic captures (`room_5a7293e388d1`, `room_b2037e49176a`) plus clean pass (`room_9598a6313996`, `mutual_done`, `turn_count=5`)
+- 2026-03-07 - [infra] Deployed latest Edge + Monitor to Cloudflare (API Worker Version: `1cae668c-ec54-49c6-a56a-a65c369e1c0f`)
+- 2026-03-07 - [infra] OpenClaw/Codex bridges now participate in `managed_attached` mode with runner ids, lease renewals, owner-wait status updates, and explicit runner release on shutdown
+- 2026-03-07 - [fix] Registry upsert schema now matches the expanded execution metadata row shape; local/ops ingestion no longer fails with `36 values for 38 columns`
+- 2026-03-07 - [infra] Added conformance coverage for runner claim/renew/release + start-SLO, and extended harness/state/ops tests for runner-plane metadata
+- 2026-03-07 - [fix] Natural Telegram prompt pack now preserves each OpenClaw runtime's own owner/style voice; removed explicit "Use everyday language" style steering in favor of task-only defaults
+- 2026-03-07 - [fix] Telegram E2E validator/runner now retries transient `/result` fetch failures (TLS EOF / 429 / 5xx) before failing the run
+- 2026-03-07 - [fix] Shared runner prompt and public `skill.md` now explicitly prefer `DONE` over `ANSWER expect_reply=false` when the final plan is locked and no further reply is needed
+- 2026-03-07 - [fix] Monitor summary now counts `online` / `joined` participants from active rooms only; closed-room history no longer inflates current load
+- 2026-03-07 - [infra] Re-ran real Telegram/OpenClaw serial E2E matrix after minimal-style + harness-hardening changes: clean passes (`room_a12f30a5ab1d`, `room_f11e5bd20972`, `room_5e332d848595`, `room_65738185add0`) plus two diagnostic captures (`room_e73a403d2c83`, `room_9ddd5ac34f4c`)
+- 2026-03-07 - [infra] Deployed updated Monitor Pages (`https://22f6f442.clawroom-monitor.pages.dev`) and API Worker Version `ab4ae6ee-6abe-4b40-88b7-e9d90e9c9c23`
+- 2026-03-06 - [arch] Roadmap re-baselined around Room truth / Runner plane / Release truth instead of feature-only sequencing
+- 2026-03-06 - [arch] Architecture doc now separates Room Core, Runner Plane, and Interop Plane responsibilities
+- 2026-03-06 - [infra] Added `docs/spec/TEST_STRATEGY.md` to define L0-L4 test ladder and release gates
+- 2026-03-06 - [infra] Re-opened structural known issues for join gate, close idempotency, waiting_owner, strict goal_done, ops authority, and default test truth
+- 2026-03-06 - [protocol] Edge room truth hardening landed: joined gate, close idempotency, waiting_owner recovery, strict goal_done, and bounded message payloads
+- 2026-03-06 - [feat] Edge now exposes participant SSE at `/rooms/{id}/stream?invite_token=...` with audience-scoped events and `room_closed` termination
+- 2026-03-06 - [infra] Conformance CT-14..CT-18 now cover joined gate, close idempotency, waiting_owner recovery, strict goal_done, and participant stream delivery
+- 2026-03-06 - [fix] Ops dashboard now fails loud: missing monitor token shows degraded state immediately and metrics reset to `--`
+- 2026-03-06 - [infra] Updated roadmap / known issues to reflect the real implementation state after Room Truth landing
+- 2026-03-06 - [infra] Telegram E2E discovered a real blocked-skill failure mode (`clawroom.cc/skill.md` inaccessible in one local OpenClaw runtime); regression prompt pack now includes API-first fallback instructions
+- 2026-03-06 - [infra] Telegram E2E prompt pack now bakes in default regression-test preferences so host/guest do not need extra owner replies before joining
+- 2026-03-06 - [infra] Re-ran real Telegram/OpenClaw clean run with no manual rescue after prompt delivery: pass (`room_1d0cd4413dde`, `turn_limit`, `turn_count=8`)
+- 2026-03-06 - [infra] Added `progress/TELEGRAM_E2E_LOG.md` so every real Telegram/OpenClaw run records outcome + learnings in one place
+- 2026-03-06 - [infra] Shared runner prompt contract now includes anti-parrot / anti-meta guardrails and durable `last_counterpart_message` memory
+- 2026-03-06 - [infra] Re-ran real Telegram/OpenClaw natural-topic scenario with local host + cloud guest: pass (`room_e4187d6a476d`, `mutual_done`, `turn_count=5`, no platform-meta transcript)
+- 2026-03-06 - [fix] Python bridges now guard initiator kickoff twice: skip if the current batch already contains peer activity, and recheck events again before sending kickoff
+- 2026-03-06 - [infra] Added bridge regression coverage for both same-batch and late-arriving initiator kickoff races
+- 2026-03-06 - [infra] Re-ran hybrid natural-topic scenario with local `openclaw-bridge` host + cloud OpenClaw guest after kickoff-race fix: pass (`room_be3ed3996383`, `mutual_done`, `turn_count=4`)
+- 2026-03-06 - [feat] Codex bridge now supports local subscription-backed `codex exec` fallback when `OPENAI_API_KEY` is absent
+- 2026-03-06 - [fix] Python bridges now recheck relay sends too: if newer peer activity arrives during reply generation, stale replies are dropped in favor of the latest relay
+- 2026-03-06 - [feat] Ops overview now exposes throughput, capacity, stop-reason, and budget-proxy metrics (`rooms_created_last_1h`, `messages_last_5m`, stale active rooms, projected room-event cost)
+- 2026-03-06 - [infra] Added a Telegram Desktop send helper with reliable `/new` double-enter sequencing for OpenClaw bot E2E runs
+- 2026-03-06 - [infra] Re-ran live Codex-host + cloud OpenClaw guest natural-topic E2E after stale-reply fix: pass (`room_17d24aac63bf`, `mutual_done`, `turn_count=5`)
+- 2026-03-06 - [infra] Deployed latest Edge + Monitor to Cloudflare (API Worker Version: `341929c6-11b0-4eda-abf3-f8ca72834abd`)
+- 2026-03-06 - [protocol] Edge semantic invariant: `intent=ASK` is coerced to `expect_reply=true` to prevent silent stalls (and recorded via `meta.server_overrides`)
+- 2026-03-06 - [infra] Conformance CT-11 added: ASK with `expect_reply=false` must still relay (server coercion)
+- 2026-03-06 - [fix] Bridges + shell runner normalize `ASK` to `expect_reply=true` (model output cannot accidentally mark ASK as no-reply)
+- 2026-03-06 - [fix] Durable Object alarm now auto-closes active rooms on deadline (timeout) even if no further messages are posted
+- 2026-03-06 - [fix] Skill guest flow now fetches `join_info` first so the guest can state Topic/Goal and ask a single topic-aware preferences question
+- 2026-03-06 - [feat] Ops dashboard remembers admin token in localStorage and sends it via `x-monitor-token` header (no token in URL required after first use)
+- 2026-03-06 - [feat] Monitor home page copy prompt simplified to the minimal one-liner; rely on `skill.md` for behavior (progressive disclosure)
+- 2026-03-06 - [infra] Added regression test to keep the home prompt minimal (`apps/api/tests/test_monitor_home_prompt.py`)
+- 2026-03-06 - [feat] Added agent-friendly monitor summary API (`GET /monitor/summary`) plus `scripts/query_clawroom_monitor.py` for operator/OpenClaw access
+- 2026-03-06 - [infra] Edge wrangler baseline now enables Cloudflare observability and starter activity-proxy thresholds for rooms/events/active capacity
+- 2026-03-06 - [fix] Registry schema backfill hardened for existing DO storage: add-column path now tolerates duplicate columns, index creation runs after backfill, and empty overview queries no longer 500 on `.one()`
+- 2026-03-06 - [fix] Room fetch paths now close overdue active rooms on read/write access, so missed/legacy alarms cannot leave zombie rooms active forever
+- 2026-03-06 - [infra] Added serial Telegram E2E runner with artifact capture, enforced `/new` + 10s wait, automatic validation, and markdown log append
+- 2026-03-06 - [infra] Re-ran real Telegram/OpenClaw natural-topic E2E via the serial runner: pass (`room_b1abbd74c942`, `mutual_done`, `turn_count=6`)
+- 2026-03-07 - [infra] Shell relay runner now participates in runner-plane truth (`runner_claim` / `runner_renew` / `runner_release`) so managed-attached attempts become visible in room snapshots and ops
+- 2026-03-07 - [infra] Telegram E2E artifacts/logs now capture `execution_mode`, `attempt_status`, and `execution_attention`, not just room close state
+- 2026-03-07 - [infra] Strengthened Telegram/OpenClaw join prompts + `skill.md` contract to explicitly avoid plain compatibility mode when `bash + curl` are available
+- 2026-03-07 - [infra] Real Telegram/OpenClaw E2E clean pass still possible in compatibility mode after stronger prompts (`room_23f6f6b6c7e2`, `mutual_done`, `turn_count=8`), confirming reliability and execution-path are separate gates
+- 2026-03-07 - [infra] Real Telegram/OpenClaw diagnostic run reached `managed_attached` (`room_920d046df33f`) but host runner expired before first relay, revealing a runtime lifecycle gap rather than a room-core gap
+- 2026-03-07 - [protocol] Recovery backlog is now first-class room truth via `recovery_actions` (`pending|issued|resolved|superseded`), and room close supersedes any remaining current recovery actions
+- 2026-03-07 - [ops] Registry / monitor summary now aggregate `recovery_backlog_rooms`, `recovery_pending_actions`, and `recovery_issued_actions`
+- 2026-03-07 - [fix] `managed_runner_uncertified` no longer creates fake repair backlog; only missing / abandoned runner gaps become `repair_hint` + `recovery_actions`
+- 2026-03-07 - [infra] Live Telegram/OpenClaw diagnostic verified the new distinction online (`room_aedf107aa737`): uncertified managed runners stayed visible as attention, and repair backlog only appeared after the runner truly dropped
+- 2026-03-07 - [fix] Owner-side Telegram E2E polling now prefers `X-Host-Token` for `/rooms/{id}/result` and `/rooms/{id}` so recovery-time invite rotation no longer breaks validators
+- 2026-03-07 - [infra] Added validator coverage for the rotated-invite case: host-token owner polling still succeeds even when an old participant invite token would fail
+- 2026-03-07 - [protocol] Managed-room `execution_attention` now distinguishes “repair package already issued” from generic `replacement_pending`, so operators can tell when recovery has started but no replacement has claimed yet
+- 2026-03-08 - [protocol] Runner claims that resolve current recovery actions now emit `recovery_action_resolved` with `previous_status` and `claim_latency_ms`, extending recovery truth from `pending/issued` into `claimed`
+- 2026-03-08 - [protocol] Room / ops truth now distinguishes `repair_claim_overdue` from generic `repair_package_issued`, so “repair sent but still unclaimed” is an explicit incident state
+- 2026-03-08 - [infra] Telegram Desktop E2E defaults now wait 20 seconds after `/new` before sending the real prompt, reflecting observed session-refresh variance in real OpenClaw chats
+- 2026-03-08 - [infra] Telegram E2E artifacts now preserve the last live room snapshot before closure, so diagnostic manual-close runs no longer erase the runner-plane failure context
+- 2026-03-08 - [infra] Live online conformance gate passed for recovery lifecycle contracts (`ct27`, `ct31`, `ct32`) against `https://api.clawroom.cc` after deploy
+- 2026-03-05 - [fix] OpenClaw bridge now auto-recovers once on session-lock errors by rotating runtime session id and retrying
+- 2026-03-05 - [infra] Added bridge regression cases for initiator peer-wait, state-resume dedup, and OpenClaw session-lock recovery
+- 2026-03-05 - [infra] Re-ran online E2E gate after lock-recover + new harness tests: pass (`room_3b81a1610676`, `goal_done`, `turn_count=8`)
+- 2026-03-05 - [infra] Added shell bridge smoke test (`apps/api/tests/test_shell_bridge_smoke.py`) with local fake API + fake `openclaw` runner
+- 2026-03-05 - [infra] Re-ran online E2E gate after shell smoke addition: pass (`room_7c7efe8fd739`, `goal_done`, `turn_count=8`)
+- 2026-03-05 - [infra] Re-ran online E2E gate after SDK Step 1 + bridge harness changes: pass (`room_b58f71105853`, `goal_done`, `turn_count=8`)
+- 2026-03-05 - [infra] P1 Step 1 landed in `clawroom-client-core`: added `RunnerState` persistence and `next_relays()/relay_requires_reply()` loop helpers
+- 2026-03-05 - [infra] OpenClaw/Codex bridges migrated to shared state/loop core (cursor+seen persistence via `--state-path` or default state path)
+- 2026-03-05 - [infra] Added bridge harness tests (`apps/api/tests/test_bridge_harness.py`) for Codex/OpenClaw relay gating and `meta.in_reply_to_event_id`
+- 2026-03-05 - [infra] Deployed latest Edge + Monitor to Cloudflare (API Worker Version: `0e74d616-7926-4de7-ba8e-5536bca1b2e1`)
+- 2026-03-05 - [protocol] Closed KI-008: production now returns `protocol_version=1` / `capabilities`, and duplicate relay reply returns `dedup_hit=true`
+- 2026-03-05 - [infra] Added executable conformance suite `tests/conformance/` and passed CT-01..CT-10 against `https://api.clawroom.cc` (10/10)
+- 2026-03-05 - [feat] P2 bridge ergonomics: added `--cursor` and `--owner-context` to OpenClaw/Codex bridges for handoff + owner-constraint injection
+- 2026-03-05 - [feat] Skill progressive disclosure: added execution strategy selector (Inline/Bridge/Manual), Inline loop guide, and Manual Relay fallback section
+- 2026-03-05 - [infra] Re-ran online E2E gate after P2 changes: pass (`room_ac5959f6575f`, `goal_done`, `turn_count=8`)
+- 2026-03-05 - [arch] P1 Step 0 landed: added internal shared module `packages/client/src/clawroom_client_core` (`parse_join_url` + `http_json`)
+- 2026-03-05 - [infra] OpenClaw/Codex bridges now consume shared client-core HTTP path (Step 0 migration)
+- 2026-03-05 - [infra] Re-ran online E2E gate after Step 0 refactor: pass (`room_5e52a6964396`, `goal_done`, `turn_count=8`)
+- 2026-03-05 - [infra] Ran online pre-P1/P2 E2E gate (`scripts/e2e_onboarding_autocheck.py`) on `https://api.clawroom.cc`: pass (`room_f77b3094a389`, `goal_done`, `turn_count=8`)
+- 2026-03-05 - [fix] Skill invite template aligned to strict contract phrase: `If this is your first clawroom task, read https://clawroom.cc/skill.md first.`
+- 2026-03-05 - [protocol] Edge message hard rules: `NOTE/ASK_OWNER/DONE` are server-overridden to `expect_reply=false`
+- 2026-03-05 - [protocol] Edge stop-rule hardening: `mutual_done` no longer closes when `required_fields` are incomplete
+- 2026-03-05 - [protocol] Edge relay idempotency: added `reply_dedup(participant,in_reply_to_event_id)` and dedup short-circuit
+- 2026-03-05 - [protocol] Room snapshot now exposes `protocol_version` and server `capabilities`
+- 2026-03-05 - [infra] Codex bridge: added heartbeat loop, role auto-detect, initiator kickoff wait, and `--max-seconds=0` default
+- 2026-03-05 - [infra] OpenClaw + Codex bridges now attach `meta.in_reply_to_event_id` on relay replies
+- 2026-03-05 - [fix] Shell bridge: NOTE defaults to `expect_reply=false`, DONE no longer hardcoded, and relay replies include dedup metadata
+- 2026-03-05 - [fix] Skill contract tightened: English-only constraints, API invite form, detached keepalive + `sleep 2 && kill -0` health check
+- 2026-03-05 - [arch] Docs 重构：从 MVP 单层结构升级为 context/spec/ops/progress 四层结构
+- 2026-03-05 - [arch] 确定三种执行策略：Inline Loop / ACP Harness / Bridge Daemon + 选择逻辑
+- 2026-03-05 - [arch] 修正 OpenClaw + Telegram 执行模型：Gateway 是长驻 daemon，非 serverless webhook
+- 2026-03-05 - [arch] 引入 "Zoom for Agents" 长期愿景，对齐 5 个原子需求到 roadmap
+- 2026-03-05 - [arch] Internal SDK (`clawroom-client-core`) 方案确定，4 层设计 + 5 步迁移路线
+- 2026-03-05 - [arch] Server-side semantic guarantees 方案确定（NOTE hard rule / reply_dedup / required_fields gate）
+
+## 2026-02
+
+- 2026-02-28 - [infra] Phase 2 owner channel abstraction：支持 `--owner-channel openclaw`、`--owner-reply-cmd`
+- 2026-02-27 - [infra] Bridge 网络层加固：`trust_env=False` + retry backoff，live E2E 验证通过
+- 2026-02-27 - [infra] Cloudflare domain 修复：`clawroom.cc` / `api.clawroom.cc` 上线
+- 2026-02-27 - [feat] Skill 包发布：`skills/clawroom`（plan-first onboarding + create/join/monitor 流程）
+- 2026-02 - [feat] Monitor UI 上线：`https://clawroom.cc`（SSE stream 实时事件）
+- 2026-02 - [feat] MVP 完成：Edge + DO + OpenClaw Bridge + Codex Bridge smoke
+- 2026-03-09 - [fix] Joined participants now receive stable `participant_token` session identity; repair invite reissue no longer invalidates the auth used by already-joined runners
+- 2026-03-09 - [infra] OpenClaw bridge / Codex bridge / shell bridge now switch from invite token to participant session token after join
+- 2026-03-09 - [fix] Shell bridge is now bash-3.2 safe on macOS (`${sig,,}` removed) and uses bounded curl timeouts/retries
+- 2026-03-09 - [infra] Shell bridge now has an independent heartbeat/watchdog loop so lease renewals continue even if the main loop stalls during poll/reply work
+- 2026-03-09 - [protocol] Root-cause hints now distinguish `managed_runner_never_attached_before_first_relay` / `single_sided_missing_managed_runner_after_first_relay` from true runner-loss cases
+- 2026-03-09 - [infra] Real Telegram/OpenClaw diagnostics proved the root cause has shifted: host managed candidate can now survive longer, while cloud guest often joins without ever attaching a managed runner (`room_eddd29420379`)
+- 2026-03-09 - [infra] Telegram E2E harness now persists both `last_live_*` room fields and `last_result`, so timeout/manual-close diagnostic runs keep their best live evidence instead of collapsing to empty artifacts
+- 2026-03-09 - [fix] Shell bridge now logs `reply_generation` rc/stderr, retries once on OpenClaw session-lock failures, and activates its final signal/cleanup traps before runner claim
+- 2026-03-09 - [research] Local Telegram/OpenClaw diagnostics proved detached children and detached nested `openclaw agent` calls can both survive in the bot runtime, shifting the dominant hypothesis away from “all background children are killed” and toward real room join/attach timing pressure
+- 2026-03-09 - [infra] Real Telegram/OpenClaw E2E `room_41b5642ad182` preserved a richer last-live snapshot and showed a sharper failure mode: local host candidate attached first, then died in `waiting_for_peer_join` before the cloud guest attached in time
+- 2026-03-11 - [infra] Added a dedicated Telegram certified-path evaluator at `scripts/evaluate_telegram_certified_path.py` so the next-stage DoD now measures the real target directly: the `@singularitygz_bot <-> @link_clawd_bot` certified managed path, with a 5-run clean window and explicit owner-escalation coverage, instead of being dragged by older cross-path history noise
+- 2026-03-14 - [infra] Telegram E2E required-fields gate now treats structured-output rooms as outcome-first: if `required_filled == required_total`, the run can pass without a 4-turn minimum; the old `min_turns` gate remains for conversation-first rooms
+- 2026-03-14 - [infra] Re-ran real cross-owner Telegram product-task scenario with `@singularitygz_bot` + `@link_clawd_bot`: pass (`room_ba992e2a1118`, `goal_done`, `required_filled=3/3`, `turn_count=3`) under the updated required-fields gate
