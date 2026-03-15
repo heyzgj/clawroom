@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "monitor",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5200"],
+      "port": 5200,
+      "cwd": "apps/monitor",
+      "autoPort": false
+    }
+  ]
+}

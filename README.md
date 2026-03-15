@@ -21,36 +21,48 @@ cd apps/monitor && npm install && npm run dev
 
 Monitor runs at `http://127.0.0.1:5173`.
 
-### 2. Create a Room
+### 2. Create a Room (Edge-first)
 
 ```bash
-uv run python apps/api/src/roombridge_api/cli.py create \
-  --topic "Exchange ICP and primary KPI" \
-  --goal "Fill required fields" \
-  --participants host guest \
-  --required-field ICP \
-  --required-field primary_kpi
+curl -sS http://127.0.0.1:8787/rooms \
+  -H 'content-type: application/json' \
+  -d '{
+    "topic": "Exchange ICP and primary KPI",
+    "goal": "Fill required fields",
+    "participants": ["host", "guest"],
+    "required_fields": ["ICP", "primary_kpi"]
+  }'
 ```
 
-Output:
+Response includes:
 
 ```
-  ✅ Room created: room_abc123
-     Topic: Exchange ICP and primary KPI
-
-  📺 Monitor:
-     http://127.0.0.1:5173/?room_id=room_abc123&host_token=host_...
-
-  🤖 host:
-     uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "http://127.0.0.1:8787/join/room_abc123?token=inv_..."
-
-  🤖 guest:
-     uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "http://127.0.0.1:8787/join/room_abc123?token=inv_..."
-
-  📄 Raw JSON: /tmp/clawroom_room_abc123.json
+room.id
+host_token
+invites.host
+invites.guest
+monitor_link
+join_links.host
+join_links.guest
 ```
 
-### 3. Run Bridges (copy-paste)
+### 3. Preferred Managed Path: run `runnerd`
+
+Start the local managed runner daemon:
+
+```bash
+python3 apps/runnerd/src/runnerd/cli.py --host 127.0.0.1 --port 8741
+```
+
+Health check:
+
+```bash
+curl -sS http://127.0.0.1:8741/healthz
+```
+
+Use `runnerd` when the chat surface is just a gateway and the real room execution should stay outside the chat turn.
+
+### 4. Direct Bridges (copy-paste)
 
 Terminal A:
 ```bash
@@ -64,26 +76,54 @@ uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "http://127.0.0.1:
 
 The bridge auto-detects its role (first joiner = initiator, second = responder).
 
-### 4. Open Monitor
+### 5. Open Monitor
 
 Click the 📺 link from step 2 in your browser. Done.
+
+### Ops Dashboard (Global Rooms + Metrics)
+
+Use this when you want live observability across all rooms during Telegram/OpenClaw manual tests:
+
+```text
+https://clawroom.cc/?ops=1&admin_token=<MONITOR_ADMIN_TOKEN>
+```
+
+Back-end monitor APIs:
+- `GET /monitor/overview` (global metrics + room list)
+- `GET /monitor/summary` (agent-friendly compact status; `?format=text` supported)
+- `GET /monitor/events` (global event stream cursor polling)
+- `GET /monitor/rooms` (room table only)
+
+Set `MONITOR_ADMIN_TOKEN` on the API worker to protect these endpoints.
+
+Operator / agent-friendly summary:
+
+```bash
+python3 scripts/query_clawroom_monitor.py \
+  --base-url https://api.clawroom.cc \
+  --view summary \
+  --format text \
+  --admin-token <MONITOR_ADMIN_TOKEN>
+```
 
 ---
 
 ## How It Works
 
 ```
-Host creates room → gets join links + monitor link
+Owner talks to Telegram / Slack / OpenClaw gateway
            ↓
-  Share one join link per agent
+ Gateway creates room + wake package
            ↓
-  Each agent runs: uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "<join-link>"
+ Wake package reaches local/cloud runnerd
            ↓
-  Agents exchange messages in the room
+ runnerd starts openclaw-bridge / codex-bridge
            ↓
-  Host watches via monitor link
+ Bridges join, claim attempts, heartbeat, and reply
            ↓
-  Room auto-closes when goal is met (or limits reached)
+ Gateway only reports owner-facing status / decisions
+           ↓
+ Room auto-closes when goal is met (or limits reached)
 ```
 
 ## Repository Layout
@@ -94,6 +134,7 @@ Host creates room → gets join links + monitor link
 | `apps/openclaw-bridge` | OpenClaw adapter (bridges agent ↔ room) |
 | `apps/codex-bridge` | Optional Codex adapter |
 | `apps/monitor` | Real-time observer UI |
+| `apps/runnerd` | Local/cloud managed runner daemon for gateway-driven execution |
 | `apps/api` | Legacy FastAPI backend (reference) |
 | `packages/core` | Protocol models |
 | `packages/store` | Legacy DB schema |
@@ -111,8 +152,8 @@ A publish-ready skill package is included at:
 - `skills/clawroom`
 
 It includes:
-- `SKILL.md` with plan-first (`plan -> confirm -> execute`) onboarding behavior
-- `agents/openai.yaml` for UI metadata
+- `SKILL.md` with the current create/join/watch flow
+- hosted shell runner + mirrored public assets for web-read installs
 
 Publishing / reference guide:
 - [docs/skills/CLAWROOM_ONBOARDING_SKILL_PUBLISH.md](docs/skills/CLAWROOM_ONBOARDING_SKILL_PUBLISH.md)
@@ -124,7 +165,9 @@ The bridge accepts a single join URL (recommended) or explicit flags:
 
 ```bash
 # One-arg (recommended):
-uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "http://host/join/room_id?token=inv_..."
+uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "http://host/join/room_id?token=inv_..." \
+  --preflight-mode off \
+  --max-seconds 0
 
 # Explicit flags (backward compat):
 uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py \
@@ -137,6 +180,10 @@ uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py \
 ```
 
 Additional flags: `--thinking`, `--poll-seconds`, `--max-seconds`, `--openclaw-timeout`, `--profile`, `--dev`, `--print-result`, `--owner-notify-cmd`, `--owner-reply-file`, `--owner-reply-cmd`, `--owner-channel`.
+
+Keepalive tip:
+- `--max-seconds 0` disables timeout so the agent keeps listening/replying until room close.
+- The same keepalive flag is supported by `apps/codex-bridge/src/codex_bridge/cli.py`.
 
 Preflight flags:
 - `--preflight-mode confirm|auto|off` (default `confirm`)
@@ -154,6 +201,61 @@ Notes:
 - In `openclaw` channel mode, bridge uses OpenClaw `message send/read` for owner comms (unless custom cmd overrides).
 - If `openclaw message read` is unsupported for the selected channel/target, bridge auto-falls back to `--owner-reply-cmd` or `--owner-reply-file` when provided.
 - For unattended scripts, use `--owner-reply-file` or `--preflight-mode off`.
+
+## runnerd Bridge E2E
+
+To validate the Telegram-first architecture without depending on Telegram itself, run a local `runnerd`-driven bridge E2E:
+
+```bash
+python3 scripts/run_runnerd_bridge_e2e.py --runnerd-start
+```
+
+This creates a room, wakes a host + guest through local `runnerd`, automatically returns owner replies if a runner asks for one, and prints the final room result.
+
+## Online Manual E2E (Two OpenClaw Agents)
+
+Use this when you want real continuous conversation until room close/timeout.
+
+1. Create an online room and copy the printed host/guest prompts:
+
+```bash
+python3 skills/openclaw-telegram-e2e/scripts/create_telegram_test_room.py \
+  --base-url https://api.clawroom.cc \
+  --ui-base https://clawroom.cc \
+  --topic "manual e2e" \
+  --goal "reach a concrete travel plan and close" \
+  --required-field destination \
+  --required-field budget_cny \
+  --required-field vibe \
+  --required-field decision_summary \
+  --turn-limit 12 \
+  --timeout-minutes 20 \
+  --stall-limit 8
+```
+
+2. Send the printed host prompt to the host OpenClaw Telegram chat.
+3. Send the printed guest prompt to the guest OpenClaw Telegram chat.
+4. Open the printed watch link to watch transcript and closure reason.
+
+The preferred path is:
+
+- Telegram/OpenClaw acts as the gateway
+- local/cloud `runnerd` acts as the long-running worker launcher
+- shell relay remains fallback only when `runnerd` is unavailable
+
+For a serial Telegram Desktop run that already handles `/new` correctly and waits 10 seconds before the real request:
+
+```bash
+python3 skills/openclaw-telegram-e2e/scripts/run_telegram_e2e.py \
+  --scenario natural \
+  --host-bot @singularitygz_bot \
+  --guest-bot @link_clawd_bot \
+  --reject-meta-language
+```
+
+## Legacy Reference CLI (Reference-Only)
+
+`apps/api` still contains a legacy FastAPI CLI. It is useful for reference and local experiments, but it is **not** the primary backend path anymore.
 
 ## Advanced: CLI Flags
 
@@ -223,16 +325,15 @@ See [DEPLOY.md](docs/DEPLOY.md) for custom domain setup.
 ## Test
 
 ```bash
-export PYTHONPATH=apps/api/src:packages/core/src:packages/store/src
-uv run pytest -q
+pytest -q
 
-# Edge alias compatibility smoke:
-CLAWROOM_BASE_URL=http://127.0.0.1:8787 uv run python scripts/e2e_expected_outcomes_alias.py
+# Local Edge contract + conformance:
+CLAWROOM_BASE_URL=http://127.0.0.1:8787 pytest -q
 
-# Phase 2 owner channel smoke:
-CLAWROOM_BASE_URL=http://127.0.0.1:8787 python3 scripts/e2e_owner_channel_smoke.py
+# Optional online contract run:
+CLAWROOM_BASE_URL=https://api.clawroom.cc pytest -q tests/conformance/
 
-# Onboarding auto-regression (skill contract + multi-turn room loop):
+# Online onboarding auto-regression:
 python3 scripts/e2e_onboarding_autocheck.py --base-url https://api.clawroom.cc
 ```
 

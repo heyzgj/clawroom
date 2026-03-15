@@ -1,4 +1,0 @@
-interface:
-  display_name: "ClawRoom Onboarding"
-  short_description: "Plan-first create/join flow for ClawRoom"
-  default_prompt: "Create or join a clawroom with concise human-first UX, no raw JSON plans, API-first invites, host wait-before-kickoff behavior, and continuous relay-reply loop after join."

@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/docs -name \"*.md\" -type f -exec wc -l {} +)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps/runnerd/src -name \"*.py\" -type f -exec wc -l {} +)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps/openclaw-bridge/src -name \"*.py\" -type f -exec wc -l {} +)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps/codex-bridge/src -name \"*.py\" -type f -exec wc -l {} +)",
+      "Bash(wc -l /Users/supergeorge/Desktop/project/agent-chat/apps/runnerd/src/runnerd/*.py)",
+      "Bash(wc -l /Users/supergeorge/Desktop/project/agent-chat/packages/client/src/clawroom_client_core/*.py)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps -name \"*.py\" -path \"*/src/*\" -exec wc -l {} +)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps -name \"*.ts\" -path \"*/src/*\" -exec wc -l {} +)",
+      "Bash(wc -l /Users/supergeorge/Desktop/project/agent-chat/apps/api/tests/*.py)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps/api -name \"*.py\" -path \"*/src/*\" -exec wc -l {} +)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps/runnerd -name \"*.py\" -path \"*/src/*\" -exec wc -l {} +)",
+      "Bash(wc -l /Users/supergeorge/Desktop/project/agent-chat/tests/conformance/*.py)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/apps/edge/src -name \"*.ts\" -exec wc -l {} ;)",
+      "Bash(wc -l /Users/supergeorge/Desktop/project/agent-chat/apps/api/src/roombridge_api/*.py /Users/supergeorge/Desktop/project/agent-chat/apps/api/src/clawroom_api/*.py)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/docs/context -name \"*.md\" -exec wc -l {} +)",
+      "Bash(__NEW_LINE_70d3d8b88b7ceebd__ echo \"Spec docs:\")",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/docs/spec -name \"*.md\" -exec wc -l {} +)",
+      "Bash(__NEW_LINE_2672c2a3b71085ff__ echo \"Progress logs:\")",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/docs/progress -name \"*.md\" -exec wc -l {} +)",
+      "Bash(__NEW_LINE_7b2a32fe273a6ea8__ echo \"Proposals:\")",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/docs/proposals -name \"*.md\" -exec wc -l {} +)",
+      "Bash(__NEW_LINE_0a2a5df4295a3a8a__ echo \"Decisions:\")",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/docs/decisions -name \"*.md\" -exec wc -l {} +)",
+      "Bash(__NEW_LINE_6a81961e82ef7766__ echo \"Ops:\")",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat/docs/ops -name \"*.md\" -exec wc -l {} +)",
+      "Bash(find /Users/supergeorge/Desktop/project/agent-chat -type f \\\\\\( -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.js\" -o -name \"*.py\" \\\\\\) ! -path \"*/node_modules/*\" ! -path \"*/__pycache__/*\" ! -path \"*/.*\" -exec wc -l {} +)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:www.eweek.com)",
+      "WebFetch(domain:a2a-protocol.org)",
+      "Bash(curl -s http://127.0.0.1:8741/healthz)",
+      "Bash(grep -r \"missions\\\\|teams\\\\|registry\" /Users/supergeorge/Desktop/project/agent-chat/docs/progress/*.md)"
+    ]
+  }
+}
