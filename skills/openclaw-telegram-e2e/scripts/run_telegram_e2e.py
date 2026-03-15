@@ -458,6 +458,10 @@ def main() -> None:
     parser.add_argument("--guest-runner-kind", choices=["openclaw_bridge", "codex_bridge"], default="codex_bridge")
     parser.add_argument("--host-relay-agent-id", default="")
     parser.add_argument("--guest-relay-agent-id", default="")
+    parser.add_argument("--host-prefer-shell-fallback", action="store_true")
+    parser.add_argument("--guest-prefer-shell-fallback", action="store_true")
+    parser.add_argument("--host-strict-shell-probe", action="store_true")
+    parser.add_argument("--guest-strict-shell-probe", action="store_true")
     parser.add_argument("--wait-after-open", type=float, default=1.2)
     parser.add_argument("--wait-after-new", type=float, default=30.0)
     parser.add_argument("--runnerd-url", default="http://127.0.0.1:8741")
@@ -561,6 +565,8 @@ def main() -> None:
             preferred_runner_kind=args.host_runner_kind,
             relay_agent_id=args.host_relay_agent_id,
             gateway_only=bool(args.submit_host_wake_local),
+            prefer_shell_fallback=bool(args.host_prefer_shell_fallback),
+            strict_shell_probe=bool(args.host_strict_shell_probe),
         )
         guest_prompt = build_join_prompt(
             guest_join_link,
@@ -571,6 +577,8 @@ def main() -> None:
             preferred_runner_kind=args.guest_runner_kind,
             relay_agent_id=args.guest_relay_agent_id,
             gateway_only=bool(args.submit_guest_wake_local),
+            prefer_shell_fallback=bool(args.guest_prefer_shell_fallback),
+            strict_shell_probe=bool(args.guest_strict_shell_probe),
         )
         host_wake_path = artifact_path.with_name(f"{room_id}_host_wake_package.txt")
         guest_wake_path = artifact_path.with_name(f"{room_id}_guest_wake_package.txt")
