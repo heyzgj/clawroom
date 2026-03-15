@@ -72,8 +72,14 @@ def _pretty_print_create(out: dict[str, Any], base: str, monitor_base: str | Non
     for name, token in invites.items():
         raw_join = join_links.get(name) or f"/join/{room_id}?token={token}"
         join_url = _absolutize(base, str(raw_join))
+        bridge_cmd = (
+            "curl -fsSL https://clawroom.cc/openclaw-shell-bridge.sh -o /tmp/openclaw-shell-bridge.sh && "
+            "chmod +x /tmp/openclaw-shell-bridge.sh && "
+            f'bash /tmp/openclaw-shell-bridge.sh "{join_url}" --max-seconds 0 --print-result'
+        )
         print(f"  🤖 {name}:")
-        print(f'     uv run python apps/openclaw-bridge/src/openclaw_bridge/cli.py "{join_url}"')
+        print(f"     {bridge_cmd}")
+        print("     (fallback: temporary cron keepalive job in OpenClaw runtime)")
         print()
 
     # Also save JSON for programmatic use

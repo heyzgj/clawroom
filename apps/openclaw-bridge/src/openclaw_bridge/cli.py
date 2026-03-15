@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -10,39 +12,25 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse, parse_qs
 
-import httpx
+ROOT = Path(__file__).resolve().parents[4]
+CLIENT_SRC = ROOT / "packages" / "client" / "src"
+if str(CLIENT_SRC) not in sys.path:
+    sys.path.insert(0, str(CLIENT_SRC))
 
-
-def parse_join_url(url: str) -> dict[str, str]:
-    """Parse a join URL into {base_url, room_id, token}.
-    
-    Supported formats:
-      http://host:port/join/room_abc?token=inv_...
-      http://host:port/rooms/room_abc/join_info?token=inv_...
-    """
-    parsed = urlparse(url)
-    base = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme else url.split('/join/')[0]
-    
-    path_parts = [p for p in parsed.path.split('/') if p]
-    room_id = ''
-    if 'join' in path_parts:
-        idx = path_parts.index('join')
-        if idx + 1 < len(path_parts):
-            room_id = path_parts[idx + 1]
-    elif 'rooms' in path_parts:
-        idx = path_parts.index('rooms')
-        if idx + 1 < len(path_parts):
-            room_id = path_parts[idx + 1]
-    
-    params = parse_qs(parsed.query)
-    token = params.get('token', [''])[0]
-    
-    if not room_id or not token:
-        raise ValueError(f"Cannot parse join URL: {url}  (need /join/<room_id>?token=<token>)")
-    
-    return {'base_url': base, 'room_id': room_id, 'token': token}
+from clawroom_client_core import (
+    RunnerCapabilities,
+    build_owner_reply_prompt,
+    build_room_reply_prompt,
+    build_runner_state,
+    http_json,
+    next_relays,
+    parse_join_url,
+    relay_requires_reply,
+    runner_claim,
+    runner_release,
+    runner_renew,
+)
 
 
 def log(*parts: object) -> None:
@@ -53,6 +41,17 @@ def short(s: str, n: int = 220) -> str:
     if len(s) <= n:
         return s
     return s[: n - 1] + "..."
+
+
+def is_session_lock_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    markers = (
+        "session file locked",
+        "session lock timeout",
+        "lock timeout",
+        "locked (timeout",
+    )
+    return any(marker in text for marker in markers)
 
 
 def openclaw_cmd_prefix(*, profile: str | None, dev: bool) -> list[str]:
@@ -99,37 +98,6 @@ def extract_first_json_object(text: str) -> dict[str, Any]:
     raise ValueError("no JSON object found")
 
 
-def http_json(
-    method: str,
-    url: str,
-    token: str | None = None,
-    payload: dict[str, Any] | None = None,
-    timeout: float = 20.0,
-    retries: int = 4,
-) -> dict[str, Any]:
-    headers = {}
-    if token:
-        headers["X-Invite-Token"] = token
-    retryable = (httpx.TransportError, httpx.TimeoutException)
-    for attempt in range(retries):
-        try:
-            with httpx.Client(timeout=timeout, trust_env=False) as client:
-                resp = client.request(method, url, headers=headers, json=payload)
-        except retryable:
-            if attempt >= retries - 1:
-                raise
-            time.sleep(min(2.0, 0.25 * (2**attempt)))
-            continue
-
-        if resp.status_code >= 500 and attempt < retries - 1:
-            time.sleep(min(2.0, 0.25 * (2**attempt)))
-            continue
-        if resp.status_code >= 400:
-            raise RuntimeError(f"http {method} {url} failed status={resp.status_code} body={short(resp.text, 500)}")
-        return resp.json()
-    raise RuntimeError(f"http {method} {url} failed after {retries} retries")
-
-
 @dataclass(slots=True)
 class OpenClawRunner:
     agent_id: str
@@ -142,8 +110,15 @@ class OpenClawRunner:
         seed = f"clawroom-v2:{room_id}:{self.agent_id}:{participant_name}"
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, seed))
 
-    def ask_json(self, room_id: str, participant_name: str, prompt: str) -> dict[str, Any]:
-        session_id = self.session_id_for(room_id, participant_name)
+    def ask_json(
+        self,
+        room_id: str,
+        participant_name: str,
+        prompt: str,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        effective_session_id = session_id or self.session_id_for(room_id, participant_name)
         cmd = ["openclaw"]
         if self.dev:
             cmd.append("--dev")
@@ -157,7 +132,7 @@ class OpenClawRunner:
                 "--agent",
                 self.agent_id,
                 "--session-id",
-                session_id,
+                effective_session_id,
                 "--message",
                 prompt,
                 "--timeout",
@@ -166,16 +141,30 @@ class OpenClawRunner:
                 self.thinking,
             ]
         )
-        log("calling openclaw", f"agent={self.agent_id}", f"session={session_id}")
+        log("calling openclaw", f"agent={self.agent_id}", f"session={effective_session_id}")
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             stderr = short(proc.stderr.strip() or "(no stderr)", 1200)
             stdout = short(proc.stdout.strip() or "(no stdout)", 1200)
             raise RuntimeError(f"openclaw failed rc={proc.returncode} stdout={stdout} stderr={stderr}")
+        # OpenClaw may emit diagnostic lines before JSON (e.g. auth-profile inheritance).
+        # Strip leading non-JSON lines to find the actual payload.
+        stdout = proc.stdout
         try:
-            parsed = json.loads(proc.stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"openclaw returned non-json stdout: {short(proc.stdout, 800)}") from exc
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError:
+            # Try stripping leading diagnostic lines
+            for i, line in enumerate(stdout.splitlines()):
+                stripped = line.lstrip()
+                if stripped.startswith("{") or stripped.startswith("["):
+                    rest = "\n".join(stdout.splitlines()[i:])
+                    try:
+                        parsed = json.loads(rest)
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            else:
+                raise RuntimeError(f"openclaw returned non-json stdout: {short(stdout, 800)}")
 
         payloads = parsed.get("payloads") or []
         texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
@@ -184,120 +173,6 @@ class OpenClawRunner:
             raise RuntimeError("openclaw returned no text payload")
         log("openclaw text", short(text, 300))
         return extract_first_json_object(text)
-
-
-def room_prompt(
-    *,
-    role: str,
-    room: dict[str, Any],
-    self_name: str,
-    latest_event: dict[str, Any] | None,
-    has_started: bool,
-) -> str:
-    required_fields = room.get("required_fields") or []
-    fields = room.get("fields") or {}
-    field_values = {k: v.get("value") if isinstance(v, dict) else v for k, v in fields.items()}
-    latest_msg = None
-    if latest_event and latest_event.get("type") == "relay":
-        latest_msg = (latest_event.get("payload") or {}).get("message") or {}
-
-    role_hint = {
-        "initiator": (
-            "You are the initiating product-side agent. Ask concise questions to collect missing required fields. "
-            "If enough information is available, send DONE."
-        ),
-        "responder": (
-            "You are the responding partner-side agent. Answer directly and fill required fields when known."
-        ),
-    }.get(role, "You are a participant in this room. Respond helpfully and briefly.")
-
-    starter = ""
-    if role == "initiator" and not has_started:
-        starter = (
-            "This is room start. Initiate with ASK and request missing required fields."
-        )
-
-    incoming = "No incoming relay message yet."
-    if latest_msg:
-        incoming = (
-            "Incoming relay message:\n"
-            f"- from: {latest_msg.get('sender') or (latest_event.get('payload') or {}).get('from')}\n"
-            f"- intent: {latest_msg.get('intent')}\n"
-            f"- text: {latest_msg.get('text')}\n"
-            f"- fills: {json.dumps(latest_msg.get('fills') or {}, ensure_ascii=False)}"
-        )
-
-    return (
-        "You are acting as an OpenClaw participant in a machine-to-machine room.\n"
-        "Return ONLY a single JSON object and nothing else.\n\n"
-        f"Participant: {self_name}\n"
-        f"Role: {role}\n"
-        f"Role guidance: {role_hint}\n\n"
-        f"Room topic: {room.get('topic')}\n"
-        f"Room goal: {room.get('goal')}\n"
-        f"Required fields: {json.dumps(required_fields, ensure_ascii=False)}\n"
-        f"Known fields: {json.dumps(field_values, ensure_ascii=False)}\n"
-        f"Room status: {room.get('status')} stop_reason={room.get('stop_reason')}\n\n"
-        f"{incoming}\n\n"
-        f"{starter}\n\n"
-        "Output schema (all keys required):\n"
-        "{"
-        '"intent":"ASK|ANSWER|NOTE|DONE|ASK_OWNER|OWNER_REPLY",'
-        '"text":"short message",'
-        '"fills":{"optional_field":"value"},'
-        '"facts":["optional fact"],'
-        '"questions":["optional question"],'
-        '"expect_reply":true,'
-        '"meta":{}'
-        "}\n\n"
-        "Rules:\n"
-        "- Keep text under 200 words.\n"
-        "- Use fills for required fields you know.\n"
-        "- If blocked on owner-only info, use ASK_OWNER and expect_reply=false.\n"
-        "- If no further reply needed, use DONE and expect_reply=false.\n"
-    )
-
-
-def owner_reply_prompt(*, room: dict[str, Any], self_name: str, role: str, owner_req_id: str, owner_text: str) -> str:
-    required_fields = room.get("required_fields") or []
-    fields = room.get("fields") or {}
-    field_values = {k: v.get("value") if isinstance(v, dict) else v for k, v in fields.items()}
-
-    role_hint = {
-        "initiator": "You are the product-side agent. Convert owner input into structured fills if possible.",
-        "responder": "You are the partner-side agent. Convert owner input into structured fills if possible.",
-    }.get(role, "You are a participant. Convert owner input into structured fills if possible.")
-
-    return (
-        "You are acting as an OpenClaw participant in a machine-to-machine room.\n"
-        "Return ONLY a single JSON object and nothing else.\n\n"
-        f"Participant: {self_name}\n"
-        f"Role: {role}\n"
-        f"Role guidance: {role_hint}\n\n"
-        f"Room topic: {room.get('topic')}\n"
-        f"Room goal: {room.get('goal')}\n"
-        f"Required fields: {json.dumps(required_fields, ensure_ascii=False)}\n"
-        f"Known fields: {json.dumps(field_values, ensure_ascii=False)}\n"
-        f"Room status: {room.get('status')} stop_reason={room.get('stop_reason')}\n\n"
-        "Owner replied out-of-band. Convert it into a clean OWNER_REPLY message.\n"
-        f"- owner_req_id: {owner_req_id}\n"
-        f"- owner_text: {owner_text}\n\n"
-        "Output schema (all keys required):\n"
-        "{"
-        '"intent":"OWNER_REPLY",'
-        '"text":"short message",'
-        '"fills":{"optional_field":"value"},'
-        '"facts":["optional fact"],'
-        '"questions":["optional question"],'
-        '"expect_reply":true,'
-        '"meta":{}'
-        "}\n\n"
-        "Rules:\n"
-        "- Keep text under 120 words.\n"
-        "- Use fills for required fields when possible.\n"
-        "- Always set intent=OWNER_REPLY.\n"
-        "- Set meta.owner_req_id to the provided value.\n"
-    )
 
 
 def normalize_model_message(raw: dict[str, Any], *, fallback_intent: str = "ANSWER") -> dict[str, Any]:
@@ -324,8 +199,16 @@ def normalize_model_message(raw: dict[str, Any], *, fallback_intent: str = "ANSW
     questions = [str(x).strip() for x in raw.get("questions", [])] if isinstance(raw.get("questions"), list) else []
     questions = [x for x in questions if x]
 
-    expect_reply = bool(raw.get("expect_reply", True))
-    if intent in {"DONE", "ASK_OWNER"} and "expect_reply" not in raw:
+    # Enforce semantic invariants so a model cannot accidentally stall the room.
+    if intent == "ASK":
+        expect_reply = True
+    elif intent in {"NOTE", "DONE", "ASK_OWNER"}:
+        expect_reply = False
+    elif isinstance(raw.get("expect_reply"), bool):
+        expect_reply = bool(raw["expect_reply"])
+    elif intent in {"ANSWER", "OWNER_REPLY"}:
+        expect_reply = True
+    else:
         expect_reply = False
 
     meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
@@ -341,16 +224,62 @@ def normalize_model_message(raw: dict[str, Any], *, fallback_intent: str = "ANSW
     }
 
 
-def find_new_relay_events(events: list[dict[str, Any]], seen: set[int]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for evt in events:
-        eid = int(evt.get("id", 0))
-        if eid in seen:
-            continue
-        seen.add(eid)
-        if evt.get("type") == "relay":
-            out.append(evt)
-    return out
+def coerce_opening_message(message: dict[str, Any]) -> dict[str, Any]:
+    coerced = dict(message)
+    changed: list[str] = []
+    if str(coerced.get("intent") or "") in {"DONE", "NOTE", "OWNER_REPLY"}:
+        coerced["intent"] = "ANSWER"
+        changed.append("intent->ANSWER")
+    if not bool(coerced.get("expect_reply")):
+        coerced["expect_reply"] = True
+        changed.append("expect_reply->true")
+    if changed:
+        meta = dict(coerced.get("meta") or {})
+        meta["opening_coercion"] = changed
+        coerced["meta"] = meta
+    return coerced
+
+
+def _room_outcomes_complete(room_snapshot: dict[str, Any], message: dict[str, Any]) -> bool:
+    expected = room_snapshot.get("expected_outcomes") or room_snapshot.get("required_fields") or []
+    if not isinstance(expected, list) or not expected:
+        return False
+    known_fields: dict[str, str] = {}
+    room_fields = room_snapshot.get("fields") if isinstance(room_snapshot.get("fields"), dict) else {}
+    for key, raw in room_fields.items():
+        if isinstance(raw, dict):
+            value = str(raw.get("value") or "").strip()
+        else:
+            value = str(raw or "").strip()
+        if value:
+            known_fields[str(key)] = value
+    for key, value in (message.get("fills") or {}).items():
+        text = str(value or "").strip()
+        if text:
+            known_fields[str(key)] = text
+    return all(str(name) in known_fields and known_fields[str(name)].strip() for name in expected)
+
+
+def coerce_terminal_message(message: dict[str, Any], room_snapshot: dict[str, Any]) -> dict[str, Any]:
+    coerced = dict(message)
+    intent = str(coerced.get("intent") or "")
+    if intent not in {"ANSWER", "NOTE"}:
+        return coerced
+    if bool(coerced.get("expect_reply")):
+        return coerced
+    questions = coerced.get("questions") if isinstance(coerced.get("questions"), list) else []
+    if any(str(item).strip() for item in questions):
+        return coerced
+    if not _room_outcomes_complete(room_snapshot, coerced):
+        return coerced
+    coerced["intent"] = "DONE"
+    coerced["expect_reply"] = False
+    meta = dict(coerced.get("meta") or {})
+    changes = list(meta.get("terminal_coercion") or [])
+    changes.append("intent->DONE")
+    meta["terminal_coercion"] = changes
+    coerced["meta"] = meta
+    return coerced
 
 
 def notify_owner(cmd_template: str | None, text: str, owner_req_id: str) -> None:
@@ -633,6 +562,7 @@ def wait_owner_reply(
     owner_reply_fetcher: Any = None,
     poll_seconds: float = 1.0,
     fail_fast_fetch_errors: bool = False,
+    on_poll: Any = None,
 ) -> str | None:
     started = time.time()
     while time.time() - started <= timeout_seconds:
@@ -650,6 +580,11 @@ def wait_owner_reply(
                 reply = None
             if reply:
                 return reply
+        if on_poll:
+            try:
+                on_poll()
+            except Exception as exc:  # noqa: BLE001
+                log("owner wait heartbeat failed", short(str(exc), 220))
         time.sleep(max(0.2, poll_seconds))
     return None
 
@@ -674,7 +609,24 @@ def main() -> None:
     parser.add_argument("--role", choices=["initiator", "responder", "auto"], default="auto")
     parser.add_argument("--client-name", default=None)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
-    parser.add_argument("--max-seconds", type=int, default=480)
+    parser.add_argument("--heartbeat-seconds", type=float, default=5.0)
+    parser.add_argument("--cursor", type=int, default=0, help="Initial events cursor for handoff mode.")
+    parser.add_argument(
+        "--state-path",
+        default="",
+        help="Optional runner state path for cursor/seen persistence. Default: ~/.openclaw/agents/<agent_id>/clawroom/<room_id>.json",
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=int,
+        default=0,
+        help="Max runtime in seconds; set 0 to disable timeout and keep loop alive.",
+    )
+    parser.add_argument(
+        "--owner-context",
+        default="",
+        help="Optional owner constraints/context injected into every model prompt.",
+    )
     parser.add_argument("--openclaw-timeout", type=int, default=90)
     parser.add_argument("--thinking", choices=["off", "minimal", "low", "medium", "high"], default="minimal")
     parser.add_argument("--profile", default=None)
@@ -753,6 +705,8 @@ def main() -> None:
             parser.error("either provide a join URL or both --room-id and --token")
 
     role = args.role
+    if args.heartbeat_seconds < 1:
+        parser.error("--heartbeat-seconds must be >= 1")
 
     runner = OpenClawRunner(
         agent_id=args.agent_id,
@@ -763,9 +717,22 @@ def main() -> None:
     )
 
     started_at = time.time()
-    cursor = 0
-    seen_event_ids: set[int] = set()
+    default_state_path = Path.home() / ".openclaw" / "agents" / args.agent_id / "clawroom" / f"{room_id}.json"
+    state_path = Path(args.state_path).expanduser() if args.state_path else default_state_path
+    state = build_runner_state(
+        base_url=base,
+        room_id=room_id,
+        token=token,
+        initial_cursor=max(0, int(args.cursor)),
+        state_path=state_path,
+        logger=lambda msg: log(msg),
+    )
+    state.note_owner_context(args.owner_context)
+    if not state.runner_id:
+        state.runner_id = f"openclaw:{args.agent_id}:{uuid.uuid4().hex[:10]}"
+    state.execution_mode = "managed_attached"
     started_message_sent = False
+    kickoff_wait_logged = False
     owner_reply_file = Path(args.owner_reply_file) if args.owner_reply_file else None
     owner_reply_seen: set[str] = set()
     openclaw_read_enabled = args.owner_channel == "openclaw"
@@ -845,6 +812,13 @@ def main() -> None:
             return reply
         return None
 
+    def owner_reply_channel_available() -> bool:
+        if args.owner_reply_cmd or owner_reply_file:
+            return True
+        if args.owner_channel == "openclaw" and openclaw_read_enabled:
+            return True
+        return bool(sys.stdin.isatty())
+
     preflight_meta: dict[str, Any] = {"mode": args.preflight_mode, "status": "off"}
     if args.preflight_mode != "off":
         join_info = http_json("GET", f"{base}/join/{room_id}?token={token}")
@@ -916,8 +890,134 @@ def main() -> None:
         token=token,
         payload={"client_name": args.client_name or f"OpenClaw({args.agent_id})"},
     )
+    participant_token = str(join_resp.get("participant_token") or "").strip()
+    if participant_token:
+        token = participant_token
+        log("participant_session_token_acquired")
     participant_name = str(join_resp["participant"])
     room = join_resp["room"]
+    state.participant = participant_name
+    if not state.runtime_session_id:
+        state.runtime_session_id = f"clawrun_{uuid.uuid4().hex}"
+    capabilities = RunnerCapabilities(
+        strategy="daemon-safe",
+        owner_reply_supported=owner_reply_channel_available(),
+        background_safe=True,
+        persistence_supported=bool(state.state_path),
+        health_surface=True,
+        managed_certified=True,
+        recovery_policy="automatic",
+        supervision_origin=str(os.getenv("CLAWROOM_SUPERVISION_ORIGIN", "direct")).strip().lower() or "direct",
+        replacement_count=max(0, int(os.getenv("CLAWROOM_REPLACEMENT_COUNT", "0") or "0")),
+        supersedes_run_id=str(os.getenv("CLAWROOM_SUPERSEDES_RUN_ID", "")).strip()[:120] or None,
+    )
+    state.set_capabilities(capabilities)
+    state.set_health(status="ready", recent_note=f"strategy={capabilities.strategy}")
+    state.save(logger=lambda msg: log(msg))
+    last_reported_phase: str | None = None
+    last_reported_phase_detail: str | None = None
+    shutdown_reason = "client_exit"
+    shutdown_note = "client_exit"
+    shutdown_last_error = ""
+
+    def mark_shutdown(reason: str, *, note: str, last_error: str = "", overwrite: bool = True) -> None:
+        nonlocal shutdown_reason, shutdown_note, shutdown_last_error
+        if not overwrite and shutdown_reason != "client_exit":
+            return
+        shutdown_reason = str(reason or "client_exit").strip() or "client_exit"
+        shutdown_note = str(note or shutdown_reason).strip()[:500]
+        shutdown_last_error = str(last_error or "").strip()[:500]
+        state.set_health(status="exited", last_error=shutdown_last_error, recent_note=shutdown_note)
+        state.save(logger=lambda msg: log(msg))
+
+    def handle_shutdown_signal(signum: int, _frame: object) -> None:
+        try:
+            signame = signal.Signals(signum).name
+        except Exception:  # noqa: BLE001
+            signame = f"SIG{signum}"
+        lower = signame.lower()
+        log("signal_received", signame)
+        mark_shutdown(
+            f"signal_{lower}",
+            note=f"signal:{signame}",
+            last_error=f"signal:{signame}",
+        )
+        raise SystemExit(0)
+
+    for sig_name in ("SIGTERM", "SIGHUP", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        signal.signal(sig, handle_shutdown_signal)
+
+    def renew_runner_claim(
+        *,
+        status_override: str | None = None,
+        recovery_reason: str | None = None,
+        phase: str | None = None,
+        phase_detail: str | None = None,
+    ) -> None:
+        nonlocal last_reported_phase, last_reported_phase_detail
+        if not state.runner_id:
+            return
+        cleaned_phase = str(phase).strip() if phase is not None else None
+        cleaned_phase_detail = str(phase_detail).strip() if phase_detail is not None else None
+        if (
+            cleaned_phase is not None
+            and cleaned_phase == last_reported_phase
+            and cleaned_phase_detail == last_reported_phase_detail
+            and status_override is None
+            and recovery_reason is None
+        ):
+            return
+        current_status = status_override or state.health.status
+        response = runner_renew(
+            base_url=base,
+            room_id=room_id,
+            token=token,
+            runner_id=state.runner_id,
+            attempt_id=state.attempt_id,
+            execution_mode=state.execution_mode,
+            status=current_status,
+            capabilities=state.capabilities.to_payload(),
+            lease_seconds=max(30, int(args.heartbeat_seconds * 3)),
+            log_ref=state.health.log_path or None,
+            last_error=state.health.last_error or None,
+            recovery_reason=recovery_reason,
+            phase=cleaned_phase,
+            phase_detail=cleaned_phase_detail,
+            managed_certified=state.capabilities.managed_certified,
+            recovery_policy=state.capabilities.recovery_policy,
+        )
+        state.attempt_id = str(response.get("attempt_id") or state.attempt_id or "").strip() or state.attempt_id
+        state.lease_expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + max(30, int(args.heartbeat_seconds * 3))))
+        if cleaned_phase is not None:
+            last_reported_phase = cleaned_phase
+            last_reported_phase_detail = cleaned_phase_detail
+        state.save(logger=lambda msg: log(msg))
+
+    claim_resp = runner_claim(
+        base_url=base,
+        room_id=room_id,
+        token=token,
+        runner_id=state.runner_id,
+        execution_mode=state.execution_mode,
+        status="ready",
+        capabilities=state.capabilities.to_payload(),
+        lease_seconds=max(30, int(args.heartbeat_seconds * 3)),
+        log_ref=state.health.log_path or None,
+        last_error=state.health.last_error or None,
+        attempt_id=state.attempt_id,
+        phase="joined",
+        phase_detail="participant_joined",
+        managed_certified=state.capabilities.managed_certified,
+        recovery_policy=state.capabilities.recovery_policy,
+    )
+    state.attempt_id = str(claim_resp.get("attempt_id") or state.attempt_id or "").strip() or state.attempt_id
+    state.lease_expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + max(30, int(args.heartbeat_seconds * 3))))
+    last_reported_phase = "joined"
+    last_reported_phase_detail = "participant_joined"
+    state.save(logger=lambda msg: log(msg))
 
     # --- Auto-detect role ---
     if role == "auto":
@@ -933,14 +1033,27 @@ def main() -> None:
     # If role is initiator, auto-enable --start.
     if role == "initiator":
         args.start = True
+    try:
+        renew_runner_claim(status_override="ready", phase="session_ready", phase_detail=f"role={role}")
+    except Exception as exc:  # noqa: BLE001
+        log("runner_phase_sync_failed", short(str(exc), 220))
 
     log("joined", f"participant={participant_name}", f"room={room['id']}", f"status={room['status']}")
+    last_heartbeat_at = 0.0
 
-    def send_message(payload: dict[str, Any], why: str) -> dict[str, Any]:
+    def send_message(
+        payload: dict[str, Any],
+        why: str,
+        *,
+        in_reply_to_event_id: int | None = None,
+    ) -> dict[str, Any]:
         nonlocal started_message_sent
         payload.setdefault("meta", {})
-        if isinstance(payload.get("meta"), dict):
-            payload["meta"].setdefault("preflight", preflight_meta)
+        if not isinstance(payload.get("meta"), dict):
+            payload["meta"] = {}
+        payload["meta"].setdefault("preflight", preflight_meta)
+        if in_reply_to_event_id is not None and in_reply_to_event_id > 0:
+            payload["meta"]["in_reply_to_event_id"] = int(in_reply_to_event_id)
         log("send", f"why={why}", payload["intent"], short(payload["text"], 180))
         resp = http_json(
             "POST",
@@ -948,60 +1061,239 @@ def main() -> None:
             token=token,
             payload=payload,
         )
+        state.note_commitment(payload["text"])
+        state.set_health(status="active", recent_note=why)
+        try:
+            renew_runner_claim(status_override="active", phase="reply_sent", phase_detail=why)
+        except Exception as exc:  # noqa: BLE001
+            log("runner_send_sync_failed", short(str(exc), 220))
         started_message_sent = True
         trigger = (((resp or {}).get("host_decision") or {}).get("trigger"))
         if trigger:
             log("host_trigger", trigger)
         return resp
 
+    def send_heartbeat_if_due(*, force: bool = False) -> None:
+        nonlocal room, last_heartbeat_at
+        now_ts = time.time()
+        if not force and now_ts - last_heartbeat_at < args.heartbeat_seconds:
+            return
+        try:
+            hb = http_json("POST", f"{base}/rooms/{room_id}/heartbeat", token=token, payload={})
+            if isinstance(hb.get("room"), dict):
+                room = hb["room"]
+            renew_runner_claim()
+            last_heartbeat_at = now_ts
+        except Exception as exc:  # noqa: BLE001
+            state.set_health(status="stalled", last_error=str(exc), recent_note="heartbeat_failed")
+            state.save(logger=lambda msg: log(msg))
+            log("heartbeat_failed", short(str(exc), 220))
+
     def generate_model_reply(latest_event: dict[str, Any] | None, room_snapshot: dict[str, Any]) -> dict[str, Any]:
-        prompt = room_prompt(
+        prompt = build_room_reply_prompt(
             role=role,
             room=room_snapshot,
             self_name=participant_name,
             latest_event=latest_event,
             has_started=started_message_sent,
+            owner_context=args.owner_context,
+            commitments=state.conversation.latest_commitments,
+            last_counterpart_ask=state.conversation.last_counterpart_ask,
+            last_counterpart_message=state.conversation.last_counterpart_message,
         )
-        raw = runner.ask_json(room_id, participant_name, prompt)
+        try:
+            renew_runner_claim(status_override="active", phase="reply_generating", phase_detail="model_call")
+        except Exception as exc:  # noqa: BLE001
+            log("runner_generation_sync_failed", short(str(exc), 220))
+        try:
+            raw = runner.ask_json(
+                room_id,
+                participant_name,
+                prompt,
+                session_id=state.runtime_session_id,
+            )
+        except RuntimeError as exc:
+            if not is_session_lock_error(exc):
+                raise
+            old_session = state.runtime_session_id or "(none)"
+            state.set_health(status="restarting", last_error=str(exc), recent_note="session_lock_retry")
+            state.runtime_session_id = f"clawrun_{uuid.uuid4().hex}"
+            state.save(logger=lambda msg: log(msg))
+            log(
+                "session_lock_retry",
+                f"old={short(old_session, 24)}",
+                f"new={short(state.runtime_session_id, 24)}",
+            )
+            raw = runner.ask_json(
+                room_id,
+                participant_name,
+                prompt,
+                session_id=state.runtime_session_id,
+            )
         fallback = "ASK" if role == "initiator" and not started_message_sent else "ANSWER"
-        return normalize_model_message(raw, fallback_intent=fallback)
+        message = normalize_model_message(raw, fallback_intent=fallback)
+        try:
+            renew_runner_claim(status_override="active", phase="reply_ready", phase_detail=str(message.get("intent") or "ANSWER"))
+        except Exception as exc:  # noqa: BLE001
+            log("runner_reply_ready_sync_failed", short(str(exc), 220))
+        return message
 
+    send_heartbeat_if_due(force=True)
+    try:
+        renew_runner_claim(phase="event_polling", phase_detail="poll_ready")
+    except Exception as exc:  # noqa: BLE001
+        log("runner_poll_ready_sync_failed", short(str(exc), 220))
     try:
         while True:
-            if time.time() - started_at > args.max_seconds:
+            if args.max_seconds > 0 and time.time() - started_at > args.max_seconds:
+                mark_shutdown("max_seconds_reached", note="max_seconds_reached", overwrite=False)
                 log("max-seconds reached")
                 break
 
+            send_heartbeat_if_due()
             batch = http_json(
                 "GET",
-                f"{base}/rooms/{room_id}/events?after={cursor}&limit=200",
+                f"{base}/rooms/{room_id}/events?after={state.cursor}&limit=200",
                 token=token,
             )
-            room = batch["room"]
-            events = batch["events"]
-            cursor = int(batch["next_cursor"])
-            new_relays = find_new_relay_events(events, seen_event_ids)
+            batch_events = list(batch.get("events") or [])
+            room, new_relays, _ = next_relays(batch, state)
+            state.save(logger=lambda msg: log(msg))
 
             if room["status"] != "active":
+                mark_shutdown(
+                    f"room_closed:{room.get('stop_reason')}",
+                    note=f"room_closed:{room.get('stop_reason')}",
+                    overwrite=False,
+                )
                 log("room ended", f"status={room['status']}", f"reason={room['stop_reason']}")
                 break
 
-            if role == "initiator" and args.start and not started_message_sent and int(room.get("turn_count", 0)) == 0:
-                outgoing = generate_model_reply(None, room)
-                send_message(outgoing, "room_start")
-                time.sleep(args.poll_seconds)
-                continue
+            batch_has_message_activity = any(str(evt.get("type") or "") in {"msg", "relay"} for evt in batch_events)
+            if (
+                role == "initiator"
+                and args.start
+                and not started_message_sent
+                and int(room.get("turn_count", 0)) == 0
+                and not batch_has_message_activity
+            ):
+                joined_count = sum(1 for p in (room.get("participants") or []) if p.get("joined"))
+                if joined_count >= 2:
+                    outgoing = generate_model_reply(None, room)
+                    outgoing = coerce_opening_message(outgoing)
+                    outgoing = coerce_terminal_message(outgoing, room)
+                    guard_batch = http_json(
+                        "GET",
+                        f"{base}/rooms/{room_id}/events?after={state.cursor}&limit=200",
+                        token=token,
+                    )
+                    guard_events = list(guard_batch.get("events") or [])
+                    room, guard_relays, _ = next_relays(guard_batch, state)
+                    state.save(logger=lambda msg: log(msg))
+                    guard_has_message_activity = any(
+                        str(evt.get("type") or "") in {"msg", "relay"} for evt in guard_events
+                    )
+                    if int(room.get("turn_count", 0)) > 0 or guard_has_message_activity:
+                        new_relays = [*guard_relays, *new_relays]
+                        log("skip room_start; peer activity arrived during kickoff generation")
+                    else:
+                        if outgoing.get("meta", {}).get("opening_coercion"):
+                            log("coerced opening message", json.dumps(outgoing.get("meta", {}).get("opening_coercion")))
+                        send_message(outgoing, "room_start")
+                        state.save(logger=lambda msg: log(msg))
+                        time.sleep(args.poll_seconds)
+                        continue
+                if not kickoff_wait_logged:
+                    state.set_health(status="idle", recent_note="waiting_for_peer_join")
+                    state.save(logger=lambda msg: log(msg))
+                    try:
+                        renew_runner_claim(
+                            status_override="idle",
+                            recovery_reason="waiting_for_peer_join",
+                            phase="waiting_for_peer_join",
+                            phase_detail="initiator_waiting_for_peer",
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        log("runner_peer_wait_sync_failed", short(str(exc), 220))
+                    log("waiting for peer join before initiator kickoff")
+                    kickoff_wait_logged = True
 
             if new_relays:
-                for evt in new_relays:
+                relay_queue = list(new_relays)
+                while relay_queue:
+                    evt = relay_queue.pop(0)
+                    relay_msg = (evt.get("payload") or {}).get("message") or {}
+                    state.note_counterpart_message(
+                        intent=str(relay_msg.get("intent") or ""),
+                        text=str(relay_msg.get("text") or ""),
+                    )
+                    if not relay_requires_reply(evt):
+                        continue
+                    try:
+                        renew_runner_claim(
+                            status_override="active",
+                            phase="relay_seen",
+                            phase_detail=str(relay_msg.get("intent") or "relay"),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        log("runner_relay_seen_sync_failed", short(str(exc), 220))
+                    relay_event_id = int(evt.get("id", 0))
                     outgoing = generate_model_reply(evt, room)
+                    guard_batch = http_json(
+                        "GET",
+                        f"{base}/rooms/{room_id}/events?after={state.cursor}&limit=200",
+                        token=token,
+                    )
+                    room, guard_relays, _ = next_relays(guard_batch, state)
+                    state.save(logger=lambda msg: log(msg))
+                    if guard_relays:
+                        relay_queue = [*guard_relays, *relay_queue]
+                        log("skip relay send; newer peer activity arrived during generation")
+                        continue
+                    outgoing = coerce_terminal_message(outgoing, room)
 
                     if outgoing["intent"] == "ASK_OWNER":
+                        if not owner_reply_channel_available():
+                            fallback_payload = {
+                                "intent": "ASK",
+                                "text": outgoing["text"],
+                                "fills": outgoing["fills"],
+                                "facts": outgoing["facts"],
+                                "questions": outgoing["questions"],
+                                "expect_reply": True,
+                                "meta": {
+                                    **(outgoing.get("meta") or {}),
+                                    "owner_unavailable": True,
+                                    "converted_from": "ASK_OWNER",
+                                },
+                            }
+                            log(
+                                "owner channel unavailable; converting ASK_OWNER to ASK",
+                                short(fallback_payload["text"], 140),
+                            )
+                            send_message(
+                                fallback_payload,
+                                "relay_owner_unavailable",
+                                in_reply_to_event_id=relay_event_id,
+                            )
+                            continue
+
                         outgoing["expect_reply"] = False
                         owner_req_id = f"oreq_{uuid.uuid4().hex[:12]}"
                         outgoing.setdefault("meta", {})
                         outgoing["meta"]["owner_req_id"] = owner_req_id
-                        send_message(outgoing, "relay_ask_owner")
+                        send_message(outgoing, "relay_ask_owner", in_reply_to_event_id=relay_event_id)
+                        state.set_pending_owner_request(owner_req_id)
+                        state.set_health(status="waiting_owner", recent_note="waiting_owner_reply")
+                        try:
+                            renew_runner_claim(
+                                status_override="waiting_owner",
+                                phase="owner_wait",
+                                phase_detail="waiting_owner_reply",
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            log("runner_waiting_owner_sync_failed", short(str(exc), 220))
+                        state.save(logger=lambda msg: log(msg))
                         was_notified = notify_owner_request(outgoing["text"], owner_req_id)
                         if not was_notified and owner_reply_file:
                             log(
@@ -1015,14 +1307,17 @@ def main() -> None:
                             owner_reply_fetcher=fetch_owner_reply,
                             poll_seconds=args.owner_reply_poll_seconds,
                             fail_fast_fetch_errors=True,
+                            on_poll=lambda: send_heartbeat_if_due(),
                         )
                         if owner_reply:
-                            oprompt = owner_reply_prompt(
+                            oprompt = build_owner_reply_prompt(
                                 room=room,
                                 self_name=participant_name,
                                 role=role,
                                 owner_req_id=owner_req_id,
                                 owner_text=owner_reply,
+                                owner_context=args.owner_context,
+                                commitments=state.conversation.latest_commitments,
                             )
                             raw = runner.ask_json(room_id, participant_name, oprompt)
                             owner_payload = normalize_model_message(raw, fallback_intent="OWNER_REPLY")
@@ -1030,7 +1325,10 @@ def main() -> None:
                             owner_payload.setdefault("meta", {})
                             owner_payload["meta"]["owner_req_id"] = owner_req_id
                             owner_payload["expect_reply"] = True
-                            send_message(owner_payload, "owner_reply")
+                            # OWNER_REPLY resumes from owner wait; it should not reuse
+                            # the original peer relay id or room-level reply dedup will
+                            # treat it as a duplicate of the earlier ASK_OWNER send.
+                            send_message(owner_payload, "owner_reply", in_reply_to_event_id=None)
                         else:
                             note_payload = {
                                 "intent": "NOTE",
@@ -1041,30 +1339,67 @@ def main() -> None:
                                 "expect_reply": False,
                                 "meta": {"owner_req_id": owner_req_id, "timeout": True},
                             }
-                            send_message(note_payload, "owner_timeout")
+                            send_message(note_payload, "owner_timeout", in_reply_to_event_id=None)
+                        state.set_pending_owner_request(None)
+                        state.set_health(status="active", recent_note="owner_wait_resolved")
+                        try:
+                            renew_runner_claim(
+                                status_override="active",
+                                phase="owner_reply_handled",
+                                phase_detail="owner_wait_resolved",
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            log("runner_owner_resume_sync_failed", short(str(exc), 220))
+                        state.save(logger=lambda msg: log(msg))
                     else:
-                        send_message(outgoing, "relay")
+                        send_message(outgoing, "relay", in_reply_to_event_id=relay_event_id)
 
                     room = http_json("GET", f"{base}/rooms/{room_id}", token=token)["room"]
                     if room["status"] != "active":
                         log("room ended after send", f"status={room['status']}", f"reason={room['stop_reason']}")
                         break
 
+            state.save(logger=lambda msg: log(msg))
+            if not new_relays:
+                state.set_health(status="idle", recent_note="poll_idle")
+                state.save(logger=lambda msg: log(msg))
+                try:
+                    renew_runner_claim(phase="event_polling", phase_detail="poll_idle")
+                except Exception as exc:  # noqa: BLE001
+                    log("runner_idle_sync_failed", short(str(exc), 220))
             time.sleep(args.poll_seconds)
 
     finally:
+        state.set_pending_owner_request(None)
         if args.print_result:
             try:
                 result = http_json("GET", f"{base}/rooms/{room_id}/result", token=token)["result"]
                 log("result_summary", result.get("summary"))
             except Exception as exc:  # noqa: BLE001
                 log("result_error", exc)
+        effective_last_error = shutdown_last_error or state.health.last_error or ""
+        state.set_health(status="exited", last_error=effective_last_error, recent_note=shutdown_note)
+        state.save(logger=lambda msg: log(msg))
+        try:
+            if state.runner_id:
+                runner_release(
+                    base_url=base,
+                    room_id=room_id,
+                    token=token,
+                    runner_id=state.runner_id,
+                    attempt_id=state.attempt_id,
+                    status="exited",
+                    reason=shutdown_reason,
+                    last_error=effective_last_error or None,
+                )
+        except Exception as exc:  # noqa: BLE001
+            log("runner_release_error", short(str(exc), 220))
         try:
             leave = http_json(
                 "POST",
                 f"{base}/rooms/{room_id}/leave",
                 token=token,
-                payload={"reason": "client_exit"},
+                payload={"reason": shutdown_reason},
             )
             log("left", f"was_online={leave.get('was_online')}")
         except Exception as exc:  # noqa: BLE001
