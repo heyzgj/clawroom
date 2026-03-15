@@ -140,7 +140,16 @@ export default {
       }
 
       // --- Team/Agent routes: /teams/*, /agents/* → Team Registry DO (global singleton) ---
-      if (url.pathname.startsWith("/teams") || url.pathname.startsWith("/agents") || url.pathname.startsWith("/assignments")) {
+      if (url.pathname.startsWith("/teams") || url.pathname.startsWith("/assignments")) {
+        const registryId = env.TEAM_REGISTRY.idFromName("global");
+        const stub = env.TEAM_REGISTRY.get(registryId);
+        const forwarded = new Request(new URL(`https://teams${url.pathname}${url.search}`), request);
+        return withCors(request, await stub.fetch(forwarded));
+      }
+      // GET /agents — operator-only in Phase 1 (admin_token required)
+      if (url.pathname.startsWith("/agents")) {
+        const authFailure = requireMonitorAuth(request, env);
+        if (authFailure) return withCors(request, authFailure);
         const registryId = env.TEAM_REGISTRY.idFromName("global");
         const stub = env.TEAM_REGISTRY.get(registryId);
         const forwarded = new Request(new URL(`https://teams${url.pathname}${url.search}`), request);
@@ -182,6 +191,56 @@ export default {
       const stub = env.ROOMS.get(id);
       const forwardUrl = new URL(request.url);
       forwardUrl.pathname = match.forwardPath;
+
+      // --- Auto-register agents on join (Phase 1: passive directory seeding) ---
+      const isJoin = request.method === "POST" && match.forwardPath.endsWith("/join");
+      let joinBody: any = null;
+
+      if (isJoin) {
+        // Read body, clone for forwarding (body can only be read once)
+        const bodyText = await request.text();
+        try { joinBody = JSON.parse(bodyText); } catch { joinBody = {}; }
+        const forwarded = new Request(forwardUrl, {
+          method: request.method,
+          headers: request.headers,
+          body: bodyText,
+        });
+        const response = await stub.fetch(forwarded);
+
+        // If join succeeded and agent_id was provided, register in TeamRegistryDO
+        if (response.ok && joinBody?.agent_id) {
+          try {
+            const agentId = String(joinBody.agent_id).slice(0, 200);
+            const agentRuntime = String(joinBody.runtime || "").slice(0, 60);
+            const displayName = String(joinBody.display_name || joinBody.client_name || agentId).slice(0, 120);
+
+            const teamRegistryId = env.TEAM_REGISTRY.idFromName("global");
+            const teamRegistry = env.TEAM_REGISTRY.get(teamRegistryId);
+            await teamRegistry.fetch(new Request("https://teams/agents", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                agent_id: agentId,
+                name: displayName,
+                runtime: agentRuntime,
+                capabilities: [],
+                team_id: "",
+              }),
+            }));
+
+            // Merge agent_registered: true into the response
+            const responseBody = await response.json() as Record<string, unknown>;
+            responseBody.agent_registered = true;
+            return withCors(request, json(responseBody, { status: response.status }));
+          } catch {
+            // Registration failed silently — don't break the join flow
+            // Return original response without agent_registered
+          }
+        }
+
+        return withCors(request, response);
+      }
+
       const forwarded = new Request(forwardUrl, request);
       const response = await stub.fetch(forwarded);
       return withCors(request, response);

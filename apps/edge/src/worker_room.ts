@@ -3213,6 +3213,9 @@ export class RoomDurableObject implements DurableObject {
 	    const participant = participantAuth.name;
 	    const body = (await request.json().catch(() => ({}))) as any;
 	    const clientName = typeof body?.client_name === "string" ? body.client_name.slice(0, 120) : null;
+	    const agentId = typeof body?.agent_id === "string" ? body.agent_id.slice(0, 200) : null;
+	    const runtime = typeof body?.runtime === "string" ? body.runtime.slice(0, 60) : null;
+	    const displayName = typeof body?.display_name === "string" ? body.display_name.slice(0, 120) : null;
 	    const joinedAt = nowIso();
       const participantRow = this.sql.exec(
         "SELECT joined, participant_token FROM participants WHERE name=? LIMIT 1",
@@ -3247,11 +3250,16 @@ export class RoomDurableObject implements DurableObject {
       if (participantCount > 0 && joinedCount >= participantCount) {
         this.sql.exec("UPDATE room SET all_joined_at=COALESCE(all_joined_at, ?) WHERE id=?", joinedAt, roomId);
       }
-	    await this.appendEvent("*", "join", { participant, client_name: clientName });
+	    await this.appendEvent("*", "join", { participant, client_name: clientName, agent_id: agentId, runtime });
 
 	    const snapshot = await this.snapshot(roomId);
     await this.publishRoomSnapshot("join", snapshot);
-    return json({ participant, participant_token: participantToken, room: snapshot });
+    return json({
+      participant,
+      participant_token: participantToken,
+      room: snapshot,
+      ...(agentId ? { agent_id: agentId, runtime, display_name: displayName || clientName || agentId } : {}),
+    });
   }
 
   private async handleRunnerClaim(request: Request, roomId: string): Promise<Response> {
