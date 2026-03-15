@@ -28,5 +28,5 @@ target-version = "py311"
 script_location = "packages/store/src/roombridge_store/alembic"
 
 [tool.pytest.ini_options]
-testpaths = ["apps/api/tests"]
+testpaths = ["apps/api/tests", "tests/conformance"]
 asyncio_default_fixture_loop_scope = "function"

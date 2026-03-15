@@ -243,6 +243,55 @@ def test_gateway_only_join_prompt_never_tells_gateway_to_join_directly() -> None
     assert "Reply with one concise gateway status update for the owner" in prompt
 
 
+def test_join_prompt_can_prefer_shell_fallback_for_probe_runs() -> None:
+    prompt = CREATE_MODULE.build_join_prompt(
+        "https://api.clawroom.cc/join/room_shell?token=inv_123",
+        room_id="room_shell",
+        role="responder",
+        scenario="natural",
+        runnerd_url="http://127.0.0.1:9999",
+        preferred_runner_kind="codex_bridge",
+        prefer_shell_fallback=True,
+    )
+    assert "Shell candidate path:" in prompt
+    assert "prefer the shell bridge candidate path below before direct API join" in prompt
+    assert "openclaw-shell-bridge.sh" in prompt
+    assert "--role responder" in prompt
+    assert "--client-name TelegramShellBridge" in prompt
+    assert "If reading the skill page is blocked, continue API-first" in prompt
+
+
+def test_join_prompt_can_enter_strict_shell_probe_mode() -> None:
+    prompt = CREATE_MODULE.build_join_prompt(
+        "https://api.clawroom.cc/join/room_shell_strict?token=inv_123",
+        room_id="room_shell_strict",
+        role="responder",
+        scenario="natural",
+        runnerd_url="http://127.0.0.1:9999",
+        preferred_runner_kind="codex_bridge",
+        prefer_shell_fallback=True,
+        strict_shell_probe=True,
+    )
+    assert "Diagnostic mode: do not direct-join this room." in prompt
+    assert "run the shell bridge candidate path below" in prompt
+    assert "reply briefly that shell execution is unavailable here" in prompt
+    assert "Do not use API-first fallback in this diagnostic mode." in prompt
+    assert "If reading the skill page is blocked, continue API-first" not in prompt
+
+
+def test_probe_shell_command_includes_join_link_and_optional_agent_id() -> None:
+    command = CREATE_MODULE.build_probe_shell_command(
+        "https://api.clawroom.cc/join/room_shell?token=inv_123",
+        role="initiator",
+        relay_agent_id="relay-shell",
+    )
+    assert "openclaw-shell-bridge.sh" in command
+    assert "\"https://api.clawroom.cc/join/room_shell?token=inv_123\"" in command
+    assert "--role initiator" in command
+    assert "--agent-id relay-shell" in command
+    assert "--client-name TelegramShellBridge" in command
+
+
 def test_owner_escalation_join_prompt_requires_one_owner_clarification() -> None:
     prompt = CREATE_MODULE.build_join_prompt(
         "https://api.clawroom.cc/join/room_owner?token=inv_123",

@@ -199,3 +199,117 @@ def test_stall_rule(client):
     assert room_after.status_code == 200
     assert room_after.json()["room"]["status"] == "closed"
     assert room_after.json()["room"]["stop_reason"] == "stall"
+
+
+def test_guest_first_multi_turn_relay_continues(client):
+    created_resp = client.post(
+        "/rooms",
+        json={
+            "topic": "Guest-first loop",
+            "goal": "verify host can reply after guest kickoff",
+            "participants": ["host", "guest"],
+            "required_fields": [],
+            "turn_limit": 12,
+            "timeout_minutes": 30,
+            "stall_limit": 6,
+            "metadata": {"source": "pytest_multi_turn"},
+        },
+    )
+    assert created_resp.status_code == 200
+    created = created_resp.json()
+
+    room_id = created["room"]["id"]
+    host_token = created["invites"]["host"]
+    guest_token = created["invites"]["guest"]
+
+    host_join = client.post(
+        f"/rooms/{room_id}/join",
+        headers={"X-Invite-Token": host_token},
+        json={"client_name": "host-bot"},
+    )
+    guest_join = client.post(
+        f"/rooms/{room_id}/join",
+        headers={"X-Invite-Token": guest_token},
+        json={"client_name": "guest-bot"},
+    )
+    assert host_join.status_code == 200
+    assert guest_join.status_code == 200
+
+    kickoff = client.post(
+        f"/rooms/{room_id}/messages",
+        headers={"X-Invite-Token": guest_token},
+        json={
+            "intent": "ASK",
+            "text": "Guest kickoff: can you suggest plan A and plan B?",
+            "fills": {},
+            "facts": [],
+            "questions": ["plan A?", "plan B?"],
+            "expect_reply": True,
+            "meta": {"source": "pytest_multi_turn", "kickoff": "guest"},
+        },
+    )
+    assert kickoff.status_code == 200
+    assert kickoff.json()["relay_recipients"] == ["host"]
+
+    host_events_1 = client.get(
+        f"/rooms/{room_id}/events?after=0&limit=200",
+        headers={"X-Invite-Token": host_token},
+    )
+    assert host_events_1.status_code == 200
+    host_events_1_body = host_events_1.json()
+    host_cursor = int(host_events_1_body["next_cursor"])
+    host_relays_1 = [e for e in host_events_1_body["events"] if e["type"] == "relay"]
+    assert any((e["payload"] or {}).get("from") == "guest" for e in host_relays_1)
+
+    host_reply_1 = client.post(
+        f"/rooms/{room_id}/messages",
+        headers={"X-Invite-Token": host_token},
+        json={
+            "intent": "ANSWER",
+            "text": "Host reply #1: here's plan A and plan B. Which one do you prefer?",
+            "fills": {},
+            "facts": ["plan A is faster", "plan B is cheaper"],
+            "questions": ["which option do you prefer?"],
+            "expect_reply": True,
+            "meta": {"source": "pytest_multi_turn"},
+        },
+    )
+    assert host_reply_1.status_code == 200
+    assert host_reply_1.json()["relay_recipients"] == ["guest"]
+
+    guest_events = client.get(
+        f"/rooms/{room_id}/events?after=0&limit=200",
+        headers={"X-Invite-Token": guest_token},
+    )
+    assert guest_events.status_code == 200
+    guest_relays = [e for e in guest_events.json()["events"] if e["type"] == "relay"]
+    assert any((e["payload"] or {}).get("from") == "host" for e in guest_relays)
+
+    guest_reply_2 = client.post(
+        f"/rooms/{room_id}/messages",
+        headers={"X-Invite-Token": guest_token},
+        json={
+            "intent": "ANSWER",
+            "text": "Guest reply #2: I prefer plan B. Can you refine the timeline?",
+            "fills": {},
+            "facts": ["prefer lower cost"],
+            "questions": ["timeline details?"],
+            "expect_reply": True,
+            "meta": {"source": "pytest_multi_turn"},
+        },
+    )
+    assert guest_reply_2.status_code == 200
+    assert guest_reply_2.json()["relay_recipients"] == ["host"]
+
+    host_events_2 = client.get(
+        f"/rooms/{room_id}/events?after={host_cursor}&limit=200",
+        headers={"X-Invite-Token": host_token},
+    )
+    assert host_events_2.status_code == 200
+    host_relays_2 = [e for e in host_events_2.json()["events"] if e["type"] == "relay"]
+    assert any((e["payload"] or {}).get("from") == "guest" for e in host_relays_2)
+
+    room_state = client.get(f"/rooms/{room_id}", headers={"X-Invite-Token": host_token})
+    assert room_state.status_code == 200
+    assert room_state.json()["room"]["status"] == "active"
+    assert room_state.json()["room"]["turn_count"] >= 3

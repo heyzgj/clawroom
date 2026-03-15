@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "apps/api/src"))
+sys.path.insert(0, str(ROOT / "apps/runnerd/src"))
+sys.path.insert(0, str(ROOT / "packages/client/src"))
 sys.path.insert(0, str(ROOT / "packages/core/src"))
 sys.path.insert(0, str(ROOT / "packages/store/src"))
 
