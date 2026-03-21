@@ -2,6 +2,7 @@ import { badRequest, conflict, json, normalizePlatformError, unauthorized } from
 
 type Env = {
   ROOM_REGISTRY?: DurableObjectNamespace;
+  AGENT_INBOXES?: DurableObjectNamespace;
   PARTICIPANT_ONLINE_STALE_SECONDS?: string;
   COMPATIBILITY_JOIN_GRACE_SECONDS?: string;
   COMPATIBILITY_FIRST_RELAY_GRACE_SECONDS?: string;
@@ -63,6 +64,14 @@ type Message = {
   meta: Record<string, unknown>;
 };
 
+type StoredMessageEvent = {
+  sender: string;
+  intent: Intent;
+  text: string;
+  questions: string[];
+  expect_reply: boolean;
+};
+
 type RoomCreateIn = {
   topic: string;
   goal: string;
@@ -86,6 +95,9 @@ type ParticipantState = {
   done: boolean;
   waiting_owner: boolean;
   client_name: string | null;
+  agent_id: string | null;
+  runtime: string | null;
+  display_name: string | null;
 };
 
 type RoomConfig = {
@@ -96,6 +108,8 @@ type RoomConfig = {
 };
 
 type StopReason = "goal_done" | "mutual_done" | "turn_limit" | "stall_limit" | "timeout" | "manual_close";
+type OwnerGateType = "join_approve";
+type OwnerGateState = "pending" | "approved" | "rejected" | "expired";
 
 type RootCauseHint = {
   code: string;
@@ -224,6 +238,18 @@ type EventRow = {
   payload: any;
 };
 
+type OwnerGateSnapshot = {
+  gate_id: string;
+  gate_type: OwnerGateType;
+  state: OwnerGateState;
+  participant: string;
+  question: string;
+  context: Record<string, unknown>;
+  created_at: string;
+  resolved_at: string | null;
+  resolution_payload: Record<string, unknown> | null;
+};
+
 const PROTOCOL_VERSION = 1;
 const DEFAULT_MANAGED_FIRST_RELAY_RISK_SECONDS = 45;
 const DEFAULT_RUNNER_LEASE_LOW_SECONDS = 20;
@@ -242,6 +268,7 @@ const ROOM_CAPABILITIES = Object.freeze([
   "strict_required_fields_v1",
   "idempotent_reply_v1",
   "joined_gate_v1",
+  "owner_gates_v1",
   "strict_goal_done_v2",
   "close_idempotent_v1",
   "message_bounds_v1",
@@ -391,6 +418,28 @@ function boolish(value: unknown): boolean {
 
 function hasCompletionMarker(meta: Record<string, unknown>): boolean {
   return boolish(meta.complete) || boolish(meta.completion_signal) || boolish(meta.room_complete);
+}
+
+function looksLikeDirectQuestion(text: string): boolean {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  return raw.includes("?") || raw.includes("？");
+}
+
+function storedMessageEventFromPayload(payload: unknown): StoredMessageEvent | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const message = (payload as Record<string, unknown>).message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+  const sender = trimmedString((message as Record<string, unknown>).sender, 120);
+  const intent = normalizeIntent((message as Record<string, unknown>).intent);
+  if (!sender) return null;
+  return {
+    sender,
+    intent,
+    text: trimmedString((message as Record<string, unknown>).text, MAX_MESSAGE_TEXT),
+    questions: normalizeStringList((message as Record<string, unknown>).questions, MAX_QUESTIONS, MAX_QUESTION_TEXT),
+    expect_reply: Boolean((message as Record<string, unknown>).expect_reply),
+  };
 }
 
 function normalizeMessage(raw: any): Message {
@@ -604,11 +653,14 @@ export class RoomDurableObject implements DurableObject {
 	        await this.publishRoomSnapshot(runnerChanges[runnerChanges.length - 1] || "runner_abandoned", snapshot);
 	      }
 
-	      if (request.method === "GET" && (tail === "/" || tail === "")) {
+      if (request.method === "GET" && (tail === "/" || tail === "")) {
 	        return await this.handleGetRoom(request, roomId);
 	      }
       if (request.method === "GET" && tail === "/join_info") return await this.handleJoinInfo(request, roomId);
       if (request.method === "POST" && tail === "/join") return await this.handleJoin(request, roomId);
+      if (request.method === "POST" && parts.length === 5 && parts[2] === "join_gates" && parts[4] === "resolve") {
+        return await this.handleJoinGateResolve(request, roomId, parts[3] || "");
+      }
       if (request.method === "POST" && tail === "/runner/claim") return await this.handleRunnerClaim(request, roomId);
       if (request.method === "POST" && tail === "/runner/renew") return await this.handleRunnerRenew(request, roomId);
       if (request.method === "POST" && tail === "/runner/release") return await this.handleRunnerRelease(request, roomId);
@@ -1190,6 +1242,9 @@ export class RoomDurableObject implements DurableObject {
 	        done INTEGER NOT NULL,
 	        waiting_owner INTEGER NOT NULL,
 	        client_name TEXT,
+	        agent_id TEXT,
+	        runtime TEXT,
+	        display_name TEXT,
 	        runner_id TEXT,
 	        runner_attempt_id TEXT,
 	        runner_status TEXT,
@@ -1269,6 +1324,19 @@ export class RoomDurableObject implements DurableObject {
         current INTEGER NOT NULL DEFAULT 1
       );
       CREATE INDEX IF NOT EXISTS idx_recovery_actions_current ON recovery_actions(current, participant, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS owner_gates (
+        gate_id TEXT PRIMARY KEY,
+        gate_type TEXT NOT NULL,
+        participant TEXT NOT NULL,
+        state TEXT NOT NULL,
+        question TEXT NOT NULL,
+        context_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolution_payload_json TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_owner_gates_participant ON owner_gates(participant, gate_type, created_at DESC);
 	    `);
     this.ensureRoomColumns();
     this.ensureParticipantColumns();
@@ -1364,6 +1432,15 @@ export class RoomDurableObject implements DurableObject {
     }
     if (!participantCols.includes("last_runner_error")) {
       this.sql.exec("ALTER TABLE participants ADD COLUMN last_runner_error TEXT");
+    }
+    if (!participantCols.includes("agent_id")) {
+      this.sql.exec("ALTER TABLE participants ADD COLUMN agent_id TEXT");
+    }
+    if (!participantCols.includes("runtime")) {
+      this.sql.exec("ALTER TABLE participants ADD COLUMN runtime TEXT");
+    }
+    if (!participantCols.includes("display_name")) {
+      this.sql.exec("ALTER TABLE participants ADD COLUMN display_name TEXT");
     }
   }
 
@@ -2840,6 +2917,9 @@ export class RoomDurableObject implements DurableObject {
           `[clawroom] registry upsert failed event=${eventType} room=${room.id} status=${res.status} body=${body.slice(0, 240)}`
         );
       }
+      if (room.status === "closed") {
+        await this.publishRoomHistory(stub, room);
+      }
     } catch {
       // Non-blocking observability path.
       console.warn(`[clawroom] registry upsert threw event=${eventType} room=${room.id}`);
@@ -2855,6 +2935,34 @@ export class RoomDurableObject implements DurableObject {
     this.onlineStateDirty = false;
     this.recoveryStateDirty = false;
     await this.publishRoomSnapshot(eventType, room);
+  }
+
+  private async publishRoomHistory(stub: DurableObjectStub, room: RoomSnapshot): Promise<void> {
+    const hostRow = this.sql.exec("SELECT digest FROM tokens WHERE key='host' LIMIT 1").one() as Record<string, unknown> | null;
+    const hostTokenDigest = hostRow?.digest ? String(hostRow.digest) : "";
+    if (!hostTokenDigest) return;
+    const result = await this.result(room, { includeTranscript: true });
+    const req = new Request("https://registry/internal/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        room_id: room.id,
+        host_token_digest: hostTokenDigest,
+        room,
+        result,
+      }),
+    });
+    try {
+      const res = await stub.fetch(req);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.warn(
+          `[clawroom] registry history upsert failed room=${room.id} status=${res.status} body=${body.slice(0, 240)}`
+        );
+      }
+    } catch {
+      console.warn(`[clawroom] registry history upsert threw room=${room.id}`);
+    }
   }
 
   private async removeRoomFromRegistry(roomId: string, reason: string): Promise<void> {
@@ -3206,60 +3314,345 @@ export class RoomDurableObject implements DurableObject {
     return json({ participant: participantName, room });
   }
 
-  private async handleJoin(request: Request, roomId: string): Promise<Response> {
-    this.ensureSchema();
-      this.invalidateSnapshotCache();
-	    const participantAuth = await this.authenticateJoinInvite(request);
-	    const participant = participantAuth.name;
-	    const body = (await request.json().catch(() => ({}))) as any;
-	    const clientName = typeof body?.client_name === "string" ? body.client_name.slice(0, 120) : null;
-	    const agentId = typeof body?.agent_id === "string" ? body.agent_id.slice(0, 200) : null;
-	    const runtime = typeof body?.runtime === "string" ? body.runtime.slice(0, 60) : null;
-	    const displayName = typeof body?.display_name === "string" ? body.display_name.slice(0, 120) : null;
-	    const joinedAt = nowIso();
-      const participantRow = this.sql.exec(
-        "SELECT joined, participant_token FROM participants WHERE name=? LIMIT 1",
+  private parseJsonRecord(raw: unknown): Record<string, unknown> {
+    if (typeof raw !== "string" || !raw.trim()) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private parseJsonStringArray(raw: unknown): string[] {
+    if (typeof raw !== "string" || !raw.trim()) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeAgentInboxEvent(agentId: string, type: "owner_gate_notification", payload: Record<string, unknown>): Promise<void> {
+    const namespace = this.env.AGENT_INBOXES;
+    const trimmedAgentId = String(agentId || "").trim();
+    if (!namespace || !trimmedAgentId) return;
+    const inboxId = namespace.idFromName(trimmedAgentId);
+    const inbox = namespace.get(inboxId);
+    try {
+      const response = await inbox.fetch(new Request("https://inbox/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type, payload }),
+      }));
+      if (!response.ok) {
+        console.warn("room owner gate inbox write failed", trimmedAgentId, response.status);
+      }
+    } catch (error) {
+      console.warn("room owner gate inbox write threw", trimmedAgentId, error);
+    }
+  }
+
+  private async maybeWriteOwnerGateNotification(participant: string, ownerText: string, meta: Record<string, unknown>, roomId: string): Promise<void> {
+    const participantRow = this.sql.exec(
+      "SELECT agent_id, runtime, display_name, client_name FROM participants WHERE name=? LIMIT 1",
+      participant
+    ).toArray()[0] as Record<string, unknown> | undefined;
+    const agentId = participantRow?.agent_id ? String(participantRow.agent_id).trim() : "";
+    if (!agentId) return;
+    const roomRow = this.sql.exec(
+      "SELECT topic, goal, deadline_at, required_fields_json FROM room WHERE id=? LIMIT 1",
+      roomId
+    ).toArray()[0] as Record<string, unknown> | undefined;
+    const requiredFields = this.parseJsonStringArray(roomRow?.required_fields_json);
+    const ownerReqId = typeof meta.owner_req_id === "string" ? meta.owner_req_id.slice(0, 120) : "";
+    await this.writeAgentInboxEvent(agentId, "owner_gate_notification", {
+      room_id: roomId,
+      participant,
+      agent_id: agentId,
+      runtime: participantRow?.runtime ? String(participantRow.runtime) : null,
+      display_name: participantRow?.display_name ? String(participantRow.display_name) : (participantRow?.client_name ? String(participantRow.client_name) : null),
+      topic: roomRow?.topic ? String(roomRow.topic) : "",
+      goal: roomRow?.goal ? String(roomRow.goal) : "",
+      deadline_at: roomRow?.deadline_at ? String(roomRow.deadline_at) : null,
+      required_fields: requiredFields,
+      owner_request_id: ownerReqId || null,
+      text: ownerText.slice(0, 4000),
+    });
+  }
+
+  private serializeOwnerGate(row: Record<string, unknown> | null | undefined): OwnerGateSnapshot | null {
+    if (!row?.gate_id) return null;
+    return {
+      gate_id: String(row.gate_id),
+      gate_type: "join_approve",
+      state: String(row.state || "pending") as OwnerGateState,
+      participant: String(row.participant || ""),
+      question: String(row.question || ""),
+      context: this.parseJsonRecord(row.context_json),
+      created_at: String(row.created_at || ""),
+      resolved_at: row.resolved_at ? String(row.resolved_at) : null,
+      resolution_payload: row.resolution_payload_json ? this.parseJsonRecord(row.resolution_payload_json) : null,
+    };
+  }
+
+  private currentJoinGate(participant: string): OwnerGateSnapshot | null {
+    const row = (
+      this.sql.exec(
+        "SELECT * FROM owner_gates WHERE participant=? AND gate_type='join_approve' ORDER BY created_at DESC LIMIT 1",
         participant
-      ).toArray()[0] as Record<string, unknown> | undefined;
-      const existingParticipantToken = participantRow?.participant_token ? String(participantRow.participant_token) : "";
-      const participantToken = existingParticipantToken || `ptok_${crypto.randomUUID().replace(/-/g, "")}`;
-      const participantDigest = await sha256Hex(participantToken);
+      ).toArray()[0] as Record<string, unknown> | undefined
+    ) || null;
+    return this.serializeOwnerGate(row);
+  }
 
-	    this.sql.exec(
-	      "UPDATE participants SET joined=1, joined_at=COALESCE(joined_at, ?), participant_token=COALESCE(participant_token, ?), online=1, last_seen_at=?, client_name=? WHERE name=?",
-        joinedAt,
-        participantToken,
-	      joinedAt,
-	      clientName,
-	      participant
-	    );
-      const participantTokenKey = `participant:${participant}`;
-      const existingParticipantTokenKey = this.sql.exec("SELECT key FROM tokens WHERE key=? LIMIT 1", participantTokenKey).toArray();
-      if (existingParticipantTokenKey.length) {
-        this.sql.exec("UPDATE tokens SET digest=? WHERE key=?", participantDigest, participantTokenKey);
-      } else {
-        this.sql.exec("INSERT INTO tokens (key, digest) VALUES (?, ?)", participantTokenKey, participantDigest);
-      }
-	    this.sql.exec("UPDATE room SET first_joined_at=COALESCE(first_joined_at, ?) WHERE id=?", joinedAt, roomId);
-      const joinedCount = Number(
-        (this.sql.exec("SELECT COUNT(*) AS count FROM participants WHERE joined=1").one() as Record<string, unknown> | null)?.count || 0
-      );
-      const participantCount = Number(
-        (this.sql.exec("SELECT COUNT(*) AS count FROM participants").one() as Record<string, unknown> | null)?.count || 0
-      );
-      if (participantCount > 0 && joinedCount >= participantCount) {
-        this.sql.exec("UPDATE room SET all_joined_at=COALESCE(all_joined_at, ?) WHERE id=?", joinedAt, roomId);
-      }
-	    await this.appendEvent("*", "join", { participant, client_name: clientName, agent_id: agentId, runtime });
+  private buildJoinApproveQuestion(room: RoomSnapshot, participant: string): string {
+    const outcomes = room.required_fields.length > 0 ? room.required_fields : room.expected_outcomes;
+    const outcomesText = outcomes.length > 0 ? outcomes.join(", ") : "(none)";
+    return [
+      "Join this ClawRoom now?",
+      `Role: ${participant}`,
+      `Topic: ${room.topic}`,
+      `Goal: ${room.goal}`,
+      `Required outcomes: ${outcomesText}`,
+      "Approve to join, or reject to decline."
+    ].join("\n");
+  }
 
-	    const snapshot = await this.snapshot(roomId);
+  private async createJoinApproveGate(
+    room: RoomSnapshot,
+    participant: string,
+    joinRequest?: Record<string, unknown>,
+  ): Promise<OwnerGateSnapshot> {
+    const createdAt = nowIso();
+    const gateId = `gate_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    const context = {
+      room_id: room.id,
+      participant,
+      topic: room.topic,
+      goal: room.goal,
+      required_fields: room.required_fields,
+      expected_outcomes: room.expected_outcomes,
+      deadline_at: room.deadline_at,
+      join_request: joinRequest || {},
+    };
+    const question = this.buildJoinApproveQuestion(room, participant);
+    this.sql.exec(
+      `INSERT INTO owner_gates (gate_id, gate_type, participant, state, question, context_json, created_at, resolved_at, resolution_payload_json)
+       VALUES (?, 'join_approve', ?, 'pending', ?, ?, ?, NULL, NULL)`,
+      gateId,
+      participant,
+      question,
+      JSON.stringify(context),
+      createdAt
+    );
+    return {
+      gate_id: gateId,
+      gate_type: "join_approve",
+      state: "pending",
+      participant,
+      question,
+      context,
+      created_at: createdAt,
+      resolved_at: null,
+      resolution_payload: null,
+    };
+  }
+
+  private async completeParticipantJoin(
+    roomId: string,
+    participant: string,
+    details: {
+      client_name?: string | null;
+      agent_id?: string | null;
+      runtime?: string | null;
+      display_name?: string | null;
+      workflow_mode?: string | null;
+      workflow_model?: string | null;
+    },
+  ): Promise<Record<string, unknown>> {
+    const clientName = typeof details.client_name === "string" ? details.client_name.slice(0, 120) : null;
+    const agentId = typeof details.agent_id === "string" ? details.agent_id.slice(0, 200) : null;
+    const runtime = typeof details.runtime === "string" ? details.runtime.slice(0, 60) : null;
+    const displayName = typeof details.display_name === "string" ? details.display_name.slice(0, 120) : null;
+    const workflowMode = typeof details.workflow_mode === "string" ? details.workflow_mode.slice(0, 40) : null;
+    const workflowModel = typeof details.workflow_model === "string" ? details.workflow_model.slice(0, 120) : null;
+
+    const joinedAt = nowIso();
+    const participantRow = this.sql.exec(
+      "SELECT joined, participant_token FROM participants WHERE name=? LIMIT 1",
+      participant
+    ).toArray()[0] as Record<string, unknown> | undefined;
+    const existingParticipantToken = participantRow?.participant_token ? String(participantRow.participant_token) : "";
+    const participantToken = existingParticipantToken || `ptok_${crypto.randomUUID().replace(/-/g, "")}`;
+    const participantDigest = await sha256Hex(participantToken);
+
+    this.sql.exec(
+      "UPDATE participants SET joined=1, joined_at=COALESCE(joined_at, ?), participant_token=COALESCE(participant_token, ?), online=1, last_seen_at=?, client_name=?, agent_id=COALESCE(?, agent_id), runtime=COALESCE(?, runtime), display_name=COALESCE(?, display_name) WHERE name=?",
+      joinedAt,
+      participantToken,
+      joinedAt,
+      clientName,
+      agentId,
+      runtime,
+      displayName || clientName || agentId,
+      participant
+    );
+    const participantTokenKey = `participant:${participant}`;
+    const existingParticipantTokenKey = this.sql.exec("SELECT key FROM tokens WHERE key=? LIMIT 1", participantTokenKey).toArray();
+    if (existingParticipantTokenKey.length) {
+      this.sql.exec("UPDATE tokens SET digest=? WHERE key=?", participantDigest, participantTokenKey);
+    } else {
+      this.sql.exec("INSERT INTO tokens (key, digest) VALUES (?, ?)", participantTokenKey, participantDigest);
+    }
+    this.sql.exec("UPDATE room SET first_joined_at=COALESCE(first_joined_at, ?) WHERE id=?", joinedAt, roomId);
+    const joinedCount = Number(
+      (this.sql.exec("SELECT COUNT(*) AS count FROM participants WHERE joined=1").one() as Record<string, unknown> | null)?.count || 0
+    );
+    const participantCount = Number(
+      (this.sql.exec("SELECT COUNT(*) AS count FROM participants").one() as Record<string, unknown> | null)?.count || 0
+    );
+    if (participantCount > 0 && joinedCount >= participantCount) {
+      this.sql.exec("UPDATE room SET all_joined_at=COALESCE(all_joined_at, ?) WHERE id=?", joinedAt, roomId);
+    }
+    await this.appendEvent("*", "join", { participant, client_name: clientName, agent_id: agentId, runtime });
+
+    const snapshot = await this.snapshot(roomId);
     await this.publishRoomSnapshot("join", snapshot);
-    return json({
+    return {
       participant,
       participant_token: participantToken,
       room: snapshot,
       ...(agentId ? { agent_id: agentId, runtime, display_name: displayName || clientName || agentId } : {}),
-    });
+      ...(workflowMode ? { workflow_mode: workflowMode } : {}),
+      ...(workflowModel ? { workflow_model: workflowModel } : {}),
+    };
+  }
+
+  private async handleJoin(request: Request, roomId: string): Promise<Response> {
+    this.ensureSchema();
+    this.invalidateSnapshotCache();
+    const participantAuth = await this.authenticateJoinInvite(request);
+    const participant = participantAuth.name;
+    const body = (await request.json().catch(() => ({}))) as any;
+    const clientName = typeof body?.client_name === "string" ? body.client_name.slice(0, 120) : null;
+    const agentId = typeof body?.agent_id === "string" ? body.agent_id.slice(0, 200) : null;
+    const runtime = typeof body?.runtime === "string" ? body.runtime.slice(0, 60) : null;
+    const displayName = typeof body?.display_name === "string" ? body.display_name.slice(0, 120) : null;
+    const workflowMode = typeof body?.workflow_mode === "string" ? body.workflow_mode.slice(0, 40) : null;
+    const workflowModel = typeof body?.workflow_model === "string" ? body.workflow_model.slice(0, 120) : null;
+    const requireOwnerApproval = body?.require_owner_approval === true;
+
+    const existingGate = this.currentJoinGate(participant);
+    if (!participantAuth.joined) {
+      if (existingGate?.state === "pending") {
+        const room = await this.snapshot(roomId);
+        await this.flushDerivedRoomState(room);
+        return json(
+          {
+            error: "owner_approval_required",
+            join_blocked: true,
+            participant,
+            room,
+            gate: existingGate,
+          },
+          { status: 409 }
+        );
+      }
+      if (existingGate?.state === "rejected") {
+        return json(
+          {
+            error: "owner_approval_rejected",
+            join_blocked: true,
+            participant,
+            gate: existingGate,
+          },
+          { status: 409 }
+        );
+      }
+      if (requireOwnerApproval && !existingGate) {
+        const room = await this.snapshot(roomId);
+        await this.flushDerivedRoomState(room);
+        const gate = await this.createJoinApproveGate(room, participant, {
+          client_name: clientName,
+          agent_id: agentId,
+          runtime,
+          display_name: displayName,
+          workflow_mode: workflowMode,
+          workflow_model: workflowModel,
+        });
+        return json(
+          {
+            error: "owner_approval_required",
+            join_blocked: true,
+            participant,
+            room,
+            gate,
+          },
+          { status: 409 }
+        );
+      }
+    }
+    return json(await this.completeParticipantJoin(roomId, participant, {
+      client_name: clientName,
+      agent_id: agentId,
+      runtime,
+      display_name: displayName,
+      workflow_mode: workflowMode,
+      workflow_model: workflowModel,
+    }));
+  }
+
+  private async handleJoinGateResolve(request: Request, roomId: string, gateId: string): Promise<Response> {
+    this.ensureSchema();
+    await this.requireHost(request);
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const decisionRaw = String(body.decision || "").trim().toLowerCase();
+    const decision = decisionRaw === "approve" ? "approved" : decisionRaw === "reject" ? "rejected" : "";
+    if (!decision) return badRequest("decision must be approve or reject");
+
+    const existing = this.sql.exec(
+      "SELECT * FROM owner_gates WHERE gate_id=? AND gate_type='join_approve' LIMIT 1",
+      gateId
+    ).toArray()[0] as Record<string, unknown> | undefined;
+    const gate = this.serializeOwnerGate(existing || null);
+    if (!gate) return json({ error: "gate_not_found" }, { status: 404 });
+    if (gate.state !== "pending") {
+      return json({ error: "gate_not_pending", gate }, { status: 409 });
+    }
+
+    const resolvedAt = nowIso();
+    const resolutionPayload = {
+      decision,
+      note: typeof body.note === "string" ? body.note.slice(0, 500) : "",
+    };
+    this.sql.exec(
+      "UPDATE owner_gates SET state=?, resolved_at=?, resolution_payload_json=? WHERE gate_id=?",
+      decision,
+      resolvedAt,
+      JSON.stringify(resolutionPayload),
+      gateId
+    );
+    const updated = this.currentJoinGate(gate.participant);
+    if (decision === "approved" && body.auto_join === true) {
+      const joinRequest = gate.context?.join_request && typeof gate.context.join_request === "object"
+        ? gate.context.join_request as Record<string, unknown>
+        : {};
+      const joinResult = await this.completeParticipantJoin(roomId, gate.participant, {
+        client_name: typeof joinRequest.client_name === "string" ? joinRequest.client_name : null,
+        agent_id: typeof joinRequest.agent_id === "string" ? joinRequest.agent_id : null,
+        runtime: typeof joinRequest.runtime === "string" ? joinRequest.runtime : null,
+        display_name: typeof joinRequest.display_name === "string" ? joinRequest.display_name : null,
+        workflow_mode: typeof joinRequest.workflow_mode === "string" ? joinRequest.workflow_mode : null,
+        workflow_model: typeof joinRequest.workflow_model === "string" ? joinRequest.workflow_model : null,
+      });
+      return json({ gate: updated, joined: true, ...joinResult });
+    }
+    const room = await this.snapshot(roomId);
+    await this.flushDerivedRoomState(room);
+    return json({ participant: gate.participant, gate: updated, room });
   }
 
   private async handleRunnerClaim(request: Request, roomId: string): Promise<Response> {
@@ -3878,6 +4271,18 @@ export class RoomDurableObject implements DurableObject {
       msg.expect_reply = false;
       serverOverrides.push("DONE.expect_reply=false");
     }
+    const waitingOwnerBefore = this.sql.exec("SELECT waiting_owner FROM participants WHERE name=? LIMIT 1", sender).one();
+    const wasWaitingOwner = waitingOwnerBefore ? Boolean(waitingOwnerBefore.waiting_owner) : false;
+    if (wasWaitingOwner && msg.intent === "DONE") {
+      msg.intent = "NOTE";
+      msg.expect_reply = false;
+      serverOverrides.push("DONE->NOTE.waiting_owner_requires_owner_reply");
+    }
+    if (msg.intent === "DONE" && this.senderHasOutstandingCounterpartQuestion(sender)) {
+      msg.intent = "ANSWER";
+      msg.expect_reply = true;
+      serverOverrides.push("DONE->ANSWER.outstanding_counterpart_question");
+    }
     if (serverOverrides.length > 0) {
       msg.meta = {
         ...(msg.meta || {}),
@@ -3926,8 +4331,6 @@ export class RoomDurableObject implements DurableObject {
       this.sql.exec("UPDATE room SET completion_signaled=0 WHERE id IS NOT NULL");
     }
 
-    const waitingOwnerBefore = this.sql.exec("SELECT waiting_owner FROM participants WHERE name=? LIMIT 1", sender).one();
-    const wasWaitingOwner = waitingOwnerBefore ? Boolean(waitingOwnerBefore.waiting_owner) : false;
     const currentRunnerRow = this.sql.exec(
       "SELECT runner_attempt_id, runner_id, runner_mode, runner_lease_expires_at, last_runner_error FROM participants WHERE name=? LIMIT 1",
       sender
@@ -3955,6 +4358,7 @@ export class RoomDurableObject implements DurableObject {
         });
       }
       await this.appendEvent("*", "owner_wait", { participant: sender, text: msg.text, meta: msg.meta || {} });
+      await this.maybeWriteOwnerGateNotification(sender, msg.text, msg.meta || {}, roomId);
     }
     if (msg.intent === "OWNER_REPLY") {
       this.sql.exec("UPDATE participants SET waiting_owner=0 WHERE name=?", sender);
@@ -4005,31 +4409,6 @@ export class RoomDurableObject implements DurableObject {
 
     const structuredProgress = Boolean(newFieldCount || cleanFacts.length);
     const hasProgress = structuredProgress || isNewText;
-
-    if (wasWaitingOwner && msg.intent !== "ASK_OWNER" && msg.intent !== "OWNER_REPLY" && (hasProgress || msg.intent === "DONE" || inReplyToEventId !== null)) {
-      this.sql.exec("UPDATE participants SET waiting_owner=0 WHERE name=?", sender);
-      if (currentAttemptId) {
-        this.sql.exec("UPDATE participant_attempts SET status='active', updated_at=? WHERE attempt_id=?", createdAt, currentAttemptId);
-        this.updateParticipantRunnerPointer(sender, {
-          runnerId: currentRunnerId || null,
-          attemptId: currentAttemptId,
-          status: "active",
-          executionMode: currentRunnerMode,
-          runnerLastSeenAt: createdAt,
-          leaseExpiresAt: currentRunnerRow?.runner_lease_expires_at ? String(currentRunnerRow.runner_lease_expires_at) : null,
-          lastError: currentRunnerRow?.last_runner_error ? String(currentRunnerRow.last_runner_error) : null,
-        });
-      }
-      await this.appendEvent("*", "owner_resume", {
-        participant: sender,
-        text: msg.text,
-        meta: {
-          ...(msg.meta || {}),
-          resumed_by: "continuation",
-          resume_intent: msg.intent,
-        }
-      });
-    }
 
     // Append message event visible to all.
     await this.appendEvent("*", "msg", {
@@ -4501,7 +4880,10 @@ export class RoomDurableObject implements DurableObject {
         last_seen_at: p.last_seen_at ? String(p.last_seen_at) : null,
         done: Boolean(p.done),
         waiting_owner: Boolean(p.waiting_owner),
-        client_name: p.client_name ? String(p.client_name) : null
+        client_name: p.client_name ? String(p.client_name) : null,
+        agent_id: p.agent_id ? String(p.agent_id) : null,
+        runtime: p.runtime ? String(p.runtime) : null,
+        display_name: p.display_name ? String(p.display_name) : null,
       })),
       runner_attempts: attemptRecords,
     };
@@ -4551,10 +4933,11 @@ export class RoomDurableObject implements DurableObject {
     const missing = requiredFields.filter((k) => !filled.includes(k));
     const explicitCompletionSignaled = Boolean(room.completion_signaled);
     const anyParticipantDone = Number(this.sql.exec("SELECT COUNT(*) AS c FROM participants WHERE done=1").one()?.c || 0) > 0;
+    const waitingOwner = Number(this.sql.exec("SELECT COUNT(*) AS c FROM participants WHERE waiting_owner=1").one()?.c || 0) > 0;
     const terminalCompletionInferred = this.inferTerminalCompletionHandshake();
     const completionSignaled = explicitCompletionSignaled || anyParticipantDone || terminalCompletionInferred;
 
-    if (((requiredFields.length > 0 && missing.length === 0) || terminalCompletionInferred) && completionSignaled) {
+    if (!waitingOwner && (((requiredFields.length > 0 && missing.length === 0) || terminalCompletionInferred) && completionSignaled)) {
       const detail = terminalCompletionInferred
         ? "terminal no-reply counterpart message plus DONE inferred completion"
         : "required fields complete and completion signal present";
@@ -4563,7 +4946,7 @@ export class RoomDurableObject implements DurableObject {
     }
 
     const everyoneDone = this.sql.exec("SELECT COUNT(*) AS c FROM participants WHERE done=0").one();
-    if (everyoneDone && Number(everyoneDone.c) === 0) {
+    if (!waitingOwner && everyoneDone && Number(everyoneDone.c) === 0) {
       if (requiredFields.length > 0 && missing.length > 0) {
         return;
       }
@@ -4590,6 +4973,29 @@ export class RoomDurableObject implements DurableObject {
     if (stallCount >= stallLimit) {
       await this.closeRoom("stall_limit", "stall limit reached");
     }
+  }
+
+  private senderHasOutstandingCounterpartQuestion(sender: string): boolean {
+    const rows = this.sql
+      .exec("SELECT payload_json FROM events WHERE type='msg' ORDER BY id DESC LIMIT 50")
+      .toArray() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(String(row.payload_json || "{}"));
+      } catch {
+        continue;
+      }
+      const evt = storedMessageEventFromPayload(payload);
+      if (!evt) continue;
+      if (evt.sender === sender) return false;
+      const counterpartAsked =
+        evt.intent === "ASK"
+        || evt.questions.some((item) => Boolean(item))
+        || (evt.expect_reply && looksLikeDirectQuestion(evt.text));
+      if (counterpartAsked) return true;
+    }
+    return false;
   }
 
   private inferTerminalCompletionHandshake(): boolean {

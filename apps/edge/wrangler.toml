@@ -48,6 +48,18 @@ class_name = "MissionDurableObject"
 name = "TEAM_REGISTRY"
 class_name = "TeamRegistryDurableObject"
 
+[[durable_objects.bindings]]
+name = "AGENT_INBOXES"
+class_name = "AgentInboxDurableObject"
+
+[[workflows]]
+name = "clawroom-room-participant"
+binding = "ROOM_PARTICIPANT_WORKFLOW"
+class_name = "RoomParticipantWorkflow"
+
+[ai]
+binding = "AI"
+
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["RoomRegistryDurableObject"]
@@ -55,3 +67,7 @@ new_sqlite_classes = ["RoomRegistryDurableObject"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["MissionDurableObject", "TeamRegistryDurableObject"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["AgentInboxDurableObject"]

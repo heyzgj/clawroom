@@ -195,8 +195,25 @@ type RegistryRoom = {
   runner_attempts: RunnerAttemptSummary[];
 };
 
+type RoomHistory = {
+  room_id: string;
+  host_token_digest: string;
+  room: Record<string, unknown>;
+  result: Record<string, unknown>;
+  updated_at: string;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const bytes = new Uint8Array(digest);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function parsePositiveInt(value: string | null, fallback: number, max: number): number {
@@ -412,6 +429,9 @@ export class RoomRegistryDurableObject implements DurableObject {
       if (request.method === "POST" && url.pathname === "/internal/upsert") {
         return await this.handleUpsert(request);
       }
+      if (request.method === "POST" && url.pathname === "/internal/history") {
+        return await this.handleHistoryUpsert(request);
+      }
       if (request.method === "POST" && url.pathname === "/internal/remove") {
         return await this.handleRemove(request);
       }
@@ -426,6 +446,14 @@ export class RoomRegistryDurableObject implements DurableObject {
       }
       if (request.method === "GET" && url.pathname === "/monitor/events") {
         return await this.handleEvents(request);
+      }
+      const historyResultMatch = url.pathname.match(/^\/monitor\/rooms\/([^/]+)\/result$/);
+      if (request.method === "GET" && historyResultMatch) {
+        return await this.handleRoomHistoryResult(decodeURIComponent(historyResultMatch[1] || ""), request);
+      }
+      const historyEventsMatch = url.pathname.match(/^\/monitor\/rooms\/([^/]+)\/events$/);
+      if (request.method === "GET" && historyEventsMatch) {
+        return await this.handleRoomHistoryEvents(decodeURIComponent(historyEventsMatch[1] || ""), request);
       }
 
       return json({ error: "not_found" }, { status: 404 });
@@ -510,6 +538,14 @@ export class RoomRegistryDurableObject implements DurableObject {
       );
       CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_events_type_created_at ON events(type, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS room_history (
+        room_id TEXT PRIMARY KEY,
+        host_token_digest TEXT NOT NULL,
+        room_json TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
     `);
     this.ensureRoomColumns();
     this.sql.exec(`
@@ -1319,6 +1355,108 @@ export class RoomRegistryDurableObject implements DurableObject {
     this.appendEvent("room_removed", roomId, { room_id: roomId, reason });
     this.invalidateDerivedCaches();
     return json({ ok: true });
+  }
+
+  private async handleHistoryUpsert(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const roomId = String(body.room_id || "").trim();
+    const hostTokenDigest = String(body.host_token_digest || "").trim();
+    const room = body.room && typeof body.room === "object" && !Array.isArray(body.room)
+      ? body.room as Record<string, unknown>
+      : null;
+    const result = body.result && typeof body.result === "object" && !Array.isArray(body.result)
+      ? body.result as Record<string, unknown>
+      : null;
+    if (!roomId) return badRequest("room_id required");
+    if (!hostTokenDigest) return badRequest("host_token_digest required");
+    if (!room) return badRequest("room required");
+    if (!result) return badRequest("result required");
+    const updatedAt = nowIso();
+    this.sql.exec(
+      `INSERT INTO room_history (room_id, host_token_digest, room_json, result_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(room_id) DO UPDATE SET
+         host_token_digest=excluded.host_token_digest,
+         room_json=excluded.room_json,
+         result_json=excluded.result_json,
+         updated_at=excluded.updated_at`,
+      roomId,
+      hostTokenDigest,
+      JSON.stringify(room),
+      JSON.stringify(result),
+      updatedAt,
+    );
+    return json({ ok: true });
+  }
+
+  private loadRoomHistory(roomId: string): RoomHistory | null {
+    const row = this.sql.exec(
+      "SELECT room_id, host_token_digest, room_json, result_json, updated_at FROM room_history WHERE room_id=? LIMIT 1",
+      roomId,
+    ).toArray()[0] as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      room_id: String(row.room_id || ""),
+      host_token_digest: String(row.host_token_digest || ""),
+      room: row.room_json ? JSON.parse(String(row.room_json)) as Record<string, unknown> : {},
+      result: row.result_json ? JSON.parse(String(row.result_json)) as Record<string, unknown> : {},
+      updated_at: String(row.updated_at || ""),
+    };
+  }
+
+  private async requireHistoryHost(request: Request, history: RoomHistory): Promise<void> {
+    const token = new URL(request.url).searchParams.get("host_token") || request.headers.get("X-Host-Token") || "";
+    if (!token) throw new Response(JSON.stringify({ error: "unauthorized", message: "missing host token" }), { status: 401 });
+    const digest = await sha256Hex(token);
+    if (digest !== history.host_token_digest) {
+      throw new Response(JSON.stringify({ error: "unauthorized", message: "invalid host token" }), { status: 401 });
+    }
+  }
+
+  private async handleRoomHistoryResult(roomId: string, request: Request): Promise<Response> {
+    const history = this.loadRoomHistory(roomId);
+    if (!history) return json({ error: "room_not_found" }, { status: 404 });
+    await this.requireHistoryHost(request, history);
+    return json({ result: history.result, room: history.room });
+  }
+
+  private async handleRoomHistoryEvents(roomId: string, request: Request): Promise<Response> {
+    const history = this.loadRoomHistory(roomId);
+    if (!history) return json({ error: "room_not_found" }, { status: 404 });
+    await this.requireHistoryHost(request, history);
+    const url = new URL(request.url);
+    const after = parsePositiveInt(url.searchParams.get("after"), 0, Number.MAX_SAFE_INTEGER);
+    const limit = parsePositiveInt(url.searchParams.get("limit"), 200, 1000);
+    const transcript = Array.isArray(history.result.transcript) ? history.result.transcript as Array<Record<string, unknown>> : [];
+    const events: Array<Record<string, unknown>> = transcript.map((item, index) => ({
+      id: Number(item.id || index + 1),
+      created_at: String(item.created_at || history.updated_at),
+      type: "msg",
+      payload: {
+        message: {
+          sender: String(item.sender || ""),
+          intent: String(item.intent || ""),
+          text: String(item.text || ""),
+          fills: item.fills && typeof item.fills === "object" ? item.fills : {},
+          facts: Array.isArray(item.facts) ? item.facts : [],
+          questions: Array.isArray(item.questions) ? item.questions : [],
+          expect_reply: Boolean(item.expect_reply),
+          meta: item.meta && typeof item.meta === "object" ? item.meta : {},
+        },
+      },
+    }));
+    const stopReason = String((history.room as Record<string, unknown>).stop_reason || (history.result as Record<string, unknown>).stop_reason || "").trim();
+    const stopDetail = String((history.room as Record<string, unknown>).stop_detail || (history.result as Record<string, unknown>).stop_detail || "").trim();
+    const statusEventId = (events.length ? Number(events[events.length - 1].id || 0) : 0) + 1;
+    events.push({
+      id: statusEventId,
+      created_at: String((history.room as Record<string, unknown>).updated_at || history.updated_at),
+      type: "status",
+      payload: { status: "closed", reason: stopReason, detail: stopDetail },
+    });
+    const filtered = events.filter((event) => Number(event.id || 0) > after).slice(0, limit);
+    const nextCursor = filtered.length ? Number(filtered[filtered.length - 1].id || after) : after;
+    return json({ room: history.room, events: filtered, next_cursor: nextCursor });
   }
 
   private buildRoomList(request: Request): RegistryRoom[] {

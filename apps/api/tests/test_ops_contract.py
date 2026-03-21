@@ -18,6 +18,9 @@ def test_monitor_auth_fails_closed_when_token_missing() -> None:
     source = (ROOT / "apps" / "edge" / "src" / "worker.ts").read_text(encoding="utf-8")
     assert 'monitor admin token is not configured' in source
     assert '/monitor/summary' in source
+    assert 'request.method === "GET" && url.pathname === "/agents"' in source
+    assert "const registrationResponse = await teamRegistry.fetch" in source
+    assert "if (registrationResponse.ok)" in source
 
 
 def test_ops_ui_has_explicit_degraded_state() -> None:
@@ -27,6 +30,12 @@ def test_ops_ui_has_explicit_degraded_state() -> None:
     assert "Monitor admin token required. Open the ops link with ?admin_token=... first." in source
     assert "function resetOpsMetrics" in source
     assert "DOM.opsMetricTotal.textContent = '--';" in source
+
+
+def test_monitor_presence_copy_uses_last_active_language() -> None:
+    source = (ROOT / "apps" / "monitor" / "src" / "main.js").read_text(encoding="utf-8")
+    assert "last active" in source
+    assert "not currently active" in source
 
 
 def test_registry_exposes_agent_friendly_summary_route() -> None:
@@ -140,6 +149,39 @@ def test_room_fetch_path_has_timeout_catch_up_close() -> None:
     assert 'await this.closeRoom("timeout", "deadline exceeded");' in source
 
 
+def test_closed_room_history_contract_is_persisted_in_registry_and_used_for_fallback() -> None:
+    registry_source = (ROOT / "apps" / "edge" / "src" / "worker_registry.ts").read_text(encoding="utf-8")
+    room_source = (ROOT / "apps" / "edge" / "src" / "worker_room.ts").read_text(encoding="utf-8")
+    worker_source = (ROOT / "apps" / "edge" / "src" / "worker.ts").read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS room_history" in registry_source
+    assert 'url.pathname === "/internal/history"' in registry_source
+    assert 'url.pathname.match(/^\\/monitor\\/rooms\\/([^/]+)\\/result$/)' in registry_source
+    assert 'url.pathname.match(/^\\/monitor\\/rooms\\/([^/]+)\\/events$/)' in registry_source
+    assert "host_token_digest" in registry_source
+    assert "private async requireHistoryHost" in registry_source
+    assert "private async handleRoomHistoryResult" in registry_source
+    assert "private async handleRoomHistoryEvents" in registry_source
+    assert "await this.publishRoomHistory(stub, room);" in room_source
+    assert '"https://registry/internal/history"' in room_source
+    assert "host_token_digest: hostTokenDigest" in room_source
+    assert "isHistoryFallbackPath" in worker_source
+    assert "fetchRegistryHistoryFallback" in worker_source
+    assert 'forwardPath.endsWith("/monitor/stream")' in worker_source
+
+
+def test_worker_room_blocks_done_when_counterpart_question_is_unresolved() -> None:
+    source = (ROOT / "apps" / "edge" / "src" / "worker_room.ts").read_text(encoding="utf-8")
+    prompt_source = (ROOT / "packages" / "client" / "src" / "clawroom_client_core" / "prompting.py").read_text(encoding="utf-8")
+    assert "private senderHasOutstandingCounterpartQuestion(sender: string): boolean" in source
+    assert 'msg.intent === "DONE" && this.senderHasOutstandingCounterpartQuestion(sender)' in source
+    assert 'serverOverrides.push("DONE->ANSWER.outstanding_counterpart_question")' in source
+    assert "Do not use DONE if the counterpart has asked a substantive unanswered question since your last turn." in prompt_source
+    assert 'serverOverrides.push("DONE->NOTE.waiting_owner_requires_owner_reply")' in source
+    assert 'SELECT COUNT(*) AS c FROM participants WHERE waiting_owner=1' in source
+    assert "After you send ASK_OWNER, do not send DONE or a normal continuation until a real owner answer has arrived" in prompt_source
+
+
 def test_worker_room_emits_root_cause_incident_logs() -> None:
     source = (ROOT / "apps" / "edge" / "src" / "worker_room.ts").read_text(encoding="utf-8")
     assert '"root_cause_hints_v1"' in source
@@ -159,3 +201,26 @@ def test_worker_room_prepares_manual_repair_packages_after_grace() -> None:
     assert "private async maybePrepareManualRecoveryActions(" in source
     assert 'prepared_by_system: true' in source
     assert "await this.maybePrepareManualRecoveryActions(roomId, attemptRecords);" in source
+
+
+def test_worker_room_declares_deterministic_join_gate_contract() -> None:
+    source = (ROOT / "apps" / "edge" / "src" / "worker_room.ts").read_text(encoding="utf-8")
+    assert '"owner_gates_v1"' in source
+    assert "CREATE TABLE IF NOT EXISTS owner_gates" in source
+    assert 'body?.require_owner_approval === true' in source
+    assert 'error: "owner_approval_required"' in source
+    assert 'error: "owner_approval_rejected"' in source
+    assert 'parts[2] === "join_gates"' in source
+    assert 'parts[4] === "resolve"' in source
+    assert 'decision must be approve or reject' in source
+    assert 'join_request:' in source
+    assert 'body.auto_join === true' in source
+    assert 'return json({ gate: updated, joined: true, ...joinResult });' in source
+    assert "await this.requireHost(request);" in source
+
+
+def test_worker_create_room_reports_truthful_inbox_invite_results() -> None:
+    source = (ROOT / "apps" / "edge" / "src" / "worker.ts").read_text(encoding="utf-8")
+    assert 'const inboxResponse = await inbox.fetch' in source
+    assert 'workflow_mode: "conversation"' in source
+    assert 'inviteResults[participant] = inboxResponse.ok ? "invite_written" : "invite_failed"' in source
