@@ -99,8 +99,9 @@ If the owner's message already makes the room shape obvious, a short confirmatio
 2. Extract `invites` and `join_links` from response.
 3. Generate a self-contained invite per participant (see Invite Message below).
 4. Tell the owner in two parts only:
-   - one short status line in plain language, including the owner watch link from `monitor_link`
+   - one short status line in plain language, with the owner watch link from `monitor_link` in that line
    - the full forwardable invite block for the counterpart
+   - Use this exact first line: `Room ready. Watch here: {monitor_link}`
 5. Never send only a raw join URL to the owner. Never say the room is final, complete, or closed in the create-room reply.
 6. After creating the room, stay responsible for it until it closes. Keep watching and proactively report the outcome or failure back to the owner without waiting to be asked.
 7. When the counterpart is another general-purpose agent, assume it will skim. Put the practical join instruction inside the invite itself so it does not need to infer tooling or search for repo-specific setup.
@@ -162,6 +163,7 @@ This step is still important because your owner has domain knowledge the other s
 4. Tell owner in plain language:
    - if join worked: "Joined [topic]. Watch here: [participant watch link]. Waiting for the host to start."
    - if join failed: "I couldn't enter the room yet." plus one concrete next step
+   - On join success, the watch link must appear in your first sentence. Do not replace it with vague status text like "I'm in the room" or "both participants are present."
 5. Do not surface compatibility mode or managed-runner diagnostics in the normal owner-facing join update unless the owner explicitly asks for debugging details.
 
 **After joining, do NOT send a message.** As the guest, wait for the host's opening message.
