@@ -8,7 +8,7 @@ import './css/style.css';
  *
  * Views:
  *   1. Home Page (#homePage)   — shown when no room_id in URL
- *   2. Monitor View (#app)     — shown when room_id + host_token in URL
+ *   2. Monitor View (#app)     — shown when room_id + host_token or participant token in URL
  */
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,8 @@ function parseConfig() {
   const p = new URLSearchParams(window.location.search);
   const opsMode = p.get('ops');
   const roomId = p.get('room_id');
-  const hostToken = p.get('host_token');
+  const hostToken = (p.get('host_token') || '').trim();
+  const participantToken = (p.get('participant_token') || p.get('token') || '').trim();
   let adminToken = (p.get('admin_token') || '').trim();
   // Ops auth is a shared secret. To reduce friction (and avoid leaking the
   // token in URLs), remember it in localStorage once provided.
@@ -35,7 +36,8 @@ function parseConfig() {
   const apiBase = resolveApiBase();
   const missionsMode = p.get('missions');
   const briefingMode = p.get('briefing');
-  if (roomId && hostToken) return { mode: 'room', roomId, hostToken, apiBase };
+  if (roomId && hostToken) return { mode: 'room', roomId, authMode: 'host', authToken: hostToken, apiBase };
+  if (roomId && participantToken) return { mode: 'room', roomId, authMode: 'participant', authToken: participantToken, apiBase };
   // Briefing view: ?briefing=1&rooms=r1,r2&tokens=t1,t2&title=...&bot=...
   if (briefingMode === '1' || briefingMode === 'true' || missionsMode === '1' || missionsMode === 'true') {
     const rooms = (p.get('rooms') || '').split(',').filter(Boolean);
@@ -109,7 +111,8 @@ const DOM = {
 
 const State = {
   roomId: '',
-  hostToken: '',
+  authMode: 'host',
+  authToken: '',
   apiBase: '',
   status: 'active',
   participants: new Map(),   // name (lowercase) → { name, displayName, color, isTyping }
@@ -157,18 +160,148 @@ function apiPath(path) {
   return `${State.apiBase}${path}`;
 }
 
+function currentRoomAuthQuery() {
+  if (!State.authToken) return '';
+  const key = State.authMode === 'host' ? 'host_token' : 'token';
+  return `${key}=${encodeURIComponent(State.authToken)}`;
+}
+
+function roomApiUrl(path, extraQuery = '') {
+  const params = [currentRoomAuthQuery(), extraQuery].filter(Boolean).join('&');
+  return `${apiPath(path)}${params ? `?${params}` : ''}`;
+}
+
 function statusReasonLabel(reason) {
   const labels = {
-    goal_done: 'Goal Reached',
-    mutual_done: 'Completed',
-    timeout: 'Timed Out',
-    turn_limit: 'Completed',
-    stall_limit: 'Stalled',
-    session_ended: 'Completed',
-    manual_close: 'Closed',
-    closed: 'Closed',
+    goal_done: 'Outcome ready',
+    mutual_done: 'Outcome ready',
+    timeout: 'Needs a quick check',
+    turn_limit: 'Result ready',
+    stall_limit: 'Needs a quick check',
+    session_ended: 'Finished',
+    manual_close: 'Finished',
+    closed: 'Finished',
   };
-  return labels[reason] || 'Completed';
+  return labels[reason] || 'Finished';
+}
+
+function humanizeCode(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.replace(/[_-]+/g, ' ');
+}
+
+function executionModeLabel(mode) {
+  const value = String(mode || '').trim().toLowerCase();
+  if (value === 'managed_attached' || value === 'managed_hosted') return 'managed handoff';
+  if (value === 'compatibility') return 'standard handoff';
+  return humanizeCode(value);
+}
+
+function certificationLabel(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return '';
+  if (text.includes('uncertified')) return 'best-effort runtime';
+  if (text.includes('certified')) return 'stable runtime';
+  return humanizeCode(text);
+}
+
+function buildResultHeadline(stopReason, filled, total) {
+  const reason = String(stopReason || '').trim().toLowerCase();
+  if (reason === 'timeout' || reason === 'stall_limit') return 'Needs a quick check';
+  if (total > 0 && filled > 0) return 'Result ready';
+  if (reason === 'goal_done' || reason === 'mutual_done' || reason === 'turn_limit') return 'Outcome ready';
+  return 'Conversation finished';
+}
+
+function buildResultNarrative(stopReason, filled, total, turnCount) {
+  const reason = String(stopReason || '').trim().toLowerCase();
+  const safeTurns = Number(turnCount) || 0;
+  const turnText = safeTurns > 0 ? ` after ${safeTurns} ${safeTurns === 1 ? 'turn' : 'turns'}` : '';
+
+  if (total > 0 && filled >= total) {
+    return `The room wrapped up with all ${total} requested outcomes ready${turnText}.`;
+  }
+  if (total > 0 && filled > 0) {
+    const remaining = Math.max(total - filled, 0);
+    if (reason === 'timeout' || reason === 'stall_limit') {
+      return `The room paused before it fully finished. ${filled} of ${total} requested outcomes are ready, and ${remaining} still need follow-up.`;
+    }
+    return `The room wrapped up with ${filled} of ${total} requested outcomes ready${turnText}. ${remaining} ${remaining === 1 ? 'item still needs follow-up.' : 'items still need follow-up.'}`;
+  }
+  if (total > 0) {
+    if (reason === 'timeout' || reason === 'stall_limit') {
+      return 'The room stopped before it could finish the requested handoff.';
+    }
+    return `The room ended before it captured the requested handoff${turnText}.`;
+  }
+  if (reason === 'timeout' || reason === 'stall_limit') {
+    return 'The conversation paused before it fully finished.';
+  }
+  return `The conversation wrapped up${turnText}.`;
+}
+
+function buildAttentionCopy(room = {}) {
+  const executionAttention = room.execution_attention || {};
+  const reasons = new Set(
+    Array.isArray(executionAttention.reasons)
+      ? executionAttention.reasons.map((reason) => String(reason || '').trim()).filter(Boolean)
+      : []
+  );
+
+  if (reasons.has('waiting_on_owner') || reasons.has('owner_reply_overdue')) {
+    return {
+      label: 'Needs your input',
+      detail: 'A collaborator asked for your answer before they can continue.',
+      action: 'Reply in Telegram to keep this moving.',
+      cta: 'Reply in Telegram',
+    };
+  }
+  if (reasons.has('join_not_started')) {
+    return {
+      label: 'Waiting on the other side',
+      detail: 'The room is ready, but the other side has not joined yet.',
+      action: 'Open Telegram and resend the invite if it keeps waiting.',
+      cta: 'Open Telegram',
+    };
+  }
+  if (
+    reasons.has('compatibility_mode') ||
+    reasons.has('no_managed_runner') ||
+    reasons.has('compatibility_room_stalled') ||
+    reasons.has('first_relay_overdue') ||
+    reasons.has('replacement_pending') ||
+    reasons.has('repair_claim_overdue')
+  ) {
+    return {
+      label: 'Needs your attention',
+      detail: 'This room has not started cleanly yet.',
+      action: 'Open Telegram and restart or resend the handoff.',
+      cta: 'Open Telegram',
+    };
+  }
+  if (reasons.has('awaiting_mutual_completion') || reasons.has('terminal_turn_without_room_close')) {
+    return {
+      label: 'Almost done',
+      detail: 'The answer is basically ready, but one side has not wrapped up yet.',
+      action: 'Wait a moment. If it stays here, reopen the room.',
+      cta: 'Open Telegram',
+    };
+  }
+  if (reasons.has('required_fields_not_progressing')) {
+    return {
+      label: 'Needs a clearer handoff',
+      detail: 'The room is active, but it is not landing the result you asked for yet.',
+      action: 'Reply with the missing detail or refocus the request.',
+      cta: 'Open Telegram',
+    };
+  }
+  return {
+    label: 'Needs your attention',
+    detail: 'This room needs a quick manual check before it can continue.',
+    action: 'Open Telegram and keep the conversation moving.',
+    cta: 'Open Telegram',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -182,8 +315,8 @@ function showHomePage() {
   DOM.app.hidden = true;
 
   // Instruction block copy — the prompt to paste into your agent
-  const INSTRUCTION_TEXT = "Read https://clawroom.cc/skill.md — then create a ClawRoom for the task I give you.";
-  const COPY_LABEL = 'Copy to Create Room';
+const INSTRUCTION_TEXT = "Read https://clawroom.cc/skill.md. Then help me with the task I send next. If another agent should join, create a ClawRoom, give me one watch link I can open plus one forwardable invite block that explains what the room is for and how to join, make the copyable part the full invite instead of only a raw link, keep watching until the room closes, and report back in plain language. If my request is short, infer a simple setup and ask at most one blocking follow-up. Do not explain ClawRoom mechanics unless I ask.";
+  const COPY_LABEL = 'Copy for My Agent';
 
   const btnCopy = document.getElementById('btnCopyInstruction');
   const instructionTextEl = document.getElementById('instructionText');
@@ -413,9 +546,10 @@ function processEvent(evt) {
 // ---------------------------------------------------------------------------
 
 class EventClient {
-  constructor(roomId, hostToken, apiBase) {
+  constructor(roomId, authMode, authToken, apiBase) {
     this.roomId = roomId;
-    this.hostToken = hostToken;
+    this.authMode = authMode;
+    this.authToken = authToken;
     this.apiBase = apiBase;
     this._sseFailures = 0;
     this._maxSseFail = 3;
@@ -444,8 +578,12 @@ class EventClient {
       return;
     }
 
-    const url = `${this.apiBase}/rooms/${this.roomId}/monitor/stream`
-      + `?host_token=${encodeURIComponent(this.hostToken)}&after=${State.cursor}`;
+    const basePath = this.authMode === 'host'
+      ? `/rooms/${this.roomId}/monitor/stream`
+      : `/rooms/${this.roomId}/stream`;
+    const queryKey = this.authMode === 'host' ? 'host_token' : 'token';
+    const url = `${this.apiBase}${basePath}`
+      + `?${queryKey}=${encodeURIComponent(this.authToken)}&after=${State.cursor}`;
 
     this._sse = new EventSource(url);
 
@@ -500,8 +638,12 @@ class EventClient {
   async _poll() {
     if (this._stopped) return;
     try {
-      const url = `${this.apiBase}/rooms/${this.roomId}/monitor/events`
-        + `?host_token=${encodeURIComponent(this.hostToken)}&after=${State.cursor}&limit=500`;
+      const basePath = this.authMode === 'host'
+        ? `/rooms/${this.roomId}/monitor/events`
+        : `/rooms/${this.roomId}/events`;
+      const queryKey = this.authMode === 'host' ? 'host_token' : 'token';
+      const url = `${this.apiBase}${basePath}`
+        + `?${queryKey}=${encodeURIComponent(this.authToken)}&after=${State.cursor}&limit=500`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -537,13 +679,13 @@ function updateStatusUI(status, reason = '') {
 
   if (status === 'active') {
     DOM.headerStatus.classList.add('thinking');
-    DOM.headerStatus.textContent = 'Active Sync';
+    DOM.headerStatus.textContent = 'Working on it';
   } else if (status === 'waiting_owner') {
     DOM.headerStatus.classList.add('owner-wait');
-    DOM.headerStatus.textContent = 'Owner Action Required';
+    DOM.headerStatus.textContent = 'Needs your input';
   } else if (status === 'closed') {
     DOM.headerStatus.classList.add('done');
-    DOM.headerStatus.textContent = statusReasonLabel(reason);
+    DOM.headerStatus.textContent = buildResultHeadline(reason, 0, 0);
   } else if (status === 'reconnecting') {
     DOM.headerStatus.classList.add('reconnecting');
     DOM.headerStatus.textContent = 'Reconnecting…';
@@ -576,7 +718,7 @@ function renderOrbs() {
     }
     const presence = data.online
       ? 'online'
-      : (data.lastSeenAt ? `last seen ${new Date(data.lastSeenAt).toLocaleTimeString()}` : 'offline');
+      : (data.lastSeenAt ? `last active ${new Date(data.lastSeenAt).toLocaleTimeString()}` : 'not currently active');
     orb.innerHTML = `
       <div class="avatar"></div>
       <div class="meta">
@@ -589,9 +731,12 @@ function renderOrbs() {
 }
 
 async function primeRoomSnapshot() {
-  if (!State.roomId || !State.hostToken) return;
+  if (!State.roomId || !State.authToken) return;
   try {
-    const url = `${apiPath(`/rooms/${encodeURIComponent(State.roomId)}/monitor/events`)}?host_token=${encodeURIComponent(State.hostToken)}&after=0&limit=1`;
+    const path = State.authMode === 'host'
+      ? `/rooms/${encodeURIComponent(State.roomId)}/monitor/events`
+      : `/rooms/${encodeURIComponent(State.roomId)}/events`;
+    const url = roomApiUrl(path, 'after=0&limit=1');
     const res = await fetch(url);
     if (!res.ok) return;
     const data = await res.json();
@@ -625,7 +770,7 @@ function renderTimelineEvent(event) {
     el.classList.add('event-owner-wait');
     el.innerHTML = `
       <div class="event-meta">
-        <span class="event-actor">⏸ Waiting for you</span>
+        <span class="event-actor">⏸ Needs your input</span>
       </div>
       <div class="event-content">${escHtml(event.text || '')}</div>
     `;
@@ -655,7 +800,7 @@ function renderTimelineEvent(event) {
     const isSuccess = ['goal_done', 'mutual_done', 'turn_limit'].includes(reason);
     const icon = isSuccess ? '✓' : '•';
     const label = status === 'waiting_owner'
-      ? 'Owner Action Required'
+      ? 'Needs your input'
       : statusReasonLabel(reason || (status === 'closed' ? 'closed' : 'session_ended'));
     el.innerHTML = `<div class="event-content" style="color: var(--color-accent-goal)">${icon} ${label}</div>`;
   }
@@ -701,7 +846,7 @@ function renderSummaryList(container, rows, emptyText, isMissing = false) {
 
     const state = document.createElement('span');
     state.className = 'summary-item-state';
-    state.textContent = isMissing ? 'missing' : 'filled';
+    state.textContent = isMissing ? 'still needed' : 'ready';
 
     head.appendChild(key);
     head.appendChild(state);
@@ -760,31 +905,28 @@ function renderRoomSummary(result = {}, stopReasonFallback = '', fallbackMessage
 
   const total = Number(completion.total) || 0;
   const filled = Math.min(Number(completion.filled) || 0, total);
-  DOM.summaryCompletionBadge.textContent = total > 0 ? `${filled}/${total} complete` : 'Open-ended room';
+  DOM.summaryCompletionBadge.textContent = total > 0 ? `${filled} of ${total} ready` : 'Open conversation';
 
   const stopReason = String(result.stop_reason || stopReasonFallback || '').trim();
-  DOM.summaryStopReason.textContent = stopReason
-    ? `Session ended: ${statusReasonLabel(stopReason)}`
-    : 'Session ended';
+  DOM.summaryStopReason.textContent = buildResultHeadline(stopReason, filled, total);
 
   const summaryText = String(result.summary || '').trim();
+  const turnCount = Number(result.turn_count) || 0;
   DOM.summaryNarrative.textContent =
     fallbackMessage
     || summaryText
-    || (total > 0
-      ? `Captured ${filled} of ${total} expected outcomes.`
-      : 'No required outcomes were set for this room.');
+    || buildResultNarrative(stopReason, filled, total, turnCount);
 
   renderSummaryList(
     DOM.summaryFilled,
     filledRows,
-    total > 0 ? 'No outcomes were filled.' : 'No outcomes were requested.',
+    total > 0 ? 'Nothing is ready yet.' : 'No structured handoff was requested.',
     false,
   );
   renderSummaryList(
     DOM.summaryMissing,
     missingOutcomes.map((outcome) => ({ key: outcome, value: '' })),
-    total > 0 ? 'All expected outcomes were completed.' : 'Open-ended room.',
+    total > 0 ? 'Everything you asked for is here.' : 'This room was open-ended.',
     true,
   );
 
@@ -794,13 +936,14 @@ function renderRoomSummary(result = {}, stopReasonFallback = '', fallbackMessage
 
 async function maybeLoadRoomSummary(stopReasonFallback = '') {
   if (State.summaryLoaded || State.summaryLoading) return;
-  if (!State.roomId || !State.hostToken) return;
+  if (!State.roomId || !State.authToken) return;
 
   State.summaryLoading = true;
   try {
-    const url =
-      apiPath(`/rooms/${encodeURIComponent(State.roomId)}/monitor/result`)
-      + `?host_token=${encodeURIComponent(State.hostToken)}`;
+    const path = State.authMode === 'host'
+      ? `/rooms/${encodeURIComponent(State.roomId)}/monitor/result`
+      : `/rooms/${encodeURIComponent(State.roomId)}/result`;
+    const url = roomApiUrl(path);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -808,7 +951,7 @@ async function maybeLoadRoomSummary(stopReasonFallback = '') {
     State.summaryLoaded = true;
   } catch (err) {
     console.error('[ClawRoom Monitor] failed to load room summary:', err);
-    renderRoomSummary({}, stopReasonFallback, 'Room ended. Summary is not available yet.');
+    renderRoomSummary({}, stopReasonFallback, 'The room finished, but the handoff summary is not ready yet.');
   } finally {
     State.summaryLoading = false;
   }
@@ -1174,7 +1317,8 @@ function showMonitorView(cfg) {
   }
 
   State.roomId = cfg.roomId;
-  State.hostToken = cfg.hostToken;
+  State.authMode = cfg.authMode || 'host';
+  State.authToken = cfg.authToken || '';
   State.apiBase = cfg.apiBase || '';
   State.cursor = 0;
   State.seenEventIds.clear();
@@ -1184,7 +1328,7 @@ function showMonitorView(cfg) {
   colorIndex = 0;
 
   DOM.roomSummary.hidden = true;
-  DOM.summaryCompletionBadge.textContent = '0/0 complete';
+  DOM.summaryCompletionBadge.textContent = 'Starting up';
   DOM.summaryStopReason.textContent = '';
   DOM.summaryNarrative.textContent = '';
   DOM.summaryFilled.innerHTML = '';
@@ -1198,7 +1342,7 @@ function showMonitorView(cfg) {
   updateStatusUI('active');
   void primeRoomSnapshot();
 
-  const client = new EventClient(cfg.roomId, cfg.hostToken, cfg.apiBase);
+  const client = new EventClient(cfg.roomId, State.authMode, State.authToken, cfg.apiBase);
   client.start();
 }
 
@@ -1242,6 +1386,7 @@ function showBriefingView(cfg) {
   const quietLabel = document.getElementById('briefingQuietLabel');
   const quietDetail = document.getElementById('briefingQuietDetail');
   const needsYouSection = document.getElementById('briefingNeedsYou');
+  const needsYouLabel = document.getElementById('briefingNeedsYouLabel');
   const needsYouDetail = document.getElementById('briefingNeedsYouDetail');
   const telegramLink = document.getElementById('briefingTelegramLink');
   const resultsSection = document.getElementById('briefingResults');
@@ -1314,20 +1459,29 @@ function showBriefingView(cfg) {
       // State 2: Needs you
       needsYouSection.hidden = false;
       const count = needsOwner.length;
+      const primaryNeed = buildAttentionCopy(needsOwner[0].room || {});
+      if (needsYouLabel) {
+        needsYouLabel.textContent = count === 1 ? primaryNeed.label : `${count} rooms need your attention`;
+      }
       needsYouDetail.textContent = count === 1
-        ? 'Your lead wants to discuss something.'
-        : `${count} rooms need your input.`;
+        ? `${primaryNeed.detail} ${primaryNeed.action}`
+        : `${count} rooms need your attention. ${primaryNeed.action}`;
       if (bot) {
         telegramLink.href = `https://t.me/${bot}`;
+        telegramLink.textContent = primaryNeed.cta;
         telegramLink.hidden = false;
       } else {
         telegramLink.hidden = true;
       }
-      if (subtitleEl) subtitleEl.textContent = `${roomsWithData.length} room${roomsWithData.length !== 1 ? 's' : ''} tracked`;
+      if (subtitleEl) {
+        subtitleEl.textContent = count === 1
+          ? 'Something needs your attention now'
+          : `${count} rooms need your attention right now`;
+      }
     } else if (allDone) {
       // State 3: Done
       resultsSection.hidden = false;
-      resultsLabel.textContent = doneRooms.length === 1 ? 'Done' : `${doneRooms.length} rooms done`;
+      resultsLabel.textContent = doneRooms.length === 1 ? 'Result ready' : `${doneRooms.length} results ready`;
 
       // Render outcomes
       let outcomesHtml = '';
@@ -1337,7 +1491,7 @@ function showBriefingView(cfg) {
         if (keys.length === 0) {
           outcomesHtml += `<div class="briefing-outcome">
             <span class="briefing-outcome-key">Result</span>
-            <span class="briefing-outcome-value">Completed (no structured outcomes)</span>
+            <span class="briefing-outcome-value">Finished, but there is no structured handoff to review.</span>
             <span class="briefing-outcome-room">${esc(r.roomId)}</span>
           </div>`;
         } else {
@@ -1364,16 +1518,16 @@ function showBriefingView(cfg) {
         const topic = room.topic || '';
 
         let metaParts = [];
-        if (turnCount) metaParts.push(`${turnCount} turns`);
-        if (executionMode) metaParts.push(executionMode);
+        if (turnCount) metaParts.push(`${turnCount} ${turnCount === 1 ? 'turn' : 'turns'}`);
+        if (executionMode) metaParts.push(executionModeLabel(executionMode));
         if (topic) metaParts.push(topic);
 
         let badgesHtml = '';
         if (certification) {
-          badgesHtml += `<span class="briefing-badge briefing-badge--certified">${esc(certification)}</span>`;
+          badgesHtml += `<span class="briefing-badge briefing-badge--certified">${esc(certificationLabel(certification))}</span>`;
         }
         if (recoveryReason) {
-          badgesHtml += `<span class="briefing-badge briefing-badge--recovery">recovery: ${esc(recoveryReason)}</span>`;
+          badgesHtml += `<span class="briefing-badge briefing-badge--recovery">Recovered after: ${esc(humanizeCode(recoveryReason))}</span>`;
         }
 
         detailsHtml += `<div class="briefing-detail-card">
@@ -1384,27 +1538,33 @@ function showBriefingView(cfg) {
       }
       detailsBody.innerHTML = detailsHtml;
 
-      if (subtitleEl) subtitleEl.textContent = `Completed \u00B7 ${new Date().toLocaleTimeString()}`;
+      if (subtitleEl) subtitleEl.textContent = `Everything wrapped up \u00B7 ${new Date().toLocaleTimeString()}`;
     } else {
       // State 1: All quiet
       quietSection.hidden = false;
       const inProgress = activeRooms.length + needsOwner.length;
       const total = roomsWithData.length;
       if (total === 0) {
-        quietLabel.textContent = 'No rooms found';
+        quietLabel.textContent = 'Couldn’t load rooms';
         quietDetail.textContent = rooms.length > 0
-          ? 'Could not reach any of the specified rooms.'
-          : 'No rooms specified in the briefing URL.';
+          ? 'We could not reach these rooms yet. Check the link and try again.'
+          : 'This briefing link does not include any rooms yet.';
       } else {
-        quietLabel.textContent = 'All quiet';
+        quietLabel.textContent = 'Working on it';
         quietDetail.textContent = inProgress === 1
-          ? '1 task in progress'
-          : `${inProgress} tasks in progress`;
+          ? '1 room is moving. Nothing you need to do right now.'
+          : `${inProgress} rooms are moving. Nothing you need to do right now.`;
         if (doneRooms.length > 0) {
-          quietDetail.textContent += ` \u00B7 ${doneRooms.length} completed`;
+          quietDetail.textContent += doneRooms.length === 1
+            ? ' 1 result is already ready.'
+            : ` ${doneRooms.length} results are already ready.`;
         }
       }
-      if (subtitleEl) subtitleEl.textContent = `${total} room${total !== 1 ? 's' : ''} tracked \u00B7 ${new Date().toLocaleTimeString()}`;
+      if (subtitleEl) {
+        subtitleEl.textContent = total === 0
+          ? 'Checking progress...'
+          : `${total} room${total !== 1 ? 's' : ''} tracked \u00B7 ${new Date().toLocaleTimeString()}`;
+      }
     }
   }
 

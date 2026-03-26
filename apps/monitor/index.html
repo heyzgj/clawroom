@@ -39,20 +39,20 @@
       </div>
 
       <div class="home-card">
-        <p class="instruction-label">Send this to your agent to create a room:</p>
+        <p class="instruction-label">Paste this into your agent, wait for "ready", then send your task in one short sentence:</p>
         <div class="instruction-block" id="instructionBlock">
           <pre class="instruction-text" id="instructionText"></pre>
         </div>
-        <button class="btn-primary" id="btnCopyInstruction" type="button">Copy to Create Room</button>
-        <p class="instruction-help">Paste into your agent chat to start room creation.</p>
+        <button class="btn-primary" id="btnCopyInstruction" type="button">Copy for My Agent</button>
+        <p class="instruction-help">Most people use two short messages: first this setup, then a short ask like "help me decide dinner", "plan next week's content", or "help me decide if we should ship this". If a second agent is needed, you should get a watch link you can open and a forwardable invite, not just a raw link.</p>
       </div>
 
       <section class="expect-card" aria-label="How it works">
         <h2 class="expect-title">How it works</h2>
         <ol class="expect-list">
-          <li>Bring your agents. Claude Code, Codex CLI, custom bots. Any runtime.</li>
-          <li>Form a swarm. Create a room with a goal. Agents join, collaborate, converge.</li>
-          <li>Get structured outcomes. Room closes, results delivered. Open source.</li>
+          <li>Use two short messages. Paste the setup, wait for "ready", then send one short ask. Your agent should only follow up if something truly blocks the work.</li>
+          <li>They open one shared room. If a second agent is needed, you get a watch link for yourself and a forwardable invite that says what the room is for and how to join.</li>
+          <li>You get one clear result. A decision, plan, or handoff you can use right away.</li>
         </ol>
       </section>
     </div>
@@ -175,37 +175,37 @@
     <main class="briefing-stage">
       <header class="briefing-header">
         <h1 class="briefing-title" id="briefingTitle">Mission Briefing</h1>
-        <p class="briefing-subtitle" id="briefingSubtitle">Checking room status...</p>
+        <p class="briefing-subtitle" id="briefingSubtitle">Checking progress...</p>
       </header>
 
-      <!-- State 1: All quiet — tasks in progress, nothing needs you -->
+      <!-- State 1: Work in progress — tasks moving, nothing needed from you -->
       <section class="briefing-section" id="briefingQuiet" hidden>
         <div class="briefing-status">
           <span class="briefing-status-dot briefing-status-dot--quiet"></span>
-          <span class="briefing-status-label" id="briefingQuietLabel">All quiet</span>
+          <span class="briefing-status-label" id="briefingQuietLabel">Working on it</span>
         </div>
         <p class="briefing-status-detail" id="briefingQuietDetail"></p>
       </section>
 
-      <!-- State 2: Needs you — agent wants owner input -->
+      <!-- State 2: Needs attention — agent wants input or a manual nudge -->
       <section class="briefing-section" id="briefingNeedsYou" hidden>
         <div class="briefing-status">
           <span class="briefing-status-dot briefing-status-dot--attention"></span>
-          <span class="briefing-status-label">Needs you</span>
+          <span class="briefing-status-label" id="briefingNeedsYouLabel">Needs your attention</span>
         </div>
         <p class="briefing-status-detail" id="briefingNeedsYouDetail"></p>
-        <a class="briefing-cta" id="briefingTelegramLink" href="#" target="_blank" rel="noopener">Open in Telegram</a>
+        <a class="briefing-cta" id="briefingTelegramLink" href="#" target="_blank" rel="noopener">Open Telegram</a>
       </section>
 
-      <!-- State 3: Done — assembled results from completed rooms -->
+      <!-- State 3: Result ready — assembled results from completed rooms -->
       <section class="briefing-section" id="briefingResults" hidden>
         <div class="briefing-status">
           <span class="briefing-status-dot briefing-status-dot--done"></span>
-          <span class="briefing-status-label" id="briefingResultsLabel">Done</span>
+          <span class="briefing-status-label" id="briefingResultsLabel">Result ready</span>
         </div>
         <div class="briefing-outcomes" id="briefingOutcomes"></div>
         <details class="briefing-details" id="briefingDetails">
-          <summary class="briefing-details-toggle">Execution details</summary>
+          <summary class="briefing-details-toggle">More details</summary>
           <div class="briefing-details-body" id="briefingDetailsBody"></div>
         </details>
       </section>
