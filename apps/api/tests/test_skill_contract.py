@@ -23,9 +23,13 @@ def test_skill_files_are_english_and_loop_safe():
         "DO NOT send your first message until the counterpart has joined the room.",
         "Always do one owner clarify before creating a room.",
         "Keep the clarify brief and human.",
+        "Pre-room clarify is single-shot.",
         "Average owners often send one short sentence like",
         "Always ask one short clarify before creating the room, even if the request already sounds clear.",
         "The clarify can be a confirmation question or a single focused missing-detail question.",
+        "If you need both the target agent and the desired handoff shape, ask for both in the same short message.",
+        'If the owner already said "another OpenClaw" or "another agent", do not ask them for an invite link to the new room.',
+        "Do not ask a second pre-room clarify.",
         "Do not ask a generic three-question form if the owner only needs a quick result.",
         "DO NOT call POST /rooms until the owner has replied to that one clarify.",
         "Never send only a raw join URL to the owner.",
@@ -33,13 +37,14 @@ def test_skill_files_are_english_and_loop_safe():
         "When the counterpart is another general-purpose agent, assume it will skim.",
         "If you use a copyable block, that copyable block must be the full invite artifact.",
         "Do not say you already joined, are in position, are waiting in the room, or are monitoring live unless your own join really succeeded",
-        "with the owner watch link from `monitor_link` in that line",
-        "Use this exact first line: `Room ready. Watch here: {monitor_link}`",
+        "with the owner watch link as a full absolute `https://clawroom.cc/...` URL in that line",
+        "Use this exact first line: `Room ready. Watch here: {absolute_monitor_link}`",
         "Do not put any other sentence before that line. The watch link line comes first.",
-        'Watch here: [participant watch link]. Waiting for the host to start.',
+        'Watch here: [absolute participant watch link]. Waiting for the host to start.',
         'On join success, the watch link must appear in your first sentence.',
         "Owner update shape:",
         "If you are a joined participant rather than the host, give the owner the participant watch link",
+        "Watch links must be full absolute `https://clawroom.cc/...` URLs, not relative paths.",
         "Do not mention execution internals like `execution_mode`, compatibility mode, managed runner status, recovery actions, root-cause hints, or repair packages unless the owner explicitly asked for debugging.",
         "For a normal public invite flow, if the current surface can make HTTPS requests, use the invite directly:",
         "treat the public invite as sufficient authority to enter; do not invent extra host-token, managed-runner, or bridge requirements unless the API itself explicitly rejects the join",
@@ -81,5 +86,6 @@ def test_api_reference_mentions_owner_and_participant_watch_links() -> None:
     ]:
         text = path.read_text(encoding="utf-8")
         assert "`monitor_link` is the owner watch link." in text
-        assert 'watch_link: "/?room_id=room_abc123&token=ptok_xxxx"' in text
+        assert "full absolute URL" in text
+        assert 'watch_link: "https://clawroom.cc/?room_id=room_abc123&token=ptok_xxxx"' in text
         assert "https://clawroom.cc/?room_id={room_id}&token={participant_token}" in text

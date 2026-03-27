@@ -13,11 +13,13 @@ type Env = {
   MANUAL_REPAIR_PREPARE_SECONDS?: string;
   REPAIR_ISSUED_STALE_SECONDS?: string;
   CLAWROOM_PUBLIC_API_BASE?: string;
+  CLAWROOM_PUBLIC_UI_BASE?: string;
 };
 
 type RoomStatus = "active" | "closed";
 type LifecycleState = "submitted" | "working" | "input_required" | "completed" | "failed" | "canceled";
 type ExecutionMode = "managed_attached" | "compatibility" | "managed_hosted";
+type CloseResolutionMode = "consensus" | "owner_gated";
 type ExecutionAttentionState = "healthy" | "attention" | "takeover_recommended" | "takeover_required";
 type RunnerCertification = "none" | "candidate" | "certified";
 type ManagedCoverage = "none" | "partial" | "full";
@@ -72,12 +74,38 @@ type StoredMessageEvent = {
   expect_reply: boolean;
 };
 
+type ContextRefType = "commit" | "url" | "file" | "metric" | "custom";
+
+type ContextRef = {
+  type: ContextRefType;
+  label: string;
+  value: string;
+};
+
+type ContextEnvelope = {
+  summary: string;
+  refs: ContextRef[];
+};
+
+type OutcomeContract = {
+  close_conditions: {
+    min_turns: number | null;
+    min_unique_participants: number | null;
+    require_explicit_consensus: boolean;
+  };
+  resolution_mode: CloseResolutionMode;
+  field_principles: Record<string, string>;
+  scenario_hint: string | null;
+};
+
 type RoomCreateIn = {
   topic: string;
   goal: string;
   participants: string[];
   required_fields?: string[];
   expected_outcomes?: string[];
+  close_conditions?: string[];
+  resolution_mode?: CloseResolutionMode;
   turn_limit?: number;
   timeout_minutes?: number;
   stall_limit?: number;
@@ -85,6 +113,10 @@ type RoomCreateIn = {
   metadata?: Record<string, unknown>;
   mission_id?: string;
   assigned_agent?: string;
+  parent_room_id?: string;
+  prior_outcome_summary?: string;
+  prior_outcome_refs?: ContextRef[];
+  outcome_contract?: OutcomeContract | Record<string, unknown> | null;
 };
 
 type ParticipantState = {
@@ -105,10 +137,11 @@ type RoomConfig = {
   stall_limit: number;
   timeout_minutes: number;
   ttl_minutes: number;
+  resolution_mode?: CloseResolutionMode;
 };
 
 type StopReason = "goal_done" | "mutual_done" | "turn_limit" | "stall_limit" | "timeout" | "manual_close";
-type OwnerGateType = "join_approve";
+type OwnerGateType = "join_approve" | "close_approve";
 type OwnerGateState = "pending" | "approved" | "rejected" | "expired";
 
 type RootCauseHint = {
@@ -181,7 +214,16 @@ type RoomSnapshot = {
   lifecycle_state: LifecycleState;
   required_fields: string[];
   expected_outcomes: string[];
+  close_conditions: string[];
+  resolution_mode: CloseResolutionMode;
+  parent_room_id: string | null;
+  prior_outcome_summary: string | null;
+  prior_outcome_refs: ContextRef[];
+  outcome_contract: OutcomeContract | null;
+  pending_close_approval: boolean;
+  close_approval: OwnerGateSnapshot | null;
   fields: Record<string, { value: string; updated_at: string; by: string }>;
+  close_gate: OwnerGateSnapshot | null;
   status: RoomStatus;
   stop_reason: StopReason | null;
   stop_detail: string | null;
@@ -199,6 +241,7 @@ type RoomSnapshot = {
     done: boolean;
     waiting_owner: boolean;
     client_name: string | null;
+    context_envelope: ContextEnvelope | null;
   }>;
   runner_attempts: Array<{
     attempt_id: string;
@@ -269,6 +312,8 @@ const ROOM_CAPABILITIES = Object.freeze([
   "idempotent_reply_v1",
   "joined_gate_v1",
   "owner_gates_v1",
+  "close_gates_v1",
+  "close_resolution_mode_v1",
   "strict_goal_done_v2",
   "close_idempotent_v1",
   "message_bounds_v1",
@@ -292,7 +337,18 @@ const MAX_FACT_TEXT = 280;
 const MAX_QUESTION_TEXT = 280;
 const MAX_FILLS = 16;
 const MAX_FILL_KEY = 120;
-const MAX_FILL_VALUE = 500;
+const MAX_FILL_VALUE = 2_000;
+const MAX_FIELD_PRINCIPLES = 64;
+const MAX_FIELD_PRINCIPLE_KEY = 120;
+const MAX_FIELD_PRINCIPLE_VALUE = 500;
+const MAX_CONTEXT_SUMMARY = 2_000;
+const MAX_CONTEXT_REFS = 16;
+const MAX_CONTEXT_REF_LABEL = 120;
+const MAX_CONTEXT_REF_VALUE = 1_000;
+const MAX_CONTEXT_ENVELOPE_BYTES = 8 * 1024;
+const MAX_PRIOR_OUTCOME_SUMMARY = 4_000;
+const MAX_PRIOR_OUTCOME_REFS = 16;
+const ROOM_ID_RE = /^room_[A-Za-z0-9_-]{1,60}$/;
 const DEFAULT_RUNNER_LEASE_SECONDS = 45;
 const MAX_RUNNER_LEASE_SECONDS = 900;
 const DEFAULT_COMPATIBILITY_JOIN_GRACE_SECONDS = 90;
@@ -300,7 +356,9 @@ const DEFAULT_COMPATIBILITY_FIRST_RELAY_GRACE_SECONDS = 180;
 const DEFAULT_COMPATIBILITY_STALL_GRACE_SECONDS = 120;
 const DEFAULT_COMPLETION_GRACE_SECONDS = 30;
 const DEFAULT_REPAIR_ISSUED_STALE_SECONDS = 90;
+const DEFAULT_CLOSE_CONDITIONS: StopReason[] = ["goal_done", "mutual_done", "timeout", "turn_limit", "stall_limit"];
 const DEFAULT_PUBLIC_API_BASE = "https://api.clawroom.cc";
+const DEFAULT_PUBLIC_UI_BASE = "https://clawroom.cc";
 const DEFAULT_PARTICIPANT_TOUCH_DEBOUNCE_SECONDS = 10;
 const HOT_PATH_RECONCILE_DEBOUNCE_MS = 3_000;
 const HOT_PATH_EXPIRY_CHECK_DEBOUNCE_MS = 1_000;
@@ -312,6 +370,19 @@ const LIVE_ATTEMPT_STATUSES = new Set<AttemptStatus>([
   "stalled",
   "restarting",
 ]);
+const SCENARIO_PRESETS: Record<string, Record<string, string>> = Object.freeze({
+  decision_packet: {
+    decision: "Must be a specific actionable decision, not 'needs further discussion'.",
+    ranked_options: "Must list at least 2 options, with the chosen recommendation first.",
+    success_metrics: "Must include at least one measurable metric with a timeline.",
+    owner_actions: "Must include at least one action the owner can take this week.",
+  },
+  pilot_handoff: {
+    decision: "Must name the specific pilot scope and timeline.",
+    rationale: "Must reference concrete evidence or constraints.",
+    next_steps: "Must include at least one action with an owner and a deadline.",
+  },
+});
 
 type RunnerAttemptRecord = {
   attempt_id: string;
@@ -363,6 +434,24 @@ function normOutcomeKey(value: unknown): string {
 function parseOutcomeList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((x) => String(x).trim()).filter(Boolean).slice(0, 64);
+}
+
+function normalizeCloseConditions(raw: unknown): StopReason[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_CLOSE_CONDITIONS];
+  const allowed = new Set<StopReason>(["goal_done", "mutual_done", "timeout", "turn_limit", "stall_limit", "manual_close"]);
+  const values: StopReason[] = [];
+  for (const item of raw) {
+    const value = String(item || "").trim().toLowerCase();
+    if (!value) continue;
+    if (!allowed.has(value as StopReason)) continue;
+    const reason = value as StopReason;
+    if (!values.includes(reason)) values.push(reason);
+  }
+  return values.length > 0 ? values : [...DEFAULT_CLOSE_CONDITIONS];
+}
+
+function normalizeResolutionMode(raw: unknown): CloseResolutionMode {
+  return String(raw || "").trim().toLowerCase() === "owner_gated" ? "owner_gated" : "consensus";
 }
 
 function outcomeSignature(values: string[]): string {
@@ -562,6 +651,102 @@ function normalizeObjectRecord(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {};
 }
 
+function serializedByteLength(raw: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(raw)).length;
+}
+
+function normalizeContextRefType(raw: unknown): ContextRefType | null {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "commit" || value === "url" || value === "file" || value === "metric" || value === "custom") {
+    return value;
+  }
+  return null;
+}
+
+function normalizeContextRef(raw: unknown): ContextRef | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const type = normalizeContextRefType(record.type);
+  const label = String(record.label || "").trim();
+  const value = String(record.value || "").trim();
+  if (!label || !value) return null;
+  if (label.length > MAX_CONTEXT_REF_LABEL || value.length > MAX_CONTEXT_REF_VALUE) return null;
+  if (!type || !label || !value) return null;
+  return { type, label, value };
+}
+
+function normalizeContextEnvelope(raw: unknown): ContextEnvelope | null {
+  if (raw == null) return null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const summary = String(record.summary || "").trim();
+  if (!summary) return null;
+  if (summary.length > MAX_CONTEXT_SUMMARY) return null;
+  if (!Array.isArray(record.refs) || record.refs.length > MAX_CONTEXT_REFS) return null;
+  const refs = record.refs.map((ref) => normalizeContextRef(ref));
+  if (refs.some((ref) => !ref)) return null;
+  const envelope = { summary, refs: refs as ContextRef[] };
+  if (serializedByteLength(envelope) > MAX_CONTEXT_ENVELOPE_BYTES) return null;
+  return envelope;
+}
+
+function normalizePriorOutcomeRefs(raw: unknown): ContextRef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((ref) => normalizeContextRef(ref)).filter((ref): ref is ContextRef => Boolean(ref)).slice(0, MAX_PRIOR_OUTCOME_REFS);
+}
+
+function normalizeFieldPrinciples(raw: unknown): Record<string, string> | null {
+  if (raw == null) return {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const entries = Object.entries(record);
+  if (entries.length > MAX_FIELD_PRINCIPLES) return null;
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of entries) {
+    const keySource = String(rawKey || "").trim();
+    const valueSource = String(rawValue || "").trim();
+    if (!keySource || !valueSource) continue;
+    if (keySource.length > MAX_FIELD_PRINCIPLE_KEY || valueSource.length > MAX_FIELD_PRINCIPLE_VALUE) return null;
+    normalized[keySource] = valueSource;
+  }
+  return normalized;
+}
+
+function normalizeOutcomeContract(raw: unknown): OutcomeContract | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const closeConditionsRaw =
+    record.close_conditions && typeof record.close_conditions === "object" && !Array.isArray(record.close_conditions)
+      ? (record.close_conditions as Record<string, unknown>)
+      : {};
+  const minTurns = parseOptionalPositiveInt(closeConditionsRaw.min_turns);
+  if (minTurns !== null && minTurns > 500) return null;
+  const minUniqueParticipants = parseOptionalPositiveInt(closeConditionsRaw.min_unique_participants);
+  if (minUniqueParticipants !== null && minUniqueParticipants > 8) return null;
+  const requireExplicitConsensus = Boolean(closeConditionsRaw.require_explicit_consensus);
+  const scenarioHint = trimmedString(record.scenario_hint, 64) || null;
+  const fieldPrinciples = normalizeFieldPrinciples(record.field_principles);
+  if (fieldPrinciples === null) return null;
+  const expandedFieldPrinciples = scenarioHint && Object.keys(fieldPrinciples).length === 0
+    ? { ...(SCENARIO_PRESETS[scenarioHint] || {}) }
+    : fieldPrinciples;
+  return {
+    close_conditions: {
+      min_turns: minTurns,
+      min_unique_participants: minUniqueParticipants,
+      require_explicit_consensus: requireExplicitConsensus,
+    },
+    resolution_mode: normalizeResolutionMode(record.resolution_mode),
+    field_principles: expandedFieldPrinciples,
+    scenario_hint: scenarioHint,
+  };
+}
+
+function normalizeRoomId(raw: unknown): string | null {
+  const value = trimmedString(raw, 64);
+  return ROOM_ID_RE.test(value) ? value : null;
+}
+
 function clampLeaseSeconds(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_RUNNER_LEASE_SECONDS;
@@ -661,6 +846,12 @@ export class RoomDurableObject implements DurableObject {
       if (request.method === "POST" && parts.length === 5 && parts[2] === "join_gates" && parts[4] === "resolve") {
         return await this.handleJoinGateResolve(request, roomId, parts[3] || "");
       }
+      if (request.method === "POST" && parts.length === 5 && parts[2] === "close_gates" && parts[4] === "resolve") {
+        return await this.resolveCloseGate(request, roomId, parts[3] || "");
+      }
+      if (request.method === "POST" && tail === "/owner_resolution") {
+        return await this.handleOwnerResolution(request, roomId);
+      }
       if (request.method === "POST" && tail === "/runner/claim") return await this.handleRunnerClaim(request, roomId);
       if (request.method === "POST" && tail === "/runner/renew") return await this.handleRunnerRenew(request, roomId);
       if (request.method === "POST" && tail === "/runner/release") return await this.handleRunnerRelease(request, roomId);
@@ -716,9 +907,7 @@ export class RoomDurableObject implements DurableObject {
       const deadlineRaw = String(row.deadline_at || "");
       const deadlineMs = Date.parse(deadlineRaw);
       if (Number.isFinite(deadlineMs) && now >= deadlineMs) {
-        const changed = await this.closeRoom("timeout", "deadline exceeded");
-        const snapshot = roomId ? await this.snapshot(roomId) : null;
-        if (changed && snapshot) await this.publishRoomSnapshot("timeout", snapshot);
+        if (roomId) await this.requestRoomClose(roomId, "timeout", "deadline exceeded", { source: "auto" });
         return;
       }
       await this.scheduleActiveAlarm(row as Record<string, unknown>);
@@ -1198,10 +1387,17 @@ export class RoomDurableObject implements DurableObject {
     if (this.schemaReady) return;
     this.sql.exec(`
 		      CREATE TABLE IF NOT EXISTS room (
-		        id TEXT PRIMARY KEY,
-		        topic TEXT NOT NULL,
-		        goal TEXT NOT NULL,
+	        id TEXT PRIMARY KEY,
+	        topic TEXT NOT NULL,
+	        goal TEXT NOT NULL,
 	        required_fields_json TEXT NOT NULL,
+	        parent_room_id TEXT,
+	        prior_outcome_summary TEXT,
+	        prior_outcome_refs_json TEXT NOT NULL DEFAULT '[]',
+	        outcome_contract_json TEXT NOT NULL DEFAULT '{}',
+        close_conditions_json TEXT NOT NULL DEFAULT '[]',
+        resolution_mode TEXT NOT NULL DEFAULT 'consensus',
+        field_mutation_version INTEGER NOT NULL DEFAULT 0,
         turn_limit INTEGER NOT NULL,
         stall_limit INTEGER NOT NULL,
         timeout_minutes INTEGER NOT NULL,
@@ -1241,7 +1437,9 @@ export class RoomDurableObject implements DurableObject {
 	        last_seen_at TEXT,
 	        done INTEGER NOT NULL,
 	        waiting_owner INTEGER NOT NULL,
+	        consensus_version INTEGER NOT NULL DEFAULT 0,
 	        client_name TEXT,
+	        context_envelope_json TEXT NOT NULL DEFAULT '{}',
 	        agent_id TEXT,
 	        runtime TEXT,
 	        display_name TEXT,
@@ -1370,9 +1568,30 @@ export class RoomDurableObject implements DurableObject {
 	    if (!roomCols.includes("latest_msg_expect_reply")) {
 	      this.sql.exec("ALTER TABLE room ADD COLUMN latest_msg_expect_reply INTEGER");
 	    }
-	    if (!roomCols.includes("execution_mode")) {
+    if (!roomCols.includes("execution_mode")) {
 	      this.sql.exec("ALTER TABLE room ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'compatibility'");
 	    }
+    if (!roomCols.includes("parent_room_id")) {
+      this.sql.exec("ALTER TABLE room ADD COLUMN parent_room_id TEXT");
+    }
+    if (!roomCols.includes("prior_outcome_summary")) {
+      this.sql.exec("ALTER TABLE room ADD COLUMN prior_outcome_summary TEXT");
+    }
+    if (!roomCols.includes("prior_outcome_refs_json")) {
+      this.sql.exec("ALTER TABLE room ADD COLUMN prior_outcome_refs_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!roomCols.includes("outcome_contract_json")) {
+      this.sql.exec("ALTER TABLE room ADD COLUMN outcome_contract_json TEXT NOT NULL DEFAULT '{}'");
+    }
+    if (!roomCols.includes("close_conditions_json")) {
+      this.sql.exec("ALTER TABLE room ADD COLUMN close_conditions_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!roomCols.includes("resolution_mode")) {
+      this.sql.exec("ALTER TABLE room ADD COLUMN resolution_mode TEXT NOT NULL DEFAULT 'consensus'");
+    }
+    if (!roomCols.includes("field_mutation_version")) {
+      this.sql.exec("ALTER TABLE room ADD COLUMN field_mutation_version INTEGER NOT NULL DEFAULT 0");
+    }
     if (!roomCols.includes("last_recovery_reason")) {
       this.sql.exec("ALTER TABLE room ADD COLUMN last_recovery_reason TEXT");
     }
@@ -1411,6 +1630,12 @@ export class RoomDurableObject implements DurableObject {
     }
     if (!participantCols.includes("last_seen_at")) {
       this.sql.exec("ALTER TABLE participants ADD COLUMN last_seen_at TEXT");
+    }
+    if (!participantCols.includes("context_envelope_json")) {
+      this.sql.exec("ALTER TABLE participants ADD COLUMN context_envelope_json TEXT NOT NULL DEFAULT '{}'");
+    }
+    if (!participantCols.includes("consensus_version")) {
+      this.sql.exec("ALTER TABLE participants ADD COLUMN consensus_version INTEGER NOT NULL DEFAULT 0");
     }
     if (!participantCols.includes("runner_id")) {
       this.sql.exec("ALTER TABLE participants ADD COLUMN runner_id TEXT");
@@ -2144,6 +2369,25 @@ export class RoomDurableObject implements DurableObject {
     return (configured || origin || DEFAULT_PUBLIC_API_BASE).replace(/\/+$/, "");
   }
 
+  private publicUiBase(origin?: string): string {
+    const configured = String(this.env.CLAWROOM_PUBLIC_UI_BASE || "").trim();
+    if (configured) return configured.replace(/\/+$/, "");
+    const rawOrigin = String(origin || "").trim();
+    if (!rawOrigin) return DEFAULT_PUBLIC_UI_BASE;
+    try {
+      const url = new URL(rawOrigin);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        return `${url.protocol}//${url.host}`.replace(/\/+$/, "");
+      }
+      if (url.hostname === "api.clawroom.cc" || url.hostname === "www.api.clawroom.cc") {
+        return `${url.protocol}//clawroom.cc`;
+      }
+    } catch {
+      return DEFAULT_PUBLIC_UI_BASE;
+    }
+    return DEFAULT_PUBLIC_UI_BASE;
+  }
+
   private buildJoinLink(baseUrl: string, roomId: string, inviteToken: string): string {
     return `${baseUrl}/join/${roomId}?token=${encodeURIComponent(inviteToken)}`;
   }
@@ -2781,10 +3025,7 @@ export class RoomDurableObject implements DurableObject {
     if (!row || String(row.status || "") !== "active") return;
     const deadlineMs = Date.parse(String(row.deadline_at || ""));
     if (!Number.isFinite(deadlineMs) || Date.now() < deadlineMs) return;
-    const changed = await this.closeRoom("timeout", "deadline exceeded");
-    if (!changed) return;
-    const snapshot = await this.snapshot(roomId);
-    await this.publishRoomSnapshot("timeout", snapshot);
+    await this.requestRoomClose(roomId, "timeout", "deadline exceeded", { source: "auto" });
   }
 
   private touchParticipant(name: string): boolean {
@@ -3029,6 +3270,40 @@ export class RoomDurableObject implements DurableObject {
     const expectedOutcomesInput = parseOutcomeList(create.expected_outcomes);
     const hasRequiredFields = Array.isArray(create.required_fields);
     const hasExpectedOutcomes = Array.isArray(create.expected_outcomes);
+    const closeConditionsInput = normalizeCloseConditions(create.close_conditions);
+    const resolutionMode = normalizeResolutionMode(create.resolution_mode ?? defaults?.resolution_mode);
+    const parentRoomId = normalizeRoomId(create.parent_room_id);
+    if (create.parent_room_id && !parentRoomId) {
+      return badRequest("parent_room_id must look like a valid room id");
+    }
+    const priorOutcomeSummary = typeof create.prior_outcome_summary === "string" ? create.prior_outcome_summary.trim() : "";
+    if (priorOutcomeSummary.length > MAX_PRIOR_OUTCOME_SUMMARY) {
+      return badRequest("prior_outcome_summary exceeds 4000 characters");
+    }
+    if (parentRoomId && !priorOutcomeSummary) {
+      return badRequest("prior_outcome_summary is required when parent_room_id is set");
+    }
+    if (create.prior_outcome_refs != null && !Array.isArray(create.prior_outcome_refs)) {
+      return badRequest("prior_outcome_refs must be an array");
+    }
+    const priorOutcomeRefsRaw = Array.isArray(create.prior_outcome_refs) ? create.prior_outcome_refs : [];
+    if (priorOutcomeRefsRaw.length > MAX_PRIOR_OUTCOME_REFS) {
+      return badRequest("prior_outcome_refs exceeds 16 refs");
+    }
+    const priorOutcomeRefs = normalizePriorOutcomeRefs(priorOutcomeRefsRaw);
+    if (priorOutcomeRefs.length !== priorOutcomeRefsRaw.length) {
+      return badRequest("prior_outcome_refs must contain valid refs");
+    }
+    if (serializedByteLength(priorOutcomeRefs) > MAX_CONTEXT_ENVELOPE_BYTES) {
+      return badRequest("prior_outcome_refs exceeds 8KB serialized limit");
+    }
+    if (create.outcome_contract != null && (typeof create.outcome_contract !== "object" || Array.isArray(create.outcome_contract))) {
+      return badRequest("outcome_contract must be an object");
+    }
+    const outcomeContract = normalizeOutcomeContract(create.outcome_contract);
+    if (create.outcome_contract != null && serializedByteLength(create.outcome_contract) > MAX_CONTEXT_ENVELOPE_BYTES) {
+      return badRequest("outcome_contract exceeds 8KB serialized limit");
+    }
 
     if (hasRequiredFields && hasExpectedOutcomes) {
       const requiredSig = outcomeSignature(requiredFieldsInput);
@@ -3070,12 +3345,18 @@ export class RoomDurableObject implements DurableObject {
     const assignedAgent = String(create.assigned_agent || "");
 
     this.sql.exec(
-      `INSERT INTO room (id, topic, goal, required_fields_json, turn_limit, stall_limit, timeout_minutes, ttl_minutes, status, stop_reason, stop_detail, created_at, updated_at, turn_count, stall_count, deadline_at, expires_at, mission_id, assigned_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, NULL, ?, ?, 0, 0, ?, NULL, ?, ?)`,
+      `INSERT INTO room (id, topic, goal, required_fields_json, parent_room_id, prior_outcome_summary, prior_outcome_refs_json, outcome_contract_json, close_conditions_json, resolution_mode, field_mutation_version, turn_limit, stall_limit, timeout_minutes, ttl_minutes, status, stop_reason, stop_detail, created_at, updated_at, turn_count, stall_count, deadline_at, expires_at, mission_id, assigned_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'active', NULL, NULL, ?, ?, 0, 0, ?, NULL, ?, ?)`,
       roomId,
       topic,
       goal,
       JSON.stringify(requiredFields),
+      parentRoomId,
+      priorOutcomeSummary || null,
+      JSON.stringify(priorOutcomeRefs),
+      JSON.stringify(outcomeContract || {}),
+      JSON.stringify(closeConditionsInput),
+      resolutionMode,
       Math.max(2, Math.min(500, Math.floor(turnLimit))),
       Math.max(1, Math.min(200, Math.floor(stallLimit))),
       Math.max(1, Math.min(1440, Math.floor(timeoutMinutes))),
@@ -3091,7 +3372,7 @@ export class RoomDurableObject implements DurableObject {
     for (const p of participants) {
       this.sql.exec("INSERT INTO tokens (key, digest) VALUES (?, ?)", `invite:${p}`, inviteDigests[p]);
       this.sql.exec(
-        "INSERT INTO participants (name, joined, online, last_seen_at, done, waiting_owner, client_name) VALUES (?, 0, 0, NULL, 0, 0, NULL)",
+        "INSERT INTO participants (name, joined, online, last_seen_at, done, waiting_owner, consensus_version, client_name) VALUES (?, 0, 0, NULL, 0, 0, 0, NULL)",
         p
       );
     }
@@ -3109,7 +3390,8 @@ export class RoomDurableObject implements DurableObject {
     for (const [name, token] of Object.entries(inviteTokens)) {
       joinLinks[name] = `/join/${roomId}?token=${encodeURIComponent(token)}`;
     }
-    const monitorLink = `/?room_id=${encodeURIComponent(roomId)}&host_token=${encodeURIComponent(hostToken)}`;
+    const publicUiBase = this.publicUiBase(new URL(request.url).origin);
+    const monitorLink = `${publicUiBase}/?room_id=${encodeURIComponent(roomId)}&host_token=${encodeURIComponent(hostToken)}`;
 
     const snapshot: RoomSnapshot = {
       id: roomId,
@@ -3156,7 +3438,16 @@ export class RoomDurableObject implements DurableObject {
       lifecycle_state: "working",
       required_fields: [...requiredFields],
       expected_outcomes: [...requiredFields],
+      parent_room_id: parentRoomId,
+      prior_outcome_summary: priorOutcomeSummary || null,
+      prior_outcome_refs: priorOutcomeRefs,
+      outcome_contract: outcomeContract,
+      close_conditions: [...closeConditionsInput],
+      resolution_mode: resolutionMode,
+      pending_close_approval: false,
+      close_approval: null,
       fields: {},
+      close_gate: null,
       status: "active",
       stop_reason: null,
       stop_detail: null,
@@ -3174,6 +3465,7 @@ export class RoomDurableObject implements DurableObject {
         done: false,
         waiting_owner: false,
         client_name: null,
+        context_envelope: null,
       })),
       runner_attempts: [],
     };
@@ -3324,6 +3616,19 @@ export class RoomDurableObject implements DurableObject {
     }
   }
 
+  private parseJsonArray(raw: unknown): unknown[] {
+    if (!Array.isArray(raw)) {
+      if (typeof raw !== "string" || !raw.trim()) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return raw;
+  }
+
   private parseJsonStringArray(raw: unknown): string[] {
     if (typeof raw !== "string" || !raw.trim()) return [];
     try {
@@ -3387,7 +3692,7 @@ export class RoomDurableObject implements DurableObject {
     if (!row?.gate_id) return null;
     return {
       gate_id: String(row.gate_id),
-      gate_type: "join_approve",
+      gate_type: String(row.gate_type || "join_approve") as OwnerGateType,
       state: String(row.state || "pending") as OwnerGateState,
       participant: String(row.participant || ""),
       question: String(row.question || ""),
@@ -3403,6 +3708,26 @@ export class RoomDurableObject implements DurableObject {
       this.sql.exec(
         "SELECT * FROM owner_gates WHERE participant=? AND gate_type='join_approve' ORDER BY created_at DESC LIMIT 1",
         participant
+      ).toArray()[0] as Record<string, unknown> | undefined
+    ) || null;
+    return this.serializeOwnerGate(row);
+  }
+
+  private currentCloseGate(roomId: string): OwnerGateSnapshot | null {
+    const row = (
+      this.sql.exec(
+        "SELECT * FROM owner_gates WHERE participant=? AND gate_type='close_approve' ORDER BY created_at DESC LIMIT 1",
+        roomId
+      ).toArray()[0] as Record<string, unknown> | undefined
+    ) || null;
+    return this.serializeOwnerGate(row);
+  }
+
+  private currentPendingCloseGate(roomId: string): OwnerGateSnapshot | null {
+    const row = (
+      this.sql.exec(
+        "SELECT * FROM owner_gates WHERE participant=? AND gate_type='close_approve' AND state='pending' ORDER BY created_at DESC LIMIT 1",
+        roomId
       ).toArray()[0] as Record<string, unknown> | undefined
     ) || null;
     return this.serializeOwnerGate(row);
@@ -3461,9 +3786,236 @@ export class RoomDurableObject implements DurableObject {
     };
   }
 
+  private buildCloseApproveQuestion(room: RoomSnapshot, reason: StopReason, detail: string): string {
+    const outcomes = room.required_fields.length > 0 ? room.required_fields : room.expected_outcomes;
+    const outcomesText = outcomes.length > 0 ? outcomes.join(", ") : "(none)";
+    return [
+      "Close this ClawRoom now?",
+      `Room: ${room.id}`,
+      `Resolution mode: ${room.resolution_mode}`,
+      `Close condition: ${reason}`,
+      `Detail: ${detail}`,
+      `Required outcomes: ${outcomesText}`,
+      "Approve to close, or reject to keep the room active.",
+    ].join("\n");
+  }
+
+  private async createCloseApproveGate(room: RoomSnapshot, reason: StopReason, detail: string): Promise<OwnerGateSnapshot> {
+    const createdAt = nowIso();
+    const gateId = `gate_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    const context = {
+      room_id: room.id,
+      stop_reason: reason,
+      stop_detail: detail,
+      resolution_mode: room.resolution_mode,
+      close_conditions: room.close_conditions,
+      participant: room.id,
+    };
+    const question = this.buildCloseApproveQuestion(room, reason, detail);
+    this.sql.exec(
+      `INSERT INTO owner_gates (gate_id, gate_type, participant, state, question, context_json, created_at, resolved_at, resolution_payload_json)
+       VALUES (?, 'close_approve', ?, 'pending', ?, ?, ?, NULL, NULL)`,
+      gateId,
+      room.id,
+      question,
+      JSON.stringify(context),
+      createdAt
+    );
+    return {
+      gate_id: gateId,
+      gate_type: "close_approve",
+      state: "pending",
+      participant: room.id,
+      question,
+      context,
+      created_at: createdAt,
+      resolved_at: null,
+      resolution_payload: null,
+    };
+  }
+
+  private async forceCloseRoom(roomId: string, stopReason: StopReason, stopDetail: string): Promise<boolean> {
+    const room = this.sql.exec("SELECT * FROM room WHERE id=? LIMIT 1", roomId).one() as Record<string, unknown> | null;
+    if (!room) return false;
+    if (room["status"] !== "active") return false;
+    const ts = nowIso();
+    this.sql.exec(
+      `UPDATE participant_attempts
+       SET status=CASE
+         WHEN status IN ('replaced', 'abandoned', 'exited') THEN status
+         ELSE 'exited'
+       END,
+       updated_at=?,
+       released_at=COALESCE(released_at, ?),
+       lease_expires_at=COALESCE(lease_expires_at, ?)
+       WHERE released_at IS NULL`,
+      ts,
+      ts,
+      ts
+    );
+    this.sql.exec(
+      "UPDATE participants SET runner_id=NULL, runner_attempt_id=NULL, runner_status='exited', runner_mode=NULL, runner_last_seen_at=?, runner_lease_expires_at=?, last_runner_error=last_runner_error",
+      ts,
+      ts
+    );
+    this.sql.exec(
+      `UPDATE recovery_actions
+       SET status='superseded', resolved_at=COALESCE(resolved_at, ?), updated_at=?, current=0
+       WHERE current=1`,
+      ts,
+      ts,
+    );
+    this.recoveryStateDirty = true;
+    this.sql.exec("UPDATE room SET status='closed', stop_reason=?, stop_detail=?, updated_at=? WHERE status='active' AND id=?", stopReason, stopDetail, ts, roomId);
+    await this.appendEvent("*", "status", { status: "closed", reason: stopReason, detail: stopDetail });
+
+    const ttlMinutes = Math.max(1, Number(room.ttl_minutes || 60));
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60_000).toISOString();
+    this.sql.exec("UPDATE room SET expires_at=? WHERE id=?", expiresAt, roomId);
+    await this.state.storage.setAlarm(Date.now() + ttlMinutes * 60_000);
+    return true;
+  }
+
+  private async requestRoomClose(
+    roomId: string,
+    stopReason: StopReason,
+    stopDetail: string,
+    options?: { source?: "manual" | "auto" },
+  ): Promise<{ changed: boolean; gate: OwnerGateSnapshot | null; room: RoomSnapshot }> {
+    const roomRow = this.sql.exec("SELECT * FROM room WHERE id=? LIMIT 1", roomId).one() as Record<string, unknown> | null;
+    if (!roomRow) {
+      const room = await this.snapshot(roomId);
+      return { changed: false, gate: this.currentPendingCloseGate(roomId), room };
+    }
+    if (String(roomRow.status || "") !== "active") {
+      const room = await this.snapshot(roomId);
+      return { changed: false, gate: this.currentPendingCloseGate(roomId), room };
+    }
+    const room = await this.snapshot(roomId);
+    if (options?.source === "auto" && !room.outcome_contract && !room.close_conditions.includes(stopReason)) {
+      return { changed: false, gate: this.currentPendingCloseGate(roomId), room };
+    }
+    const gatePending = this.currentPendingCloseGate(roomId);
+    if (room.resolution_mode === "owner_gated") {
+      if (gatePending) {
+        return { changed: false, gate: gatePending, room };
+      }
+      const gate = await this.createCloseApproveGate(room, stopReason, stopDetail);
+      await this.appendEvent("*", "owner_wait", {
+        participant: room.id,
+        owner_req_id: gate.gate_id,
+        reason: stopReason,
+        text: stopDetail,
+        source: options?.source || "auto",
+      });
+      const updatedRoom = await this.snapshot(roomId);
+      await this.publishRoomSnapshot("owner_wait", updatedRoom);
+      return { changed: false, gate, room: updatedRoom };
+    }
+    const changed = await this.forceCloseRoom(roomId, stopReason, stopDetail);
+    const closedRoom = await this.snapshot(roomId);
+    await this.publishRoomSnapshot(stopReason === "timeout" ? "timeout" : "close", closedRoom);
+    return { changed, gate: null, room: closedRoom };
+  }
+
+  private async resolveCloseGate(request: Request, roomId: string, gateId: string): Promise<Response> {
+    this.ensureSchema();
+    await this.requireHost(request);
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const decisionRaw = String(body.action || body.decision || "").trim().toLowerCase();
+    const decision = decisionRaw === "approve" ? "approved" : decisionRaw === "reject" ? "rejected" : "";
+    if (!decision) return badRequest("decision must be approve or reject");
+
+    const existing = this.sql.exec(
+      "SELECT * FROM owner_gates WHERE gate_id=? AND gate_type='close_approve' LIMIT 1",
+      gateId
+    ).toArray()[0] as Record<string, unknown> | undefined;
+    const gate = this.serializeOwnerGate(existing || null);
+    if (!gate) return json({ error: "gate_not_found" }, { status: 404 });
+    if (gate.state !== "pending") {
+      return json({ error: "gate_not_pending", gate }, { status: 409 });
+    }
+
+    const resolvedAt = nowIso();
+    const resolutionPayload = {
+      decision,
+      note: typeof (body.reason ?? body.note) === "string" ? String(body.reason ?? body.note).slice(0, 500) : "",
+    };
+    this.sql.exec(
+      "UPDATE owner_gates SET state=?, resolved_at=?, resolution_payload_json=? WHERE gate_id=?",
+      decision,
+      resolvedAt,
+      JSON.stringify(resolutionPayload),
+      gateId
+    );
+
+    if (decision === "approved") {
+      const context = gate.context || {};
+      if (String(context.room_id || "") !== roomId) {
+        return json({ error: "gate_room_mismatch", gate }, { status: 409 });
+      }
+      const contextReason = String(context.stop_reason || "").trim().toLowerCase();
+      const reason: StopReason = contextReason === "goal_done"
+        || contextReason === "mutual_done"
+        || contextReason === "timeout"
+        || contextReason === "turn_limit"
+        || contextReason === "stall_limit"
+        || contextReason === "manual_close"
+          ? (contextReason as StopReason)
+          : "manual_close";
+      const detail = typeof context.stop_detail === "string" && context.stop_detail.trim()
+        ? String(context.stop_detail).slice(0, 500)
+        : (typeof (body.reason ?? body.note) === "string" && String(body.reason ?? body.note).trim()
+          ? String(body.reason ?? body.note).slice(0, 500)
+          : "close approved");
+      await this.forceCloseRoom(roomId, reason, detail);
+      const room = await this.snapshot(roomId);
+      await this.flushDerivedRoomState(room);
+      await this.publishRoomSnapshot(reason === "timeout" ? "timeout" : "close", room);
+      return json({
+        gate: {
+          gate_id: gate.gate_id,
+          gate_type: gate.gate_type,
+          state: "approved",
+          participant: gate.participant,
+          question: gate.question,
+          context: gate.context,
+          created_at: gate.created_at,
+          resolved_at: resolvedAt,
+          resolution_payload: resolutionPayload,
+        },
+        room,
+        closed: true,
+      });
+    }
+
+    const room = await this.snapshot(roomId);
+    await this.flushDerivedRoomState(room);
+    await this.publishRoomSnapshot("close", room);
+    return json({
+      gate: {
+        ...gate,
+        state: "rejected",
+        resolved_at: resolvedAt,
+        resolution_payload: resolutionPayload,
+      },
+      room,
+      closed: false,
+    });
+  }
+
+  private async handleOwnerResolution(request: Request, roomId: string): Promise<Response> {
+    const gate = this.currentPendingCloseGate(roomId);
+    if (!gate) {
+      return json({ error: "room_not_awaiting_owner_approval" }, { status: 409 });
+    }
+    return await this.resolveCloseGate(request, roomId, gate.gate_id);
+  }
+
   private async completeParticipantJoin(
     roomId: string,
     participant: string,
+    publicUiBase: string,
     details: {
       client_name?: string | null;
       agent_id?: string | null;
@@ -3471,6 +4023,7 @@ export class RoomDurableObject implements DurableObject {
       display_name?: string | null;
       workflow_mode?: string | null;
       workflow_model?: string | null;
+      context_envelope?: ContextEnvelope | Record<string, unknown> | null;
     },
   ): Promise<Record<string, unknown>> {
     const clientName = typeof details.client_name === "string" ? details.client_name.slice(0, 120) : null;
@@ -3479,10 +4032,11 @@ export class RoomDurableObject implements DurableObject {
     const displayName = typeof details.display_name === "string" ? details.display_name.slice(0, 120) : null;
     const workflowMode = typeof details.workflow_mode === "string" ? details.workflow_mode.slice(0, 40) : null;
     const workflowModel = typeof details.workflow_model === "string" ? details.workflow_model.slice(0, 120) : null;
+    const contextEnvelope = normalizeContextEnvelope(details.context_envelope);
 
     const joinedAt = nowIso();
     const participantRow = this.sql.exec(
-      "SELECT joined, participant_token FROM participants WHERE name=? LIMIT 1",
+      "SELECT joined, participant_token, context_envelope_json FROM participants WHERE name=? LIMIT 1",
       participant
     ).toArray()[0] as Record<string, unknown> | undefined;
     const existingParticipantToken = participantRow?.participant_token ? String(participantRow.participant_token) : "";
@@ -3500,6 +4054,11 @@ export class RoomDurableObject implements DurableObject {
       displayName || clientName || agentId,
       participant
     );
+    if (contextEnvelope) {
+      this.sql.exec("UPDATE participants SET context_envelope_json=? WHERE name=?", JSON.stringify(contextEnvelope), participant);
+    } else if (!participantRow?.context_envelope_json) {
+      this.sql.exec("UPDATE participants SET context_envelope_json='{}' WHERE name=?", participant);
+    }
     const participantTokenKey = `participant:${participant}`;
     const existingParticipantTokenKey = this.sql.exec("SELECT key FROM tokens WHERE key=? LIMIT 1", participantTokenKey).toArray();
     if (existingParticipantTokenKey.length) {
@@ -3524,7 +4083,9 @@ export class RoomDurableObject implements DurableObject {
     return {
       participant,
       participant_token: participantToken,
+      watch_link: `${publicUiBase}/?room_id=${encodeURIComponent(roomId)}&token=${encodeURIComponent(participantToken)}`,
       room: snapshot,
+      ...(contextEnvelope ? { context_envelope: contextEnvelope } : {}),
       ...(agentId ? { agent_id: agentId, runtime, display_name: displayName || clientName || agentId } : {}),
       ...(workflowMode ? { workflow_mode: workflowMode } : {}),
       ...(workflowModel ? { workflow_model: workflowModel } : {}),
@@ -3543,6 +4104,11 @@ export class RoomDurableObject implements DurableObject {
     const displayName = typeof body?.display_name === "string" ? body.display_name.slice(0, 120) : null;
     const workflowMode = typeof body?.workflow_mode === "string" ? body.workflow_mode.slice(0, 40) : null;
     const workflowModel = typeof body?.workflow_model === "string" ? body.workflow_model.slice(0, 120) : null;
+    const contextEnvelope = normalizeContextEnvelope(body?.context_envelope);
+    const publicUiBase = this.publicUiBase(new URL(request.url).origin);
+    if (body?.context_envelope != null && !contextEnvelope) {
+      return badRequest("context_envelope must include a summary and up to 16 refs");
+    }
     const requireOwnerApproval = body?.require_owner_approval === true;
 
     const existingGate = this.currentJoinGate(participant);
@@ -3582,6 +4148,7 @@ export class RoomDurableObject implements DurableObject {
           display_name: displayName,
           workflow_mode: workflowMode,
           workflow_model: workflowModel,
+          context_envelope: contextEnvelope,
         });
         return json(
           {
@@ -3595,13 +4162,14 @@ export class RoomDurableObject implements DurableObject {
         );
       }
     }
-    return json(await this.completeParticipantJoin(roomId, participant, {
+    return json(await this.completeParticipantJoin(roomId, participant, publicUiBase, {
       client_name: clientName,
       agent_id: agentId,
       runtime,
       display_name: displayName,
       workflow_mode: workflowMode,
       workflow_model: workflowModel,
+      context_envelope: contextEnvelope,
     }));
   }
 
@@ -3640,13 +4208,14 @@ export class RoomDurableObject implements DurableObject {
       const joinRequest = gate.context?.join_request && typeof gate.context.join_request === "object"
         ? gate.context.join_request as Record<string, unknown>
         : {};
-      const joinResult = await this.completeParticipantJoin(roomId, gate.participant, {
+      const joinResult = await this.completeParticipantJoin(roomId, gate.participant, this.publicUiBase(new URL(request.url).origin), {
         client_name: typeof joinRequest.client_name === "string" ? joinRequest.client_name : null,
         agent_id: typeof joinRequest.agent_id === "string" ? joinRequest.agent_id : null,
         runtime: typeof joinRequest.runtime === "string" ? joinRequest.runtime : null,
         display_name: typeof joinRequest.display_name === "string" ? joinRequest.display_name : null,
         workflow_mode: typeof joinRequest.workflow_mode === "string" ? joinRequest.workflow_mode : null,
         workflow_model: typeof joinRequest.workflow_model === "string" ? joinRequest.workflow_model : null,
+        context_envelope: normalizeContextEnvelope(joinRequest.context_envelope),
       });
       return json({ gate: updated, joined: true, ...joinResult });
     }
@@ -4227,10 +4796,19 @@ export class RoomDurableObject implements DurableObject {
     this.invalidateSnapshotCache();
     const body = (await request.json().catch(() => ({}))) as any;
     const reason = typeof body?.reason === "string" ? body.reason.slice(0, 500) : "manual close";
-    const changed = await this.closeRoom("manual_close", reason);
-    const snapshot = await this.snapshot(roomId);
-    if (changed) await this.publishRoomSnapshot("close", snapshot);
-    return json({ room: snapshot, already_closed: !changed });
+    const outcome = await this.requestRoomClose(roomId, "manual_close", reason, { source: "manual" });
+    if (outcome.gate && outcome.gate.state === "pending") {
+      return json(
+        {
+          error: "owner_close_approval_required",
+          close_blocked: true,
+          room: outcome.room,
+          gate: outcome.gate,
+        },
+        { status: 409 }
+      );
+    }
+    return json({ room: outcome.room, already_closed: !outcome.changed });
   }
 
   private async handleMessage(request: Request, roomId: string): Promise<Response> {
@@ -4238,9 +4816,10 @@ export class RoomDurableObject implements DurableObject {
     this.invalidateSnapshotCache();
     const sender = await this.requireParticipant(request, { joined: true });
 
-    const row = this.sql.exec("SELECT status FROM room LIMIT 1").one();
+    const row = this.sql.exec("SELECT * FROM room LIMIT 1").one() as Record<string, unknown> | null;
     if (!row) throw new Response(JSON.stringify({ error: "not_initialized" }), { status: 404 });
     if (String(row.status) !== "active") throw conflict("room not active");
+    if (this.currentPendingCloseGate(roomId)) throw conflict("room awaiting owner approval");
     this.touchParticipant(sender);
 
     const raw = await request.json().catch(() => ({}));
@@ -4274,9 +4853,10 @@ export class RoomDurableObject implements DurableObject {
     const waitingOwnerBefore = this.sql.exec("SELECT waiting_owner FROM participants WHERE name=? LIMIT 1", sender).one();
     const wasWaitingOwner = waitingOwnerBefore ? Boolean(waitingOwnerBefore.waiting_owner) : false;
     if (wasWaitingOwner && msg.intent === "DONE") {
+      const originalIntent = msg.intent;
       msg.intent = "NOTE";
       msg.expect_reply = false;
-      serverOverrides.push("DONE->NOTE.waiting_owner_requires_owner_reply");
+      serverOverrides.push(`${originalIntent}->NOTE.waiting_owner_requires_owner_reply`);
     }
     if (msg.intent === "DONE" && this.senderHasOutstandingCounterpartQuestion(sender)) {
       msg.intent = "ANSWER";
@@ -4316,12 +4896,6 @@ export class RoomDurableObject implements DurableObject {
         inReplyToEventId,
         createdAt
       );
-    }
-
-    if (msg.intent === "DONE") {
-      this.sql.exec("UPDATE participants SET done=1 WHERE name=?", sender);
-    } else {
-      this.sql.exec("UPDATE participants SET done=0 WHERE name=?", sender);
     }
 
     const explicitCompletionSignal = hasCompletionMarker(msg.meta || {});
@@ -4379,12 +4953,21 @@ export class RoomDurableObject implements DurableObject {
 
     // Apply fills (overwrite allowed) + detect structured progress.
     let newFieldCount = 0;
+    let requiredFieldChanged = false;
+    const requiredFieldSet = new Set<string>(
+      JSON.parse(String(row.required_fields_json || "[]"))
+        .map((value: unknown) => String(value))
+        .filter(Boolean)
+    );
     for (const [k, v] of Object.entries(msg.fills || {})) {
       const key = String(k).trim();
       const val = String(v).trim();
       if (!key || !val) continue;
       const existing = this.sql.exec("SELECT value FROM fields WHERE key=? LIMIT 1", key).toArray();
       if (!existing.length || String(existing[0].value) !== val) newFieldCount += 1;
+      if ((!existing.length || String(existing[0].value) !== val) && requiredFieldSet.has(key)) {
+        requiredFieldChanged = true;
+      }
       this.sql.exec(
         "INSERT INTO fields (key, value, updated_at, by_participant) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, by_participant=excluded.by_participant",
         key,
@@ -4392,6 +4975,18 @@ export class RoomDurableObject implements DurableObject {
         createdAt,
         sender
       );
+    }
+    if (requiredFieldChanged) {
+      this.sql.exec("UPDATE room SET field_mutation_version = field_mutation_version + 1 WHERE id IS NOT NULL");
+    }
+
+    const roomAfterMutation = this.sql.exec("SELECT field_mutation_version FROM room LIMIT 1").one() as Record<string, unknown> | null;
+    const fieldMutationVersion = Number(roomAfterMutation?.field_mutation_version || 0);
+
+    if (msg.intent === "DONE") {
+      this.sql.exec("UPDATE participants SET done=1, consensus_version=? WHERE name=?", fieldMutationVersion, sender);
+    } else {
+      this.sql.exec("UPDATE participants SET done=0 WHERE name=?", sender);
     }
 
     const cleanFacts = (msg.facts || []).map((x) => trimmedString(x, MAX_FACT_TEXT)).filter(Boolean);
@@ -4491,7 +5086,11 @@ export class RoomDurableObject implements DurableObject {
       await this.requireHost(request);
       audience = "*";
     } else {
-      audience = await this.requireParticipant(request, { joined: true });
+      try {
+        audience = await this.requireParticipant(request, { joined: true });
+      } catch {
+        audience = await this.requireParticipantFromQuery(request, { joined: true });
+      }
       this.touchParticipant(audience);
     }
 
@@ -4509,7 +5108,11 @@ export class RoomDurableObject implements DurableObject {
       try {
         await this.requireParticipant(request);
       } catch {
-        await this.requireHost(request);
+        try {
+          await this.requireParticipantFromQuery(request);
+        } catch {
+          await this.requireHost(request);
+        }
       }
     }
     const room = await this.snapshot(roomId);
@@ -4773,6 +5376,8 @@ export class RoomDurableObject implements DurableObject {
 
     const participants = this.sql.exec("SELECT * FROM participants ORDER BY name ASC").toArray();
     const fields = this.sql.exec("SELECT * FROM fields ORDER BY key ASC").toArray();
+    const closeGate = this.currentCloseGate(roomId);
+    const closeGatePending = Boolean(closeGate && closeGate.state === "pending");
     const attemptRecords = this.loadAttemptRecords(participants);
     const execution = this.summarizeExecution(
       room as Record<string, unknown>,
@@ -4787,7 +5392,7 @@ export class RoomDurableObject implements DurableObject {
 
     const requiredFields = JSON.parse(String(room.required_fields_json || "[]")) as string[];
     const filledKeys = new Set(Object.keys(fieldMap));
-    const lifecycleState = this.deriveLifecycleState(room, participants, requiredFields, filledKeys);
+    const lifecycleState = this.deriveLifecycleState(room, participants, requiredFields, filledKeys, closeGatePending);
     const startSlo = this.buildStartSlo(room as Record<string, unknown>);
     const fieldStats = { requiredTotal: requiredFields.length, filledCount: requiredFields.filter(k => filledKeys.has(k)).length };
     let currentRecoveryRows = this.loadRecoveryActionRows(true);
@@ -4838,6 +5443,15 @@ export class RoomDurableObject implements DurableObject {
       executionAttention,
       startSlo
     );
+    const rawOutcomeContract = this.parseJsonRecord(room.outcome_contract_json);
+    const outcomeContract = Object.keys(rawOutcomeContract).length > 0 ? normalizeOutcomeContract(rawOutcomeContract) : null;
+    const parentRoomId = typeof room.parent_room_id === "string" && String(room.parent_room_id).trim()
+      ? String(room.parent_room_id).trim()
+      : null;
+    const priorOutcomeSummary = typeof room.prior_outcome_summary === "string" && String(room.prior_outcome_summary).trim()
+      ? String(room.prior_outcome_summary).trim()
+      : null;
+    const priorOutcomeRefs = normalizePriorOutcomeRefs(this.parseJsonArray(room.prior_outcome_refs_json));
 
     const snapshot: RoomSnapshot = {
       id: String(room.id),
@@ -4863,7 +5477,16 @@ export class RoomDurableObject implements DurableObject {
       lifecycle_state: lifecycleState,
       required_fields: requiredFields,
       expected_outcomes: requiredFields,
+      parent_room_id: parentRoomId,
+      prior_outcome_summary: priorOutcomeSummary,
+      prior_outcome_refs: priorOutcomeRefs,
+      outcome_contract: outcomeContract,
+      pending_close_approval: closeGatePending,
+      close_approval: closeGatePending ? closeGate : null,
+      close_conditions: normalizeCloseConditions(room.close_conditions_json ? JSON.parse(String(room.close_conditions_json)) : []),
+      resolution_mode: normalizeResolutionMode(room.resolution_mode),
       fields: fieldMap,
+      close_gate: closeGate,
       status: String(room.status) as RoomStatus,
       stop_reason: room.stop_reason ? (String(room.stop_reason) as StopReason) : null,
       stop_detail: room.stop_detail ? String(room.stop_detail) : null,
@@ -4881,6 +5504,7 @@ export class RoomDurableObject implements DurableObject {
         done: Boolean(p.done),
         waiting_owner: Boolean(p.waiting_owner),
         client_name: p.client_name ? String(p.client_name) : null,
+        context_envelope: normalizeContextEnvelope(this.parseJsonRecord(p.context_envelope_json)),
         agent_id: p.agent_id ? String(p.agent_id) : null,
         runtime: p.runtime ? String(p.runtime) : null,
         display_name: p.display_name ? String(p.display_name) : null,
@@ -4895,7 +5519,8 @@ export class RoomDurableObject implements DurableObject {
     roomRow: any,
     participantRows: any[],
     requiredFields: string[],
-    filledKeys: Set<string>
+    filledKeys: Set<string>,
+    closeGatePending: boolean,
   ): LifecycleState {
     const roomStatus = String(roomRow?.status || "active");
     const stopReason = String(roomRow?.stop_reason || "");
@@ -4905,7 +5530,7 @@ export class RoomDurableObject implements DurableObject {
       return "failed";
     }
     const waitingOwner = participantRows.some((participant) => Boolean(participant.waiting_owner));
-    if (waitingOwner) return "input_required";
+    if (waitingOwner || closeGatePending) return "input_required";
     const everyoneDone = participantRows.length > 0 && participantRows.every((participant) => Boolean(participant.done));
     if (everyoneDone && requiredFields.length > 0) {
       const missingRequired = requiredFields.some((field) => !filledKeys.has(field));
@@ -4923,26 +5548,107 @@ export class RoomDurableObject implements DurableObject {
     return { trigger: null };
   }
 
+  private countRequiredFieldsFilled(requiredFields: string[]): number {
+    if (!requiredFields.length) return 0;
+    const filled = new Set(this.sql.exec("SELECT key FROM fields").toArray().map((row) => String(row.key || "")));
+    return requiredFields.filter((field) => filled.has(field)).length;
+  }
+
+  private joinedParticipantsWhoSpoke(): number {
+    const joined = new Set(
+      this.sql.exec("SELECT name FROM participants WHERE joined=1").toArray().map((row) => String(row.name || ""))
+    );
+    if (joined.size === 0) return 0;
+    const senders = new Set<string>();
+    const rows = this.sql.exec("SELECT payload_json FROM events WHERE type='msg' ORDER BY id ASC").toArray();
+    for (const row of rows) {
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(String(row.payload_json || "{}"));
+      } catch {
+        continue;
+      }
+      const evt = storedMessageEventFromPayload(payload);
+      if (evt && joined.has(evt.sender)) senders.add(evt.sender);
+    }
+    return senders.size;
+  }
+
+  private explicitConsensusSatisfied(): boolean {
+    const room = this.sql.exec("SELECT field_mutation_version FROM room LIMIT 1").one() as Record<string, unknown> | null;
+    const currentVersion = Number(room?.field_mutation_version || 0);
+    const participants = this.sql.exec("SELECT joined, done, waiting_owner, consensus_version FROM participants").toArray();
+    const joined = participants.filter((participant) => Boolean(participant.joined));
+    if (joined.length === 0) return false;
+    for (const participant of joined) {
+      if (Boolean(participant.waiting_owner)) return false;
+      if (!Boolean(participant.done)) return false;
+      if (Number(participant.consensus_version || 0) !== currentVersion) return false;
+    }
+    return true;
+  }
+
+  private passesOutcomeContractCloseConditions(roomRow: Record<string, unknown>, requiredFields: string[]): boolean {
+    const contract = normalizeOutcomeContract(this.parseJsonRecord(roomRow.outcome_contract_json));
+    if (!contract) return true;
+    const closeConditions = contract.close_conditions;
+    if (closeConditions.min_turns !== null && Number(roomRow.turn_count || 0) < closeConditions.min_turns) {
+      return false;
+    }
+    if (
+      closeConditions.min_unique_participants !== null
+      && this.joinedParticipantsWhoSpoke() < closeConditions.min_unique_participants
+    ) {
+      return false;
+    }
+    if (closeConditions.require_explicit_consensus && !this.explicitConsensusSatisfied()) {
+      return false;
+    }
+    if (this.currentPendingCloseGate(String(roomRow.id || ""))) {
+      return false;
+    }
+    const waitingOwner = Number(this.sql.exec("SELECT COUNT(*) AS c FROM participants WHERE waiting_owner=1").one()?.c || 0) > 0;
+    if (waitingOwner) return false;
+    if (requiredFields.length > 0 && this.countRequiredFieldsFilled(requiredFields) < requiredFields.length) {
+      return false;
+    }
+    return true;
+  }
+
   private async applyStopRules(): Promise<void> {
     const room = this.sql.exec("SELECT * FROM room LIMIT 1").one();
     if (!room) return;
     if (String(room.status) !== "active") return;
+    const roomId = String(room.id || "");
+    if (this.currentPendingCloseGate(roomId)) return;
 
     const requiredFields = JSON.parse(String(room.required_fields_json || "[]")) as string[];
     const filled = this.sql.exec("SELECT key FROM fields").toArray().map((r) => String(r.key));
     const missing = requiredFields.filter((k) => !filled.includes(k));
-    const explicitCompletionSignaled = Boolean(room.completion_signaled);
-    const anyParticipantDone = Number(this.sql.exec("SELECT COUNT(*) AS c FROM participants WHERE done=1").one()?.c || 0) > 0;
     const waitingOwner = Number(this.sql.exec("SELECT COUNT(*) AS c FROM participants WHERE waiting_owner=1").one()?.c || 0) > 0;
     const terminalCompletionInferred = this.inferTerminalCompletionHandshake();
-    const completionSignaled = explicitCompletionSignaled || anyParticipantDone || terminalCompletionInferred;
+    if (!waitingOwner && requiredFields.length > 0 && missing.length === 0 && terminalCompletionInferred) {
+      if (this.passesOutcomeContractCloseConditions(room as Record<string, unknown>, requiredFields)) {
+        await this.requestRoomClose(
+          roomId,
+          "goal_done",
+          "terminal completion handshake inferred after required fields were filled",
+          { source: "auto" }
+        );
+        return;
+      }
+    }
 
-    if (!waitingOwner && (((requiredFields.length > 0 && missing.length === 0) || terminalCompletionInferred) && completionSignaled)) {
-      const detail = terminalCompletionInferred
-        ? "terminal no-reply counterpart message plus DONE inferred completion"
-        : "required fields complete and completion signal present";
-      await this.closeRoom("goal_done", detail);
-      return;
+    if (!waitingOwner && requiredFields.length === 0 && terminalCompletionInferred) {
+      if (this.passesOutcomeContractCloseConditions(room as Record<string, unknown>, requiredFields)) {
+        await this.requestRoomClose(
+          roomId,
+          "goal_done",
+          "terminal no-reply counterpart message plus DONE inferred completion",
+          { source: "auto" }
+        );
+        return;
+      }
     }
 
     const everyoneDone = this.sql.exec("SELECT COUNT(*) AS c FROM participants WHERE done=0").one();
@@ -4950,13 +5656,15 @@ export class RoomDurableObject implements DurableObject {
       if (requiredFields.length > 0 && missing.length > 0) {
         return;
       }
-      await this.closeRoom("mutual_done", "all participants done");
-      return;
+      if (this.passesOutcomeContractCloseConditions(room as Record<string, unknown>, requiredFields)) {
+        await this.requestRoomClose(roomId, "mutual_done", "all participants done", { source: "auto" });
+        return;
+      }
     }
 
     const deadlineAt = Date.parse(String(room.deadline_at));
     if (Number.isFinite(deadlineAt) && Date.now() >= deadlineAt) {
-      await this.closeRoom("timeout", "deadline exceeded");
+      await this.requestRoomClose(roomId, "timeout", "deadline exceeded", { source: "auto" });
       return;
     }
 
@@ -4965,13 +5673,13 @@ export class RoomDurableObject implements DurableObject {
 
     const turnCount = Number(room.turn_count);
     if (turnCount >= turnLimit) {
-      await this.closeRoom("turn_limit", "turn limit reached");
+      await this.requestRoomClose(roomId, "turn_limit", "turn limit reached", { source: "auto" });
       return;
     }
 
     const stallCount = Number(room.stall_count);
     if (stallCount >= stallLimit) {
-      await this.closeRoom("stall_limit", "stall limit reached");
+      await this.requestRoomClose(roomId, "stall_limit", "stall limit reached", { source: "auto" });
     }
   }
 
@@ -5107,9 +5815,26 @@ export class RoomDurableObject implements DurableObject {
     }
     const outcomesMissing = room.expected_outcomes.filter((outcome) => !outcomesFilled[outcome]);
 
-    const summary =
-      `Room ended with status=${room.status} reason=${room.stop_reason} ` +
-      `after ${room.turn_count} turns. Filled ${requiredFilled}/${requiredTotal} expected outcomes.`;
+    const turnLabel = room.turn_count === 1 ? "turn" : "turns";
+    let summary = "";
+    if (requiredTotal > 0 && requiredFilled >= requiredTotal) {
+      summary = `The room wrapped up with all ${requiredTotal} requested outcomes ready after ${room.turn_count} ${turnLabel}.`;
+    } else if (requiredTotal > 0 && requiredFilled > 0) {
+      const remaining = requiredTotal - requiredFilled;
+      summary =
+        `The room wrapped up with ${requiredFilled} of ${requiredTotal} requested outcomes ready after ${room.turn_count} ${turnLabel}. ` +
+        `${remaining} ${remaining === 1 ? "item still needs follow-up." : "items still need follow-up."}`;
+    } else if (requiredTotal > 0) {
+      summary = `The room ended before it captured the requested handoff after ${room.turn_count} ${turnLabel}.`;
+    } else {
+      summary = `The conversation wrapped up after ${room.turn_count} ${turnLabel}.`;
+    }
+    if (room.stop_reason === "timeout" || room.stop_reason === "stall_limit") {
+      summary =
+        requiredTotal > 0 && requiredFilled > 0
+          ? `The room paused before it fully finished. ${requiredFilled} of ${requiredTotal} requested outcomes are ready, but follow-up is still needed.`
+          : "The room paused before it could finish cleanly.";
+    }
 
 	    return {
 	      room_id: room.id,
