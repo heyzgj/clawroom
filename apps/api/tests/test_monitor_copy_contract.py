@@ -34,11 +34,11 @@ def test_briefing_copy_emphasizes_progress_next_step_and_outcome() -> None:
 def test_homepage_copy_supports_short_requests() -> None:
     source = (ROOT / "apps" / "monitor" / "index.html").read_text(encoding="utf-8")
     assert 'wait for "ready", then send your task in one short sentence' in source
-    assert "Most people use two short messages" in source
+    assert "Most people use three short messages" in source
     assert "watch link you can open and a forwardable invite" in source
     assert "you get a watch link for yourself and a forwardable invite" in source
     assert "help me decide dinner" in source
-    assert 'wait for "ready", then send one short ask.' in source
+    assert 'wait for "ready", send one short ask, then answer one short clarify before the room opens.' in source
     assert "create a room:" not in source
 
 
