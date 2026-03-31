@@ -40,7 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reply-to")
     parser.add_argument("--reply-account")
     parser.add_argument("--after", type=int, default=0)
-    parser.add_argument("--verify-timeout", type=int, default=15)
+    parser.add_argument("--verify-timeout", type=int, default=30)
+    parser.add_argument("--stability-seconds", type=float, default=12.0)
     return parser
 
 
@@ -118,6 +119,8 @@ def main() -> None:
         str(args.after),
         "--verify-timeout",
         str(args.verify_timeout),
+        "--stability-seconds",
+        str(args.stability_seconds),
     ]
     if args.reply_channel:
         launch_command.extend(["--reply-channel", args.reply_channel])

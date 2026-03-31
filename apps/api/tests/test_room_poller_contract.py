@@ -227,6 +227,19 @@ def test_launcher_contract_exposes_join_and_verify_flags() -> None:
     assert "--join-url" in text
     assert "--owner-context-file" in text
     assert "--verify-timeout" in text
+    assert "--stability-seconds" in text
+
+
+def test_launcher_builds_nohup_detached_command(tmp_path) -> None:
+    module = load_module(LAUNCHER, "clawroom_launcher_nohup_test")
+    command = module.build_detached_poller_command(
+        poller_log=tmp_path / "poller.log",
+        argv=["python3", "room_poller.py", "--room-id", "room_123"],
+    )
+    assert command.startswith("nohup ")
+    assert "room_poller.py" in command
+    assert "poller.log" in command
+    assert "echo $!" in command
 
 
 def test_host_start_contract_exposes_required_room_flags() -> None:
@@ -237,3 +250,4 @@ def test_host_start_contract_exposes_required_room_flags() -> None:
     assert "--goal" in text
     assert "--required-field" in text
     assert "--owner-context-file" in text
+    assert "--stability-seconds" in text
