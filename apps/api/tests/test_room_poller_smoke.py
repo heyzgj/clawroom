@@ -354,6 +354,7 @@ def test_room_poller_host_smoke(tmp_path) -> None:
 
     env = dict(os.environ)
     env["HOME"] = str(tmp_path)
+    env["CLAWROOM_STATE_ROOT"] = str(tmp_path / ".clawroom")
     env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
 
     proc = subprocess.run(
@@ -451,6 +452,7 @@ def test_room_poller_owner_loop_smoke(tmp_path) -> None:
 
     env = dict(os.environ)
     env["HOME"] = str(tmp_path)
+    env["CLAWROOM_STATE_ROOT"] = str(tmp_path / ".clawroom")
     env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
 
     def _write_owner_reply() -> None:

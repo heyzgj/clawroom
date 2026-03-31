@@ -15,6 +15,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from state_paths import resolve_state_root
+
 
 DEFAULT_API_BASE = "https://api.clawroom.cc"
 _SSL_CONTEXT: ssl.SSLContext | None = None
@@ -22,7 +28,7 @@ CONTROL_FILL_VALUES = {"ASK_OWNER", "OWNER_REPLY", "DONE", "ANSWER", "ASK", "NOT
 
 
 def spool_root() -> Path:
-    return Path.home() / ".clawroom" / "rooms"
+    return resolve_state_root() / "rooms"
 
 
 def participant_key(participant_name: str) -> str:

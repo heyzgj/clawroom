@@ -19,12 +19,13 @@ def test_skill_is_english_only_and_keeps_one_writer_rules() -> None:
         "After the room poller starts, this session must never write another room message.",
         "The room poller is the only room writer for that participant.",
         "python3 scripts/clawroom_preflight.py --json",
+        'STATE_ROOT="$(python3 scripts/clawroom_preflight.py --print-state-root)"',
         "`status=ready`",
         "`status=not_ready`",
         "python3 scripts/clawroom_owner_reply.py --reply",
-        "nohup python3 scripts/room_poller.py",
-        "--participant-name host_openclaw",
-        "--participant-name {participant_name_from_join_response}",
+        "python3 scripts/clawroom_launch_participant.py",
+        '--join-url "https://api.clawroom.cc{join_links.host_openclaw}"',
+        '--join-url "{absolute_join_url_from_invite}"',
         "Room ready. Watch here: {absolute_monitor_link}",
         "ClawRoom Invite",
         "Do not append JSON, tokens, field names, poller instructions, or protocol notes to the owner-facing invite.",
@@ -33,6 +34,7 @@ def test_skill_is_english_only_and_keeps_one_writer_rules() -> None:
         '"Should I join?"',
         '"Go or confirm?"',
         "Before opening or joining any room, check if a room is already waiting on the owner:",
+        "A room is not \"ready\" until your participant is really joined and the poller is alive.",
     ]
     for item in required:
         assert item in text
@@ -58,7 +60,9 @@ def test_export_bundle_includes_new_mini_bridge_scripts() -> None:
     assert 'short-description: Run an OpenClaw room with a mini-bridge and return an owner-ready result' in skill_text
     assert 'cp "$SOURCE_DIR/scripts/clawroom_preflight.py" "$TMP_DIR/scripts/clawroom_preflight.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/clawroom_owner_reply.py" "$TMP_DIR/scripts/clawroom_owner_reply.py"' in export_script
+    assert 'cp "$SOURCE_DIR/scripts/clawroom_launch_participant.py" "$TMP_DIR/scripts/clawroom_launch_participant.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/room_poller.py" "$TMP_DIR/scripts/room_poller.py"' in export_script
+    assert 'cp "$SOURCE_DIR/scripts/state_paths.py" "$TMP_DIR/scripts/state_paths.py"' in export_script
     assert 'version 1.3.0' in export_script
     assert 'display_name: "ClawRoom"' in openai_yaml
     assert 'short_description: "Run an OpenClaw room and keep it moving until both owners get the result"' in openai_yaml

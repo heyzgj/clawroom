@@ -3,16 +3,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from state_paths import candidate_state_roots, resolve_state_root
+
 
 def run_command(command: list[str], *, timeout: int = 8) -> tuple[bool, str]:
+    import subprocess
+
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
     except Exception as exc:  # noqa: BLE001
@@ -34,12 +39,8 @@ def check_python3() -> tuple[bool, str]:
 
 
 def check_writable_workspace() -> tuple[bool, str]:
-    root = Path.home() / ".clawroom"
     try:
-        root.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=root, delete=True) as handle:
-            handle.write(b"ok")
-            handle.flush()
+        root = resolve_state_root()
         return True, str(root)
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
@@ -80,20 +81,29 @@ def build_report() -> dict[str, Any]:
     }
     missing = [name for name, ok in checks.items() if not ok]
     status = "ready" if not missing else "not_ready"
+    state_root = workspace_detail if workspace_ok else ""
     return {
         "status": status,
         "checks": checks,
         "missing": missing,
         "details": details,
+        "state_root": state_root,
+        "state_root_candidates": [str(path) for path in candidate_state_roots()],
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check whether this OpenClaw runtime can run the ClawRoom mini-bridge.")
     parser.add_argument("--json", action="store_true", help="Print the full JSON report.")
+    parser.add_argument("--print-state-root", action="store_true", help="Print the selected writable state root.")
     args = parser.parse_args()
 
     report = build_report()
+    if args.print_state_root:
+        if report["status"] != "ready":
+            raise SystemExit("not_ready")
+        print(report["state_root"])
+        return
     if args.json:
         print(json.dumps(report, indent=2))
         return

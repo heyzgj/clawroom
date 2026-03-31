@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[3]
 PRE_FLIGHT = ROOT / "skills" / "clawroom" / "scripts" / "clawroom_preflight.py"
 ROOM_POLLER = ROOT / "skills" / "clawroom" / "scripts" / "room_poller.py"
 OWNER_REPLY = ROOT / "skills" / "clawroom" / "scripts" / "clawroom_owner_reply.py"
+LAUNCHER = ROOT / "skills" / "clawroom" / "scripts" / "clawroom_launch_participant.py"
 
 
 def load_module(path: Path, name: str):
@@ -40,7 +41,7 @@ def test_preflight_report_is_binary(monkeypatch) -> None:
 
 def test_room_poller_owner_context_validation_and_paths(tmp_path, monkeypatch) -> None:
     module = load_module(ROOM_POLLER, "clawroom_room_poller_test")
-    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("CLAWROOM_STATE_ROOT", str(tmp_path / ".clawroom"))
 
     context_path = tmp_path / "owner_context.json"
     context_path.write_text(
@@ -110,7 +111,7 @@ def test_room_poller_sanitizes_fills_to_required_fields() -> None:
 
 def test_owner_reply_script_requires_pending_question(tmp_path, monkeypatch) -> None:
     module = load_module(OWNER_REPLY, "clawroom_owner_reply_test")
-    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("CLAWROOM_STATE_ROOT", str(tmp_path / ".clawroom"))
     room_dir = tmp_path / ".clawroom" / "rooms" / "room_abc" / "host_openclaw"
     room_dir.mkdir(parents=True, exist_ok=True)
     (room_dir / "pending_question.json").write_text(
@@ -122,7 +123,7 @@ def test_owner_reply_script_requires_pending_question(tmp_path, monkeypatch) -> 
 
 def test_room_poller_wait_for_owner_reply_stops_when_room_closes(tmp_path, monkeypatch) -> None:
     module = load_module(ROOM_POLLER, "clawroom_room_poller_wait_test")
-    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("CLAWROOM_STATE_ROOT", str(tmp_path / ".clawroom"))
 
     context_path = tmp_path / "owner_context.json"
     context_path.write_text(
@@ -205,3 +206,23 @@ def test_room_poller_uses_certifi_backed_ssl_context(monkeypatch) -> None:
     monkeypatch.setattr(ssl, "create_default_context", fake_create_default_context)
     monkeypatch.setattr(builtins, "__import__", fake_import)
     assert module.ssl_context() is sentinel
+
+
+def test_preflight_prints_selected_state_root(tmp_path, monkeypatch) -> None:
+    module = load_module(PRE_FLIGHT, "clawroom_preflight_state_root_test")
+    monkeypatch.setenv("CLAWROOM_STATE_ROOT", str(tmp_path / ".clawroom"))
+    monkeypatch.setattr(module, "check_exec_enabled", lambda: (True, "ok"))
+    monkeypatch.setattr(module, "check_python3", lambda: (True, "Python 3.x"))
+    monkeypatch.setattr(module, "check_openclaw_agent_help", lambda: (True, "--session-id\n--deliver\n"))
+    ready = module.build_report()
+    assert ready["status"] == "ready"
+    assert ready["state_root"] == str(tmp_path / ".clawroom")
+
+
+def test_launcher_contract_exposes_join_and_verify_flags() -> None:
+    module = load_module(LAUNCHER, "clawroom_launcher_contract_test")
+    parser = module.build_parser()
+    text = parser.format_help()
+    assert "--join-url" in text
+    assert "--owner-context-file" in text
+    assert "--verify-timeout" in text

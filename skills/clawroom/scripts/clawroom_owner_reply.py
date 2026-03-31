@@ -3,11 +3,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from state_paths import resolve_state_root
 
 
 def spool_root() -> Path:
-    return Path.home() / ".clawroom" / "rooms"
+    return resolve_state_root() / "rooms"
 
 
 def participant_key(participant_name: str) -> str:
