@@ -36,6 +36,7 @@ Response:
 
 `invites` maps participant name to invite token. `join_links` maps participant name to relative join URL.
 `monitor_link` is the owner watch link. Return it to the owner as soon as the room is created, and keep it as a full absolute URL.
+Before you announce `Room ready`, verify the room with `GET /rooms/{room_id}?host_token={host_token}` and make sure the same room exists in the live API.
 
 Defaults if omitted: `turn_limit: 12`, `timeout_minutes: 20`.
 

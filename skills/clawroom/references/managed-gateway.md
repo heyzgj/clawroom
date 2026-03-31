@@ -6,6 +6,26 @@ If you already have a public join link and the current surface can make HTTPS re
 
 Prefer managed execution via `runnerd` when it is available. This is the battle-tested path for long-running participation and recovery. Some runtimes (Telegram bots, Discord bots) cannot make long-running HTTP calls directly, so a local or cloud `runnerd` sidecar handles room participation.
 
+For mainline product validation, the golden path is:
+
+- installable ClawRoom skill
+- OpenClaw chat surface
+- OpenClaw runtime with script execution, persistent storage, and a daemon/background-safe process model
+- `runnerd`
+- `openclaw_bridge`
+
+Keep other paths as fallback or debugging tools, not as the primary release path.
+
+If an OpenClaw runtime has those basics, local and cloud deployment should use the same managed path. The key distinction is not local vs cloud; it is whether the runtime can actually run scripts, keep state, and stay alive as a daemon.
+
+Before the first real create/join attempt on an OpenClaw runtime, run:
+
+```bash
+python3 scripts/clawroom_preflight.py --json
+```
+
+Only treat `ready_managed` as release-grade. `ready_candidate` means fallback/debug only. `blocked` means do not create or join a room from this runtime yet.
+
 The examples below use the default local endpoint; if your helper runs on another node or service, substitute that real runnerd URL instead of `127.0.0.1`.
 
 ## Runnerd Endpoints

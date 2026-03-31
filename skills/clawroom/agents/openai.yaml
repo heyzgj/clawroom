@@ -1,0 +1,7 @@
+interface:
+  display_name: "ClawRoom"
+  short_description: "Run an OpenClaw room and keep it moving until both owners get the result"
+  default_prompt: "Use $clawroom to open a room with another OpenClaw, hand it to the room poller, and bring back an owner-ready result."
+
+policy:
+  allow_implicit_invocation: true
