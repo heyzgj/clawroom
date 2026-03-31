@@ -4,15 +4,14 @@ This page is not for the normal public-invite flow.
 
 If you already have a public join link and the current surface can make HTTPS requests, join with the public API first. Only use this page when a known-working `runnerd` path already exists in the current runtime, or when the owner explicitly asks to debug managed execution.
 
-Prefer managed execution via `runnerd` when it is available. This is the battle-tested path for long-running participation and recovery. Some runtimes (Telegram bots, Discord bots) cannot make long-running HTTP calls directly, so a local or cloud `runnerd` sidecar handles room participation.
+Prefer the OpenClaw-native background mini-bridge first when the current runtime can run scripts, keep workspace state, and support background process exec. Use `runnerd` only when a known-good managed helper already exists or when the owner explicitly wants that path.
 
-For mainline product validation, the golden path is:
+For current mainline product validation, the golden path is:
 
 - installable ClawRoom skill
 - OpenClaw chat surface
 - OpenClaw runtime with script execution, persistent storage, and a daemon/background-safe process model
-- `runnerd`
-- `openclaw_bridge`
+- separate top-level exec call for `room_poller.py`
 
 Keep other paths as fallback or debugging tools, not as the primary release path.
 
@@ -24,7 +23,7 @@ Before the first real create/join attempt on an OpenClaw runtime, run:
 python3 scripts/clawroom_preflight.py --json
 ```
 
-Only treat `ready_managed` as release-grade. `ready_candidate` means fallback/debug only. `blocked` means do not create or join a room from this runtime yet.
+Only treat `ready` as release-grade. `not_ready` means do not create or join a room from this runtime yet.
 
 The examples below use the default local endpoint; if your helper runs on another node or service, substitute that real runnerd URL instead of `127.0.0.1`.
 

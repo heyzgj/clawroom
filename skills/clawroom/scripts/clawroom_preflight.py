@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -53,6 +54,64 @@ def check_openclaw_agent_help() -> tuple[bool, str]:
     return run_command([openclaw_path, "agent", "--help"], timeout=8)
 
 
+def openclaw_config_path() -> Path:
+    explicit = str(os.environ.get("OPENCLAW_CONFIG_PATH") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    return Path.home() / ".openclaw" / "openclaw.json"
+
+
+def load_openclaw_config() -> tuple[bool, dict[str, Any] | None, str]:
+    path = openclaw_config_path()
+    if not path.exists():
+        return False, None, f"config not found at {path}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return False, None, f"failed to parse {path}: {exc}"
+    if not isinstance(payload, dict):
+        return False, None, f"invalid config at {path}"
+    return True, payload, str(path)
+
+
+def check_process_tool_available() -> tuple[bool, str]:
+    ok, config, detail = load_openclaw_config()
+    if not ok or config is None:
+        return False, detail
+
+    explicit_profiles: list[str] = []
+    root_profile = (((config.get("tools") or {}) if isinstance(config.get("tools"), dict) else {}).get("profile"))
+    if isinstance(root_profile, str) and root_profile.strip():
+        explicit_profiles.append(root_profile.strip())
+
+    agents = config.get("agents") or {}
+    if isinstance(agents, dict):
+        defaults = agents.get("defaults") or {}
+        if isinstance(defaults, dict):
+            defaults_tools = defaults.get("tools") or {}
+            if isinstance(defaults_tools, dict):
+                defaults_profile = defaults_tools.get("profile")
+                if isinstance(defaults_profile, str) and defaults_profile.strip():
+                    explicit_profiles.append(defaults_profile.strip())
+        for item in agents.get("list") or []:
+            if not isinstance(item, dict):
+                continue
+            tools = item.get("tools") or {}
+            if not isinstance(tools, dict):
+                continue
+            profile = tools.get("profile")
+            if isinstance(profile, str) and profile.strip():
+                explicit_profiles.append(profile.strip())
+
+    allowed_profiles = {"coding", "full"}
+    if not explicit_profiles:
+        return True, f"{detail} (no explicit tools.profile; assuming default runtime allows background process exec)"
+    invalid = [profile for profile in explicit_profiles if profile not in allowed_profiles]
+    if invalid:
+        return False, f"{detail} (tools.profile must allow process exec; found {', '.join(sorted(set(invalid)))})"
+    return True, f"{detail} (tools.profile={', '.join(sorted(set(explicit_profiles)))})"
+
+
 def help_supports(flag: str, help_text: str) -> bool:
     return flag in (help_text or "")
 
@@ -64,6 +123,7 @@ def build_report() -> dict[str, Any]:
     openclaw_ok, openclaw_help = check_openclaw_agent_help()
     session_ok = openclaw_ok and help_supports("--session-id", openclaw_help)
     deliver_ok = openclaw_ok and help_supports("--deliver", openclaw_help)
+    process_ok, process_detail = check_process_tool_available()
 
     checks = {
         "exec_enabled": exec_ok,
@@ -72,12 +132,14 @@ def build_report() -> dict[str, Any]:
         "openclaw_agent_cli": openclaw_ok,
         "openclaw_session_id": session_ok,
         "openclaw_deliver": deliver_ok,
+        "process_tool_available": process_ok,
     }
     details = {
         "exec_enabled": exec_detail,
         "python3": python_detail,
         "writable_workspace": workspace_detail,
         "openclaw_agent_cli": openclaw_help if openclaw_ok else openclaw_help,
+        "process_tool_available": process_detail,
     }
     missing = [name for name, ok in checks.items() if not ok]
     status = "ready" if not missing else "not_ready"

@@ -7,7 +7,7 @@ description: >-
   mentions of ClawRoom by name, "what did they decide", "check room status",
   or any URL containing api.clawroom.cc.
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
   short-description: Run an OpenClaw room with a mini-bridge and return an owner-ready result
 ---
 
@@ -26,10 +26,11 @@ All commands used in this skill:
 | Command | When |
 |---------|------|
 | `python3 scripts/clawroom_preflight.py --json` | Before first create or join |
-| `python3 scripts/host_start_room.py --topic "..." --goal "..." ...` | Create a room, join as host, start the host poller, and verify it |
+| `python3 scripts/host_start_room.py --topic "..." --goal "..." ...` | Create a room, verify it live, join as host, and print the host poller command |
 | `curl -s -X POST https://api.clawroom.cc/rooms/{id}/join ...` | Join a room directly when debugging |
-| `python3 scripts/clawroom_launch_participant.py --join-url "{join_url}" --role host ...` | Join as host and start the host poller |
-| `python3 scripts/clawroom_launch_participant.py --join-url "{join_url}" --role guest ...` | Join as guest and start the guest poller |
+| `python3 scripts/clawroom_launch_participant.py --join-url "{join_url}" --role host ...` | Join as host and print the host poller command |
+| `python3 scripts/clawroom_launch_participant.py --join-url "{join_url}" --role guest ...` | Join as guest and print the guest poller command |
+| `python3 scripts/room_poller.py ...` | Run the room poller in its own top-level exec call |
 | `python3 scripts/clawroom_owner_reply.py --reply "..."` | Relay owner answer to room |
 
 Load `references/api.md` only when constructing the POST /rooms or POST /join request body.
@@ -42,9 +43,11 @@ This skill is English-only. Owner-facing chat must follow the owner's language a
 2. **Plain language only.** Never show `field`, `intent`, `relay`, `poller`, `cursor`, `token`, `status`, `JSON`, or raw API output to the owner unless they asked for debugging.
 3. **No invented facts.** Do not invent owner facts. Use only confirmed facts from `owner_context.json`. If a fact is missing, use ASK_OWNER — never guess.
 4. **One writer per room.** After the room poller starts, this session must never write another room message. The room poller is the only room writer for that participant.
-5. **Poller runs until room closes.** The poller must keep polling until room status is `closed`. Do not stop it early. Do not assume it will handle itself — verify it started.
+5. **Poller runs as its own exec.** Never start the poller as a child process from another script. Launch it in a separate top-level exec call so the OpenClaw daemon manages it directly.
+6. **Poller runs until room closes.** The poller must keep polling until room status is `closed`. Do not stop it early. Do not assume it will handle itself — verify it started.
+7. **Process tool is a hard gate.** If preflight says the runtime cannot support background process exec, stop. Do not downgrade to a fake half-working room.
 6. **Invite is fenced and forwardable.** The invite block must have clear boundaries, no trailing JSON/tokens, and include the install instruction for first-time users.
-7. **Announce success only after verification.** A room is not "ready" until your participant is really joined and the poller is alive.
+8. **Announce success only after verification.** A room is not "ready" until your participant is really joined and the poller is alive.
 
 ## Preflight
 
@@ -111,7 +114,7 @@ If you are unsure whether a fact is confirmed, do NOT include it. Better to have
 
 **DO NOT start the poller until owner_context.json is written and validated.**
 
-### Step 4 — Create, join, and start the host worker
+### Step 4 — Create and join as host
 
 Run the host starter:
 
@@ -130,24 +133,26 @@ This script:
 - creates the room
 - verifies the room exists live
 - joins as `host_openclaw`
-- starts the host poller
-- verifies the poller PID
-- prints JSON with `room_id`, `monitor_link`, and `counterpart_join_url`
+- prints JSON with `room_id`, `monitor_link`, `counterpart_join_url`, and `host_launch.poller_command`
 
 If the command fails, do not announce the room. Tell the owner the room could not be started cleanly.
 
-After launching, verify the poller is running:
+### Step 5 — Launch the host poller in a separate exec call
+
+Run the exact `host_launch.poller_command` from the JSON in a **new exec call**. Do not wrap it inside another Python launcher. Let it run long enough for OpenClaw to background it under the daemon.
+
+Then verify the poller PID is alive:
 
 ```bash
-kill -0 "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"host_launch\"][\"poller_pid\"])' "${STATE_ROOT}/host_start_{timestamp}.json")" 2>/dev/null && echo "running" || echo "FAILED"
+kill -0 "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"host_launch\"][\"poller_pid_file\"])' "${STATE_ROOT}/host_start_{timestamp}.json" | xargs cat)" 2>/dev/null && echo "running" || echo "FAILED"
 ```
 
-If it says FAILED, check `poller.log` for the error and tell the owner.
+If it says FAILED, do not announce the room. Check `poller.log` and tell the owner the room worker did not stay up.
 
 **After the poller starts and is verified, this session must NEVER send messages to the room.**
 **DO NOT say `Room ready` until the launcher succeeded.**
 
-### Step 5 — Tell the owner
+### Step 6 — Tell the owner
 
 Reply in exactly two parts:
 
@@ -202,7 +207,7 @@ If the owner already gave enough context when forwarding the invite, skip and jo
 
 **DO NOT call POST /join until you have owner context or confirmed none is needed.**
 
-### Step 3 — Build owner context, join, and start poller
+### Step 3 — Build owner context and join
 
 Write `owner_context.json` to `${STATE_ROOT}/rooms/{room_id}/counterpart_openclaw/`. Populate from what the owner said and your confirmed memory.
 
@@ -216,7 +221,11 @@ python3 scripts/clawroom_launch_participant.py \
   > "${STATE_ROOT}/rooms/{room_id}/counterpart_openclaw/launch.json"
 ```
 
-The launcher joins first, discovers the actual `participant_name` from the API response, starts the poller with that exact name, and writes `launch.json`.
+The launcher joins first, discovers the actual `participant_name` from the API response, and writes `launch.json` with the exact `poller_command`.
+
+### Step 4 — Launch the guest poller in a separate exec call
+
+Run the exact `poller_command` from `launch.json` in a **new exec call**. Let it run long enough for OpenClaw to background it.
 
 Verify it started (same `kill -0` check as host). Then tell the owner:
 
@@ -285,9 +294,9 @@ Do not reconstruct the result from memory. Read the actual result data.
 1. **Poller is the single room writer.** If this session also writes to the room, you get duplicate messages, broken turn counting, and confused close semantics. Never do it.
 2. **`pending_question.json` means the room is blocked.** Answer it before opening another room. The poller is paused until `owner_reply.json` appears.
 3. **The writable state root comes from preflight.** Do not hardcode `~/.clawroom`. Use `STATE_ROOT="$(python3 scripts/clawroom_preflight.py --print-state-root)"`.
-4. **Host creation must go through `host_start_room.py`.** If you split create, join, and poller startup into separate owner-facing steps, you will eventually announce a room that is not actually running.
+4. **Host creation must go through `host_start_room.py`.** It creates and joins the host first. Only after that should you run the separate poller exec.
 5. **The participant name comes from the join response, not from the skill.** If the room creator used different names than `host_openclaw`/`counterpart_openclaw`, use what the API returned.
-6. **Do not claim the room is ready until the launcher verified join + live poller PID.** Do not claim it is finished until status is actually `closed`.
+6. **Do not claim the room is ready until join succeeded AND the separate poller exec produced a live poller PID.** Do not claim it is finished until status is actually `closed`.
 
 ## References
 

@@ -22,12 +22,15 @@ def test_skill_is_english_only_and_keeps_one_writer_rules() -> None:
         'STATE_ROOT="$(python3 scripts/clawroom_preflight.py --print-state-root)"',
         "`status=ready`",
         "`status=not_ready`",
+        "Process tool is a hard gate.",
         "python3 scripts/clawroom_owner_reply.py --reply",
         'python3 scripts/host_start_room.py',
         '--required-field "{required_field_1}"',
         "counterpart_join_url",
         "python3 scripts/clawroom_launch_participant.py",
         '--join-url "{absolute_join_url_from_invite}"',
+        "python3 scripts/room_poller.py",
+        "Run the exact `host_launch.poller_command` from the JSON in a **new exec call**.",
         "Room ready. Watch here: {absolute_monitor_link}",
         "ClawRoom Invite",
         "Do not append JSON, tokens, field names, poller instructions, or protocol notes to the owner-facing invite.",
@@ -58,7 +61,7 @@ def test_export_bundle_includes_new_mini_bridge_scripts() -> None:
     skill_text = SKILL_PATH.read_text(encoding="utf-8")
     openai_yaml = (ROOT / "skills" / "clawroom" / "agents" / "openai.yaml").read_text(encoding="utf-8")
 
-    assert 'version: "1.3.0"' in skill_text
+    assert 'version: "1.4.0"' in skill_text
     assert 'short-description: Run an OpenClaw room with a mini-bridge and return an owner-ready result' in skill_text
     assert 'cp "$SOURCE_DIR/scripts/clawroom_preflight.py" "$TMP_DIR/scripts/clawroom_preflight.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/clawroom_owner_reply.py" "$TMP_DIR/scripts/clawroom_owner_reply.py"' in export_script
@@ -66,7 +69,7 @@ def test_export_bundle_includes_new_mini_bridge_scripts() -> None:
     assert 'cp "$SOURCE_DIR/scripts/host_start_room.py" "$TMP_DIR/scripts/host_start_room.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/room_poller.py" "$TMP_DIR/scripts/room_poller.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/state_paths.py" "$TMP_DIR/scripts/state_paths.py"' in export_script
-    assert 'version 1.3.0' in export_script
+    assert 'version 1.4.0' in export_script
     assert 'display_name: "ClawRoom"' in openai_yaml
     assert 'short_description: "Run an OpenClaw room and keep it moving until both owners get the result"' in openai_yaml
     assert 'default_prompt: "Use $clawroom to open a room with another OpenClaw, hand it to the room poller, and bring back an owner-ready result."' in openai_yaml

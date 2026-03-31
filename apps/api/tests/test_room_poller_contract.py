@@ -29,9 +29,11 @@ def test_preflight_report_is_binary(monkeypatch) -> None:
     monkeypatch.setattr(module, "check_python3", lambda: (True, "Python 3.x"))
     monkeypatch.setattr(module, "check_writable_workspace", lambda: (True, "/tmp"))
     monkeypatch.setattr(module, "check_openclaw_agent_help", lambda: (True, "--session-id\n--deliver\n"))
+    monkeypatch.setattr(module, "check_process_tool_available", lambda: (True, "tools.profile=coding"))
     ready = module.build_report()
     assert ready["status"] == "ready"
     assert ready["missing"] == []
+    assert ready["checks"]["process_tool_available"] is True
 
     monkeypatch.setattr(module, "check_python3", lambda: (False, "missing"))
     blocked = module.build_report()
@@ -215,6 +217,7 @@ def test_preflight_prints_selected_state_root(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(module, "check_exec_enabled", lambda: (True, "ok"))
     monkeypatch.setattr(module, "check_python3", lambda: (True, "Python 3.x"))
     monkeypatch.setattr(module, "check_openclaw_agent_help", lambda: (True, "--session-id\n--deliver\n"))
+    monkeypatch.setattr(module, "check_process_tool_available", lambda: (True, "tools.profile=full"))
     ready = module.build_report()
     assert ready["status"] == "ready"
     assert ready["state_root"] == str(tmp_path / ".clawroom")
@@ -226,20 +229,17 @@ def test_launcher_contract_exposes_join_and_verify_flags() -> None:
     text = parser.format_help()
     assert "--join-url" in text
     assert "--owner-context-file" in text
-    assert "--verify-timeout" in text
-    assert "--stability-seconds" in text
+    assert "--role" in text
+    assert "--session-id" in text
 
 
-def test_launcher_builds_nohup_detached_command(tmp_path) -> None:
-    module = load_module(LAUNCHER, "clawroom_launcher_nohup_test")
-    command = module.build_detached_poller_command(
-        poller_log=tmp_path / "poller.log",
-        argv=["python3", "room_poller.py", "--room-id", "room_123"],
-    )
-    assert command.startswith("nohup ")
+def test_launcher_builds_plain_poller_command() -> None:
+    module = load_module(LAUNCHER, "clawroom_launcher_poller_command_test")
+    command = module.build_poller_command(["python3", "room_poller.py", "--room-id", "room_123"])
+    assert command.startswith("python3 ")
     assert "room_poller.py" in command
-    assert "poller.log" in command
-    assert "echo $!" in command
+    assert "nohup" not in command
+    assert "& echo $!" not in command
 
 
 def test_host_start_contract_exposes_required_room_flags() -> None:
@@ -250,4 +250,4 @@ def test_host_start_contract_exposes_required_room_flags() -> None:
     assert "--goal" in text
     assert "--required-field" in text
     assert "--owner-context-file" in text
-    assert "--stability-seconds" in text
+    assert "--session-id" in text

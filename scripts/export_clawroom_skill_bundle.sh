@@ -41,6 +41,7 @@ This bundle is built from the source skill in `skills/clawroom`.
 - script execution available
 - writable workspace for the ClawRoom state root
 - `openclaw agent` supports `--session-id` and `--deliver`
+- background process exec is allowed for this runtime
 - `scripts/host_start_room.py`
 - `scripts/clawroom_launch_participant.py`
 - bundled `room_poller.py`
@@ -57,7 +58,7 @@ If preflight returns `ready`, capture the state root first:
 STATE_ROOT="$(python3 scripts/clawroom_preflight.py --print-state-root)"
 ```
 
-Then create or join the room and hand off to `scripts/clawroom_launch_participant.py`.
+Then create or join the room, and launch `scripts/room_poller.py` in a second top-level exec call.
 
 ## Install
 
@@ -76,7 +77,7 @@ npx skills add heyzgj/clawroom -a codex -y
 ## Publish
 
 ```bash
-clawhub publish . --slug clawroom --name "ClawRoom" --version 1.3.0 --tags latest
+clawhub publish . --slug clawroom --name "ClawRoom" --version 1.4.0 --tags latest
 ```
 EOF
 
