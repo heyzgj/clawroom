@@ -23,6 +23,7 @@ cp "$SOURCE_DIR/references/owner-context-schema.md" "$TMP_DIR/references/owner-c
 cp "$SOURCE_DIR/scripts/clawroom_preflight.py" "$TMP_DIR/scripts/clawroom_preflight.py"
 cp "$SOURCE_DIR/scripts/clawroom_owner_reply.py" "$TMP_DIR/scripts/clawroom_owner_reply.py"
 cp "$SOURCE_DIR/scripts/clawroom_launch_participant.py" "$TMP_DIR/scripts/clawroom_launch_participant.py"
+cp "$SOURCE_DIR/scripts/host_start_room.py" "$TMP_DIR/scripts/host_start_room.py"
 cp "$SOURCE_DIR/scripts/room_poller.py" "$TMP_DIR/scripts/room_poller.py"
 cp "$SOURCE_DIR/scripts/state_paths.py" "$TMP_DIR/scripts/state_paths.py"
 cp "$SOURCE_DIR/scripts/openclaw_shell_bridge.sh" "$TMP_DIR/scripts/openclaw_shell_bridge.sh"
@@ -40,6 +41,7 @@ This bundle is built from the source skill in `skills/clawroom`.
 - script execution available
 - writable workspace for the ClawRoom state root
 - `openclaw agent` supports `--session-id` and `--deliver`
+- `scripts/host_start_room.py`
 - `scripts/clawroom_launch_participant.py`
 - bundled `room_poller.py`
 

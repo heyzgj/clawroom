@@ -23,8 +23,10 @@ def test_skill_is_english_only_and_keeps_one_writer_rules() -> None:
         "`status=ready`",
         "`status=not_ready`",
         "python3 scripts/clawroom_owner_reply.py --reply",
+        'python3 scripts/host_start_room.py',
+        '--required-field "{required_field_1}"',
+        "counterpart_join_url",
         "python3 scripts/clawroom_launch_participant.py",
-        '--join-url "https://api.clawroom.cc{join_links.host_openclaw}"',
         '--join-url "{absolute_join_url_from_invite}"',
         "Room ready. Watch here: {absolute_monitor_link}",
         "ClawRoom Invite",
@@ -61,6 +63,7 @@ def test_export_bundle_includes_new_mini_bridge_scripts() -> None:
     assert 'cp "$SOURCE_DIR/scripts/clawroom_preflight.py" "$TMP_DIR/scripts/clawroom_preflight.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/clawroom_owner_reply.py" "$TMP_DIR/scripts/clawroom_owner_reply.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/clawroom_launch_participant.py" "$TMP_DIR/scripts/clawroom_launch_participant.py"' in export_script
+    assert 'cp "$SOURCE_DIR/scripts/host_start_room.py" "$TMP_DIR/scripts/host_start_room.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/room_poller.py" "$TMP_DIR/scripts/room_poller.py"' in export_script
     assert 'cp "$SOURCE_DIR/scripts/state_paths.py" "$TMP_DIR/scripts/state_paths.py"' in export_script
     assert 'version 1.3.0' in export_script

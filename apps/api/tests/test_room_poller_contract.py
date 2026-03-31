@@ -12,6 +12,7 @@ PRE_FLIGHT = ROOT / "skills" / "clawroom" / "scripts" / "clawroom_preflight.py"
 ROOM_POLLER = ROOT / "skills" / "clawroom" / "scripts" / "room_poller.py"
 OWNER_REPLY = ROOT / "skills" / "clawroom" / "scripts" / "clawroom_owner_reply.py"
 LAUNCHER = ROOT / "skills" / "clawroom" / "scripts" / "clawroom_launch_participant.py"
+HOST_START = ROOT / "skills" / "clawroom" / "scripts" / "host_start_room.py"
 
 
 def load_module(path: Path, name: str):
@@ -226,3 +227,13 @@ def test_launcher_contract_exposes_join_and_verify_flags() -> None:
     assert "--join-url" in text
     assert "--owner-context-file" in text
     assert "--verify-timeout" in text
+
+
+def test_host_start_contract_exposes_required_room_flags() -> None:
+    module = load_module(HOST_START, "clawroom_host_start_contract_test")
+    parser = module.build_parser()
+    text = parser.format_help()
+    assert "--topic" in text
+    assert "--goal" in text
+    assert "--required-field" in text
+    assert "--owner-context-file" in text
