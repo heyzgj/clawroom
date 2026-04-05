@@ -18,6 +18,14 @@ export function route(pathname: string): RouteMatch | null {
     if (!roomId) return null;
     return { kind: "rooms", roomId, forwardPath: `/rooms/${roomId}/join_info` };
   }
+  // /act/:room_id/:action → GET-able action URLs for exec-disabled agents
+  if (pathname.startsWith("/act/")) {
+    const rest = pathname.slice("/act/".length);
+    const roomId = rest.split("/")[0];
+    if (!roomId) return null;
+    const action = rest.slice(roomId.length + 1).split("/")[0] || "";
+    return { kind: "rooms", roomId, forwardPath: `/rooms/${roomId}/act/${action}` };
+  }
   return null;
 }
 

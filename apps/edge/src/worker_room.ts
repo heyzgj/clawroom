@@ -411,6 +411,30 @@ type RunnerAttemptRecord = {
   current: boolean;
 };
 
+/** Block private/internal URLs to prevent SSRF via notification_url. */
+function isBlockedNotificationUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const h = parsed.hostname.toLowerCase();
+    if (h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "0.0.0.0") return true;
+    if (h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".localhost")) return true;
+    // Block common cloud metadata endpoints
+    if (h === "169.254.169.254" || h === "metadata.google.internal") return true;
+    // Block RFC 1918 private ranges
+    const parts = h.split(".");
+    if (parts.length === 4 && parts.every((p) => /^\d+$/.test(p))) {
+      const a = parseInt(parts[0], 10);
+      const b = parseInt(parts[1], 10);
+      if (a === 10) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+    }
+    return false;
+  } catch {
+    return true; // invalid URL = blocked
+  }
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -783,6 +807,7 @@ export class RoomDurableObject implements DurableObject {
   private sql: SqlStorage;
   private schemaReady = false;
   private onlineStateDirty = false;
+  private waitingEventResolvers = new Set<() => void>();
   private recoveryStateDirty = false;
   private snapshotVersion = 0;
   private cachedSnapshot: { roomId: string; version: number; snapshot: RoomSnapshot } | null = null;
@@ -873,6 +898,12 @@ export class RoomDurableObject implements DurableObject {
       if (request.method === "GET" && tail === "/monitor/stream") return await this.handleMonitorStream(request, roomId);
       if (request.method === "GET" && tail === "/monitor/diagnostics") return await this.handleDiagnostics(request, roomId);
 
+      // GET-able action URLs for exec-disabled agents (OpenClaw web_fetch compatibility)
+      if (request.method === "GET" && parts[2] === "act") {
+        const action = parts[3] || "";
+        return await this.handleAction(request, roomId, action);
+      }
+
       return json({ error: "not_found" }, { status: 404 });
     } catch (err: any) {
       if (err instanceof Response) return err;
@@ -884,6 +915,10 @@ export class RoomDurableObject implements DurableObject {
 
   async alarm(): Promise<void> {
     this.ensureSchema();
+
+    // Retry any pending webhook notifications first
+    await this.retryPendingNotifications();
+
     const row = this.sql.exec("SELECT id, status, expires_at, deadline_at FROM room LIMIT 1").one();
     if (!row) return;
     const status = String(row.status || "");
@@ -930,6 +965,7 @@ export class RoomDurableObject implements DurableObject {
       this.sql.exec("DELETE FROM seen_texts");
       this.sql.exec("DELETE FROM participants");
       this.sql.exec("DELETE FROM tokens");
+      this.sql.exec("DELETE FROM pending_notifications");
       this.sql.exec("DELETE FROM room");
       this.cachedSnapshot = null;
       this.participantTouchCache.clear();
@@ -1535,6 +1571,17 @@ export class RoomDurableObject implements DurableObject {
         resolution_payload_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_owner_gates_participant ON owner_gates(participant, gate_type, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS pending_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        participant_name TEXT NOT NULL,
+        notification_url TEXT NOT NULL,
+        notification_secret TEXT,
+        payload_json TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT,
+        created_at TEXT NOT NULL
+      );
 	    `);
     this.ensureRoomColumns();
     this.ensureParticipantColumns();
@@ -1666,6 +1713,12 @@ export class RoomDurableObject implements DurableObject {
     }
     if (!participantCols.includes("display_name")) {
       this.sql.exec("ALTER TABLE participants ADD COLUMN display_name TEXT");
+    }
+    if (!participantCols.includes("notification_url")) {
+      this.sql.exec("ALTER TABLE participants ADD COLUMN notification_url TEXT");
+    }
+    if (!participantCols.includes("notification_secret")) {
+      this.sql.exec("ALTER TABLE participants ADD COLUMN notification_secret TEXT");
     }
   }
 
@@ -3869,6 +3922,17 @@ export class RoomDurableObject implements DurableObject {
     this.sql.exec("UPDATE room SET status='closed', stop_reason=?, stop_detail=?, updated_at=? WHERE status='active' AND id=?", stopReason, stopDetail, ts, roomId);
     await this.appendEvent("*", "status", { status: "closed", reason: stopReason, detail: stopDetail });
 
+    // Notify all participants that room closed (deliver: true → owner sees final result)
+    const closeNotifiableRows = this.sql.exec(
+      "SELECT name, notification_url, notification_secret, participant_token FROM participants WHERE notification_url IS NOT NULL AND joined=1",
+    ).toArray();
+    for (const row of closeNotifiableRows) {
+      const payload = this.buildAgentHookPayload(roomId, "room_closed", {
+        targetParticipantToken: String(row.participant_token || ""),
+      });
+      await this.enqueueNotification(String(row.name), String(row.notification_url), String(row.notification_secret || ""), payload);
+    }
+
     const ttlMinutes = Math.max(1, Number(room.ttl_minutes || 60));
     const expiresAt = new Date(Date.now() + ttlMinutes * 60_000).toISOString();
     this.sql.exec("UPDATE room SET expires_at=? WHERE id=?", expiresAt, roomId);
@@ -4024,6 +4088,9 @@ export class RoomDurableObject implements DurableObject {
       workflow_mode?: string | null;
       workflow_model?: string | null;
       context_envelope?: ContextEnvelope | Record<string, unknown> | null;
+      notification_url?: string | null;
+      notification_secret?: string | null;
+      notification_url_requested?: boolean;
     },
   ): Promise<Record<string, unknown>> {
     const clientName = typeof details.client_name === "string" ? details.client_name.slice(0, 120) : null;
@@ -4059,6 +4126,14 @@ export class RoomDurableObject implements DurableObject {
     } else if (!participantRow?.context_envelope_json) {
       this.sql.exec("UPDATE participants SET context_envelope_json='{}' WHERE name=?", participant);
     }
+    if (details.notification_url) {
+      this.sql.exec(
+        "UPDATE participants SET notification_url=?, notification_secret=? WHERE name=?",
+        details.notification_url,
+        details.notification_secret || null,
+        participant,
+      );
+    }
     const participantTokenKey = `participant:${participant}`;
     const existingParticipantTokenKey = this.sql.exec("SELECT key FROM tokens WHERE key=? LIMIT 1", participantTokenKey).toArray();
     if (existingParticipantTokenKey.length) {
@@ -4078,12 +4153,29 @@ export class RoomDurableObject implements DurableObject {
     }
     await this.appendEvent("*", "join", { participant, client_name: clientName, agent_id: agentId, runtime });
 
+    // Notify other participants that someone joined (via /hooks/agent compatible payload)
+    const notifiableJoinRows = this.sql.exec(
+      "SELECT name, notification_url, notification_secret, participant_token FROM participants WHERE name != ? AND notification_url IS NOT NULL AND joined=1",
+      participant,
+    ).toArray();
+    for (const row of notifiableJoinRows) {
+      const payload = this.buildAgentHookPayload(roomId, "participant_joined", {
+        joinedParticipant: displayName || clientName || agentId || participant,
+        targetParticipantToken: String(row.participant_token || ""),
+      });
+      await this.enqueueNotification(String(row.name), String(row.notification_url), String(row.notification_secret || ""), payload);
+    }
+
     const snapshot = await this.snapshot(roomId);
     await this.publishRoomSnapshot("join", snapshot);
+    const notificationRegistered = Boolean(details.notification_url);
+    const notificationRejected = Boolean(details.notification_url_requested && !details.notification_url);
     return {
       participant,
       participant_token: participantToken,
       watch_link: `${publicUiBase}/?room_id=${encodeURIComponent(roomId)}&token=${encodeURIComponent(participantToken)}`,
+      notification_registered: notificationRegistered,
+      ...(notificationRejected ? { notification_warning: "notification_url was rejected — must be HTTPS with a public IP. Push notifications will not work for this participant." } : {}),
       room: snapshot,
       ...(contextEnvelope ? { context_envelope: contextEnvelope } : {}),
       ...(agentId ? { agent_id: agentId, runtime, display_name: displayName || clientName || agentId } : {}),
@@ -4105,6 +4197,9 @@ export class RoomDurableObject implements DurableObject {
     const workflowMode = typeof body?.workflow_mode === "string" ? body.workflow_mode.slice(0, 40) : null;
     const workflowModel = typeof body?.workflow_model === "string" ? body.workflow_model.slice(0, 120) : null;
     const contextEnvelope = normalizeContextEnvelope(body?.context_envelope);
+    const rawNotificationUrl = typeof body?.notification_url === "string" && body.notification_url.startsWith("https://") ? body.notification_url.slice(0, 500) : null;
+    const notificationUrl = rawNotificationUrl && !isBlockedNotificationUrl(rawNotificationUrl) ? rawNotificationUrl : null;
+    const notificationSecret = typeof body?.notification_secret === "string" ? body.notification_secret.slice(0, 200) : null;
     const publicUiBase = this.publicUiBase(new URL(request.url).origin);
     if (body?.context_envelope != null && !contextEnvelope) {
       return badRequest("context_envelope must include a summary and up to 16 refs");
@@ -4170,6 +4265,9 @@ export class RoomDurableObject implements DurableObject {
       workflow_mode: workflowMode,
       workflow_model: workflowModel,
       context_envelope: contextEnvelope,
+      notification_url: notificationUrl,
+      notification_secret: notificationSecret,
+      notification_url_requested: Boolean(rawNotificationUrl),
     }));
   }
 
@@ -5037,6 +5135,21 @@ export class RoomDurableObject implements DurableObject {
           }
         });
       }
+
+      // Webhook push: notify other participants via /hooks/agent compatible payload
+      const notifiableRows = this.sql.exec(
+        "SELECT name, notification_url, notification_secret, participant_token FROM participants WHERE name != ? AND notification_url IS NOT NULL AND joined=1",
+        sender,
+      ).toArray();
+      for (const row of notifiableRows) {
+        const payload = this.buildAgentHookPayload(roomId, "new_message", {
+          senderName: sender,
+          messageText: msg.text,
+          messageIntent: msg.intent,
+          targetParticipantToken: String(row.participant_token || ""),
+        });
+        await this.enqueueNotification(String(row.name), String(row.notification_url), String(row.notification_secret || ""), payload);
+      }
     }
 
     if (currentAttemptId && msg.intent !== "ASK_OWNER") {
@@ -5094,7 +5207,27 @@ export class RoomDurableObject implements DurableObject {
       this.touchParticipant(audience);
     }
 
-    const events = this.readEvents(after, limit, audience);
+    const url = new URL(request.url);
+    const waitSeconds = Math.min(30, Math.max(0, parseInt(url.searchParams.get("wait") || "0", 10)));
+
+    let events = this.readEvents(after, limit, audience);
+
+    if (events.length === 0 && waitSeconds > 0) {
+      let wake: (() => void) | null = null;
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            wake = () => resolve();
+            this.waitingEventResolvers.add(wake);
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, waitSeconds * 1000)),
+        ]);
+      } finally {
+        if (wake) this.waitingEventResolvers.delete(wake);
+      }
+      events = this.readEvents(after, limit, audience);
+    }
+
     const room = await this.snapshot(roomId);
     const nextCursor = events.length ? events[events.length - 1].id : after;
     return json({ room, events, next_cursor: nextCursor });
@@ -5328,11 +5461,344 @@ export class RoomDurableObject implements DurableObject {
     }));
   }
 
+  /**
+   * GET-able action endpoint for exec-disabled agents (e.g., OpenClaw with web_fetch).
+   * Allows agents to join, send messages, check status, and close rooms via GET requests.
+   * All auth is via query param tokens. Text is URL-encoded in query params (max 1500 chars).
+   */
+  private async handleAction(request: Request, roomId: string, action: string): Promise<Response> {
+    this.ensureSchema();
+    const url = new URL(request.url);
+    const token = url.searchParams.get("token") || "";
+    if (!token) return badRequest("missing token query parameter");
+
+    if (action === "join") {
+      // Synthetic join request from GET params
+      const notificationUrl = url.searchParams.get("notification_url") || undefined;
+      const notificationSecret = url.searchParams.get("notification_secret") || undefined;
+      const agentId = url.searchParams.get("agent_id") || undefined;
+      const clientName = url.searchParams.get("client_name") || "web_fetch_agent";
+      const syntheticBody = JSON.stringify({
+        client_name: clientName,
+        agent_id: agentId,
+        notification_url: notificationUrl,
+        notification_secret: notificationSecret,
+      });
+      const syntheticReq = new Request(request.url, {
+        method: "POST",
+        headers: new Headers({ "content-type": "application/json", "x-invite-token": token }),
+        body: syntheticBody,
+      });
+      return await this.handleJoin(syntheticReq, roomId);
+    }
+
+    if (action === "send") {
+      const text = url.searchParams.get("text") || "";
+      const intent = (url.searchParams.get("intent") || "ANSWER").toUpperCase();
+      const expectReply = url.searchParams.get("expect_reply") !== "false";
+      if (!text) return badRequest("missing text query parameter");
+      if (text.length > 1500) return badRequest("text exceeds 1500 character limit for GET action URLs");
+      const fillsRaw = url.searchParams.get("fills") || "";
+      let fills: Record<string, string> = {};
+      if (fillsRaw) {
+        try { fills = JSON.parse(fillsRaw); } catch { /* ignore bad fills */ }
+      }
+      const syntheticBody = JSON.stringify({
+        intent,
+        text,
+        fills,
+        expect_reply: expectReply,
+        facts: [],
+        questions: [],
+        meta: { source: "get_action_url" },
+      });
+      const syntheticReq = new Request(request.url, {
+        method: "POST",
+        headers: new Headers({ "content-type": "application/json", "x-participant-token": token }),
+        body: syntheticBody,
+      });
+      return await this.handleMessage(syntheticReq, roomId);
+    }
+
+    if (action === "done") {
+      const text = url.searchParams.get("text") || "Room completed.";
+      const syntheticBody = JSON.stringify({
+        intent: "DONE",
+        text,
+        fills: {},
+        expect_reply: false,
+        facts: [],
+        questions: [],
+        meta: { source: "get_action_url" },
+      });
+      const syntheticReq = new Request(request.url, {
+        method: "POST",
+        headers: new Headers({ "content-type": "application/json", "x-participant-token": token }),
+        body: syntheticBody,
+      });
+      return await this.handleMessage(syntheticReq, roomId);
+    }
+
+    if (action === "owner-reply") {
+      // Owner replies to an ASK_OWNER question — stores the reply for the poller to pick up
+      const text = url.searchParams.get("text") || "";
+      if (!text) return badRequest("missing text query parameter");
+      if (text.length > 1500) return badRequest("text exceeds 1500 character limit");
+      // Resolve participant
+      const participant = await this.resolveParticipantByToken(token, ["participant", "invite"]);
+      if (!participant.joined) return badRequest("participant not joined");
+      // Check participant is actually waiting_owner
+      const row = this.sql.exec("SELECT waiting_owner FROM participants WHERE name=? LIMIT 1", participant.name).one();
+      if (!row || !row.waiting_owner) {
+        return json({ error: "not_waiting", message: "This participant is not currently waiting for an owner reply", participant: participant.name });
+      }
+      // Store the reply in a simple key-value: owner_reply_text on the participant
+      this.sql.exec("UPDATE participants SET waiting_owner=0 WHERE name=?", participant.name);
+      // Append a special event so the poller can detect it
+      await this.appendEvent(participant.name, "owner_reply_received", {
+        participant: participant.name,
+        text: text.slice(0, 1500),
+        source: "get_action_url",
+      });
+      const snapshot = await this.snapshot(roomId);
+      await this.publishRoomSnapshot("owner_reply_received", snapshot);
+      return json({ ok: true, participant: participant.name, room: snapshot });
+    }
+
+    if (action === "status") {
+      // Return room snapshot + recent events for this participant
+      const syntheticReq = new Request(request.url, {
+        method: "GET",
+        headers: new Headers({ "x-participant-token": token }),
+      });
+      return await this.handleEvents(syntheticReq, roomId, false);
+    }
+
+    return json({ error: "unknown_action", action }, { status: 400 });
+  }
+
+  /**
+   * Build an OpenClaw /hooks/agent compatible payload with full room context.
+   * This is a self-contained prompt that gives the agent everything it needs to act.
+   */
+  private buildAgentHookPayload(
+    roomId: string,
+    event: "new_message" | "participant_joined" | "room_closed",
+    details: {
+      senderName?: string;
+      messageText?: string;
+      messageIntent?: string;
+      joinedParticipant?: string;
+      targetParticipantToken: string;
+    },
+  ): Record<string, unknown> {
+    const apiBase = this.recoveryApiBase();
+    const roomRow = this.sql.exec("SELECT topic, goal FROM room WHERE id=? LIMIT 1", roomId).one() as Record<string, unknown> | null;
+    const topic = String(roomRow?.topic || "collaboration");
+    const goal = String(roomRow?.goal || "");
+
+    // Get required fields and current fills
+    const fieldRows = this.sql.exec("SELECT key, value, by_participant FROM fields ORDER BY key").toArray();
+    let requiredFields: string[] = [];
+    try {
+      const rfRow = this.sql.exec("SELECT required_fields_json FROM room WHERE id=? LIMIT 1", roomId).one() as Record<string, unknown> | null;
+      if (rfRow?.required_fields_json) requiredFields = JSON.parse(String(rfRow.required_fields_json));
+    } catch { /* ignore */ }
+
+    const fillsSummary = fieldRows.length > 0
+      ? fieldRows.map(f => `- ${f.key}: ${String(f.value).slice(0, 100)}`).join("\n")
+      : "(none yet)";
+    const filledKeys = new Set(fieldRows.map(f => String(f.key)));
+    const unfilledFields = requiredFields.filter(k => !filledKeys.has(k));
+
+    // Get target participant's owner context
+    const ctxRow = this.sql.exec(
+      "SELECT context_envelope_json FROM participants WHERE participant_token=? LIMIT 1",
+      details.targetParticipantToken,
+    ).toArray()[0];
+    let ownerContext = "";
+    if (ctxRow?.context_envelope_json) {
+      try {
+        const env = JSON.parse(String(ctxRow.context_envelope_json));
+        ownerContext = env.summary || JSON.stringify(env).slice(0, 500);
+      } catch { ownerContext = String(ctxRow.context_envelope_json).slice(0, 500); }
+    }
+
+    const respondUrl = `${apiBase}/act/${encodeURIComponent(roomId)}/send?token=${encodeURIComponent(details.targetParticipantToken)}`;
+    const doneUrl = `${apiBase}/act/${encodeURIComponent(roomId)}/done?token=${encodeURIComponent(details.targetParticipantToken)}`;
+    const statusUrl = `${apiBase}/act/${encodeURIComponent(roomId)}/status?token=${encodeURIComponent(details.targetParticipantToken)}`;
+
+    let messageBody: string;
+
+    if (event === "new_message") {
+      messageBody = [
+        `You are in a ClawRoom collaboration room.`,
+        ``,
+        `Room: ${roomId}`,
+        `Topic: ${topic}`,
+        `Goal: ${goal}`,
+        `Required fields: ${requiredFields.join(", ")}`,
+        `Fields filled: ${fillsSummary}`,
+        `Still needed: ${unfilledFields.length > 0 ? unfilledFields.join(", ") : "all filled"}`,
+        ownerContext ? `Your owner's context: ${ownerContext}` : "",
+        ``,
+        `New message from ${details.senderName} (intent: ${details.messageIntent}):`,
+        `"${details.messageText}"`,
+        ``,
+        `Respond: web_fetch("${respondUrl}&intent=ANSWER&text={your_reply_url_encoded}&expect_reply=true")`,
+        `When done: web_fetch("${doneUrl}&text={summary}")`,
+        `Status: web_fetch("${statusUrl}")`,
+        ``,
+        `Rules: fill required_fields via fills, one message then wait, match owner's language, hide technical detail.`,
+        `Full skill: https://clawroom.cc/skill.md`,
+      ].filter(Boolean).join("\n");
+    } else if (event === "participant_joined") {
+      messageBody = [
+        `You are the host of a ClawRoom collaboration room.`,
+        ``,
+        `Room: ${roomId}`,
+        `Topic: ${topic}`,
+        `Goal: ${goal}`,
+        `Required fields: ${requiredFields.join(", ")}`,
+        ownerContext ? `Your owner's context: ${ownerContext}` : "",
+        ``,
+        `${details.joinedParticipant || "The counterpart"} has joined the room. You should send the opening message.`,
+        `Lead with your owner's context relevant to the goal.`,
+        ``,
+        `Send opening: web_fetch("${respondUrl}&intent=ANSWER&text={your_opening_url_encoded}&expect_reply=true")`,
+        `Status: web_fetch("${statusUrl}")`,
+        ``,
+        `Rules: fill required_fields via fills, one message then wait, match owner's language, hide technical detail.`,
+        `Full skill: https://clawroom.cc/skill.md`,
+      ].filter(Boolean).join("\n");
+    } else {
+      // room_closed
+      messageBody = [
+        `A ClawRoom collaboration room has closed.`,
+        ``,
+        `Room: ${roomId}`,
+        `Topic: ${topic}`,
+        `Goal: ${goal}`,
+        `Final fields:`,
+        fillsSummary,
+        ``,
+        `Report the results to your owner in natural language. Focus on outcomes, not protocol.`,
+        `Save the full result to your workspace as a Markdown file.`,
+        `Result: web_fetch("${statusUrl}")`,
+      ].join("\n");
+    }
+
+    return {
+      message: messageBody,
+      sessionKey: `clawroom-${roomId}`,
+      deliver: event === "room_closed",
+      agentId: "main",
+    };
+  }
+
+  /**
+   * Enqueue a webhook notification for async delivery via alarm.
+   * Never blocks the caller — writes to pending_notifications and schedules alarm.
+   */
+  private async enqueueNotification(
+    participantName: string,
+    notificationUrl: string,
+    secret: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const body = JSON.stringify(payload);
+    const now = nowIso();
+    const nextAttemptAt = new Date(Date.now() + 500).toISOString(); // first attempt in 500ms
+    this.sql.exec(
+      "INSERT INTO pending_notifications (participant_name, notification_url, notification_secret, payload_json, attempts, next_attempt_at, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+      participantName,
+      notificationUrl,
+      secret || null,
+      body,
+      nextAttemptAt,
+      now,
+    );
+    // Schedule alarm for delivery if not already scheduled sooner
+    try {
+      const deliverMs = Date.now() + 500;
+      const currentAlarm = await this.state.storage.getAlarm();
+      if (!currentAlarm || currentAlarm > deliverMs) {
+        await this.state.storage.setAlarm(deliverMs);
+      }
+    } catch { /* alarm scheduling best-effort */ }
+  }
+
+  /** Retry pending webhook notifications. Called from alarm(). */
+  private async retryPendingNotifications(): Promise<void> {
+    const now = new Date().toISOString();
+    const pending = this.sql.exec(
+      "SELECT id, participant_name, notification_url, notification_secret, payload_json, attempts FROM pending_notifications WHERE attempts < 6 AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY id ASC LIMIT 20",
+      now,
+    ).toArray();
+
+    for (const row of pending) {
+      const id = Number(row.id);
+      const url = String(row.notification_url);
+      const secret = String(row.notification_secret || "");
+      const body = String(row.payload_json);
+      const attempts = Number(row.attempts);
+
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (secret) {
+        headers["authorization"] = `Bearer ${secret}`;
+      }
+
+      try {
+        const resp = await fetch(url, { method: "POST", headers, body });
+        if (resp.ok) {
+          this.sql.exec("DELETE FROM pending_notifications WHERE id=?", id);
+          continue;
+        }
+      } catch { /* network error, fall through to retry */ }
+
+      const nextAttempts = attempts + 1;
+      if (nextAttempts >= 6) {
+        this.sql.exec("DELETE FROM pending_notifications WHERE id=?", id);
+      } else {
+        const backoffMs = Math.pow(2, nextAttempts) * 1000;
+        const nextAt = new Date(Date.now() + backoffMs).toISOString();
+        this.sql.exec(
+          "UPDATE pending_notifications SET attempts=?, next_attempt_at=? WHERE id=?",
+          nextAttempts,
+          nextAt,
+          id,
+        );
+      }
+    }
+
+    // If there are still pending notifications, reschedule alarm
+    const remaining = this.sql.exec(
+      "SELECT MIN(next_attempt_at) AS next FROM pending_notifications WHERE attempts < 6",
+    ).one() as Record<string, unknown> | null;
+    if (remaining?.next) {
+      const nextMs = new Date(String(remaining.next)).getTime();
+      if (nextMs > Date.now()) {
+        try {
+          const currentAlarm = await this.state.storage.getAlarm();
+          if (!currentAlarm || currentAlarm > nextMs) {
+            await this.state.storage.setAlarm(nextMs);
+          }
+        } catch { /* best-effort */ }
+      }
+    }
+  }
+
   private async appendEvent(audience: EventAudience, type: string, payload: any): Promise<void> {
     this.ensureSchema();
     this.invalidateSnapshotCache();
     const createdAt = nowIso();
     this.sql.exec("INSERT INTO events (type, created_at, audience, payload_json) VALUES (?, ?, ?, ?)", type, createdAt, String(audience), JSON.stringify(payload || {}));
+
+    // Wake any long-poll waiters
+    for (const resolve of this.waitingEventResolvers) {
+      resolve();
+    }
+    this.waitingEventResolvers.clear();
     if (type === "msg" && payload && typeof payload === "object" && !Array.isArray(payload)) {
       const message =
         payload.message && typeof payload.message === "object" && !Array.isArray(payload.message)

@@ -410,7 +410,34 @@ export default {
         return withCors(request, await stub.fetch(forwarded));
       }
 
-      const match = route(url.pathname);
+      // GET /act/create — exec-free room creation via query params
+      if (request.method === "GET" && url.pathname === "/act/create") {
+        const topic = url.searchParams.get("topic") || "";
+        const goal = url.searchParams.get("goal") || "";
+        const fieldsRaw = url.searchParams.get("fields") || "";
+        const timeout = parseInt(url.searchParams.get("timeout") || "20", 10);
+        const participantsRaw = url.searchParams.get("participants") || "counterpart";
+        if (!topic) return withCors(request, json({ error: "missing topic query parameter" }, { status: 400 }));
+        if (!goal) return withCors(request, json({ error: "missing goal query parameter" }, { status: 400 }));
+        if (!fieldsRaw) return withCors(request, json({ error: "missing fields query parameter (comma-separated)" }, { status: 400 }));
+        const syntheticBody = {
+          topic,
+          goal,
+          participants: participantsRaw.split(",").map((s: string) => s.trim()).filter(Boolean),
+          required_fields: fieldsRaw.split(",").map((s: string) => s.trim()).filter(Boolean),
+          timeout_minutes: Math.min(Math.max(timeout, 5), 60),
+        };
+        // Rewrite as a POST /rooms request and fall through to the existing create logic
+        request = new Request(new URL("/rooms", url.origin), {
+          method: "POST",
+          headers: new Headers({ "content-type": "application/json" }),
+          body: JSON.stringify(syntheticBody),
+        });
+        // Update url for the fall-through
+        // Fall through to the POST /rooms handler below
+      }
+
+      const match = route(new URL(request.url).pathname);
       if (!match) return withCors(request, notFound());
 
       // Top-level create uses a random room id and forwards to that room DO to initialize state.
