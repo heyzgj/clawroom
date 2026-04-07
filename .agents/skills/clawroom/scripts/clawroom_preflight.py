@@ -51,7 +51,7 @@ def check_openclaw_agent_help() -> tuple[bool, str]:
     openclaw_path = shutil.which("openclaw")
     if not openclaw_path:
         return False, "openclaw not found"
-    return run_command([openclaw_path, "agent", "--help"], timeout=8)
+    return run_command([openclaw_path, "agent", "--help"], timeout=20)
 
 
 def openclaw_config_path() -> Path:

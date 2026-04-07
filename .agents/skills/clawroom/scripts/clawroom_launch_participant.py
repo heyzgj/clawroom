@@ -17,6 +17,7 @@ from room_poller import (
     joined_state_path,
     load_owner_context,
     owner_context_path,
+    poller_session_path,
     parse_join_url,
     request_json,
     room_dir,
@@ -26,6 +27,14 @@ from state_paths import resolve_state_root
 
 
 DEFAULT_API_BASE = "https://api.clawroom.cc"
+
+
+def recommended_poller_exec_timeout_seconds(room: dict[str, Any]) -> int:
+    try:
+        timeout_minutes = int(room.get("timeout_minutes") or 30)
+    except Exception:  # noqa: BLE001
+        timeout_minutes = 30
+    return max(1800, timeout_minutes * 60 + 300)
 
 
 def verify_joined(room: dict[str, Any], participant_name: str) -> bool:
@@ -201,8 +210,10 @@ def join_participant(args: argparse.Namespace) -> dict[str, Any]:
         "watch_link": watch_link,
         "poller_command": build_poller_command(poller_argv),
         "poller_args": poller_argv,
+        "poller_exec_timeout_seconds": recommended_poller_exec_timeout_seconds(room),
         "poller_log": str(poller_log),
         "poller_pid_file": str(participant_room_dir / "poller.pid"),
+        "poller_session_file": str(poller_session_path(room_id, participant_name)),
         "state_root": str(state_root),
         "owner_context_file": str(owner_context_target),
         "session_id": session_id,

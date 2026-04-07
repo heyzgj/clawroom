@@ -57,3 +57,17 @@ reports/
 # IDE/editor
 .idea/
 .vscode/
+
+# Other AI coding tools (config dirs)
+.factory/
+.kiro/
+.qoder/
+.trae/
+.windsurf/
+.claude/skills/
+
+# Playwright MCP cache
+.playwright-mcp/
+
+# Local ClawRoom runtime state (per-room spool dirs)
+.clawroom/

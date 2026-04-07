@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--goal", required=True)
     parser.add_argument("--required-field", action="append", dest="required_fields", default=[])
     parser.add_argument("--timeout-minutes", type=int, default=30)
-    parser.add_argument("--turn-limit", type=int, default=10)
+    parser.add_argument("--turn-limit", type=int, default=50)
     parser.add_argument("--owner-context-file", required=True)
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--host-name", default="host_openclaw")
@@ -114,6 +114,7 @@ def main() -> None:
                 "topic": create_payload["topic"],
                 "goal": create_payload["goal"],
                 "required_fields": required_fields,
+                "timeout_minutes": int(args.timeout_minutes),
                 "host_name": args.host_name,
                 "counterpart_name": args.counterpart_name,
                 "host_token": host_token,

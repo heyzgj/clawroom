@@ -5,6 +5,20 @@ import tempfile
 from pathlib import Path
 
 
+def _looks_like_skill_dir(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+    except Exception:  # noqa: BLE001
+        resolved = path.expanduser()
+    text = str(resolved)
+    markers = (
+        "/.openclaw/skills/",
+        "/.agents/skills/",
+        "/skills/clawroom",
+    )
+    return any(marker in text for marker in markers)
+
+
 def _dedupe(paths: list[Path]) -> list[Path]:
     seen: set[str] = set()
     unique: list[Path] = []
@@ -27,7 +41,9 @@ def candidate_state_roots() -> list[Path]:
     if workspace_env:
         candidates.append(Path(workspace_env).expanduser() / ".clawroom")
 
-    candidates.append(Path.cwd() / ".clawroom")
+    cwd = Path.cwd()
+    if not _looks_like_skill_dir(cwd):
+        candidates.append(cwd / ".clawroom")
     candidates.append(Path.home() / ".clawroom")
     return _dedupe(candidates)
 

@@ -1,5 +1,6 @@
 import './css/design-tokens.css';
 import './css/style.css';
+import './css/noir.css';
 
 /**
  * ClawRoom Monitor — Real API Client
@@ -305,7 +306,7 @@ function buildAttentionCopy(room = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// HOME PAGE: One-line instruction copy
+// HOME PAGE: Noir terminal landing
 // ---------------------------------------------------------------------------
 
 function showHomePage() {
@@ -314,34 +315,37 @@ function showHomePage() {
   DOM.briefingPage.hidden = true;
   DOM.app.hidden = true;
 
-  // Instruction block copy — the prompt to paste into your agent
-const INSTRUCTION_TEXT = "Read https://clawroom.cc/skill.md. Then help me with the task I send next. After I send the task, ask me one short clarify before you create any ClawRoom. Keep that clarify to one focused question or confirmation, not a checklist. If another agent should join, create the room, give me one watch link I can open plus one forwardable full invite, keep watching until the room closes, and report back in plain language.";
-  const COPY_LABEL = 'Copy for My Agent';
+  // Live ticker for the hero session panel: simulate active room.
+  const msgEl = document.getElementById('noirMsgCount');
+  const durEl = document.getElementById('noirDuration');
+  const sidEl = document.getElementById('noirSessionId');
+  if (!msgEl || !durEl) return;
 
-  const btnCopy = document.getElementById('btnCopyInstruction');
-  const instructionTextEl = document.getElementById('instructionText');
-  if (instructionTextEl) instructionTextEl.textContent = INSTRUCTION_TEXT;
-  if (btnCopy) {
-    btnCopy.addEventListener('click', () => {
-      navigator.clipboard.writeText(INSTRUCTION_TEXT).then(() => {
-        btnCopy.textContent = 'Copied!';
-        btnCopy.classList.add('copied');
-        setTimeout(() => {
-          btnCopy.textContent = COPY_LABEL;
-          btnCopy.classList.remove('copied');
-        }, 2000);
-      }).catch(() => {
-        // Fallback: select the instruction text
-        const pre = document.querySelector('.instruction-text');
-        if (pre) {
-          const range = document.createRange();
-          range.selectNodeContents(pre);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      });
-    });
+  let msgs = 7;
+  let dur = 12.4;
+
+  // Tick messages every ~4s
+  setInterval(() => {
+    if (msgs < 14) {
+      msgs += 1;
+      msgEl.textContent = String(msgs);
+    }
+  }, 3800);
+
+  // Tick duration every 100ms (smooth count-up)
+  setInterval(() => {
+    dur = parseFloat((dur + 0.1).toFixed(1));
+    durEl.textContent = dur.toFixed(1) + 's';
+  }, 100);
+
+  // Rotate session id suffix every 4s for a "live infrastructure" feel
+  if (sidEl) {
+    const chars = '0123456789abcdef';
+    setInterval(() => {
+      const base = 'room_8f2a';
+      const suffix = Array.from({ length: 2 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      sidEl.textContent = base + suffix;
+    }, 4000);
   }
 }
 
