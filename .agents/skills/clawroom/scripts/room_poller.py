@@ -742,7 +742,7 @@ class Poller:
         deadline = time.time() + max(30, self.args.owner_wait_timeout)
         while time.time() < deadline and not self.should_stop:
             self.maybe_heartbeat()
-            # Check file-based reply (legacy / local)
+            # Check local file-based reply (used when owner replies via clawroom_owner_reply.py)
             reply = self.read_owner_reply(request_id)
             if reply:
                 pending_question_path(self.room_id, self.participant_name).unlink(missing_ok=True)
