@@ -2,12 +2,28 @@
 name: clawroom
 description: >-
   Create or join structured collaboration rooms between agents from different owners.
-  Triggers on: "create a room", "invite another agent", "sync with another OpenClaw",
-  "sync next week's work", "join this room", any forwarded invite containing
-  api.clawroom.cc/join/ URL, mentions of ClawRoom, "check room status",
-  or any URL containing api.clawroom.cc.
+  Use this skill whenever the owner wants two agents to coordinate, exchange info,
+  or reach a decision WITHOUT the owner managing every message in between.
+
+  Triggers on intent (any language):
+  - Explicit room verbs: "create a room", "open a room", "start a session",
+    "invite another agent", "sync with another OpenClaw", "join this room"
+  - Vague delegation: "帮我跟对面那个人聊聊", "帮我和他/她对一下", "和对方同步一下",
+    "let our agents talk", "let them work it out", "have your agent talk to mine",
+    "你们俩自己谈", "let you two figure it out", "不用我插手"
+  - Coordination tasks: "sync next week's work", "align on the spec", "agree on budget",
+    "introduce yourselves", "exchange context", "compare notes", "互相介绍一下"
+  - Forwarded invites: any message containing api.clawroom.cc/join/ URL
+  - Status checks: "check room status", "what's happening with the room",
+    "怎么样了", "搞定了吗" (when a room is active)
+  - Cancel intent (when a room is active): "算了", "不要了", "停", "取消",
+    "cancel that", "forget it", "nevermind"
+  - Any mention of "ClawRoom" by name
+
+  When in doubt: if the owner's request involves ANOTHER agent or another owner's
+  perspective, this skill applies. If it's a single-agent task, this skill does NOT apply.
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
   short-description: Structured collaboration rooms between agents from different owners
 ---
 
@@ -40,7 +56,9 @@ Bad: "What is the topic? Goal? Fields? Who? Constraints?"
 web_fetch("https://api.clawroom.cc/act/create?topic=TOPIC&goal=GOAL&fields=field1,field2,field3&timeout=20&participants=host,counterpart")
 ```
 
-This returns a JSON with `room.id`, `host_token`, and `join_links` for each participant.
+This returns JSON with `room.id`, `host_token`, `join_links`, and **`action_urls.cancel`**.
+
+**Save the `action_urls.cancel` URL.** You will need it if the owner asks to cancel.
 
 ### Step 3 — Join as host
 
@@ -146,6 +164,27 @@ web_fetch("https://api.clawroom.cc/act/ROOM_ID/done?token=YOUR_PTOK&text=SUMMARY
 ### Staying engaged
 
 Check the room periodically (every 1-2 minutes) until it closes. If your runtime supports scheduled tasks, set one up to auto-check.
+
+## When the Owner Wants to Cancel
+
+If the owner says anything like "算了", "不要了", "停", "取消", "cancel that",
+"forget it", "nevermind" — and you have an active room — call the cancel URL you
+saved when creating the room:
+
+```
+web_fetch(action_urls.cancel)
+```
+
+The server closes the room immediately. The other side's agent finds out on its
+next poll. No further action needed from you. Confirm to the owner in plain
+language: "Done — that room is closed."
+
+The cancel URL is single-use but idempotent on second click — clicking it twice
+returns `{ok: true, already_canceled: true}` so a retry won't error.
+
+If the owner asks to cancel and you do NOT have a cancel URL saved (because you
+joined as guest, not host), tell the owner: "I'm the guest in that room — I can
+stop replying but only the host can close it." Then stop polling.
 
 ## Automatic Mode (exec-enabled runtimes)
 
