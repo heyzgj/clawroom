@@ -759,7 +759,7 @@ class Poller:
             time.sleep(max(0.5, self.args.poll_seconds))
         return None
 
-    def generate_model_message(self, *, room: dict[str, Any], latest_event: dict[str, Any] | None) -> dict[str, Any]:
+    def generate_model_message(self, *, room: dict[str, Any], latest_event: dict[str, Any] | None, continuation_hint: dict[str, Any] | None = None) -> dict[str, Any]:
         prompt = build_reply_prompt(
             role=self.args.role,
             room=room,
@@ -767,6 +767,26 @@ class Poller:
             owner_context=self.owner_context,
             has_started=self.has_started,
         )
+        # Inject server-side continuation hint into prompt if present
+        if continuation_hint:
+            state = continuation_hint.get("state", "")
+            reasons = continuation_hint.get("reasons", [])
+            required_action = continuation_hint.get("required_action", "")
+            missing = continuation_hint.get("missing_fields", [])
+            hint_block = (
+                f"\n\nSERVER STATE OVERRIDE: The room is in '{state}' state. "
+                f"Reasons: {reasons}. "
+                f"Required action: {required_action}. "
+            )
+            if missing:
+                hint_block += f"Missing fields: {missing}. You MUST fill these in your fills now. "
+            if required_action == "send_done":
+                hint_block += "All required fields are filled. Send intent DONE immediately. Do not chit-chat."
+            elif required_action == "fill_missing_fields":
+                hint_block += "Provide values for the missing fields in your fills. Do not send DONE until they are filled."
+            elif required_action == "fill_more_fields":
+                hint_block += "Continue filling fields based on what you and the counterpart have shared."
+            prompt = prompt + hint_block
         response = call_openclaw_json(
             agent_id=self.args.agent_id,
             session_id=self.session_id,
@@ -814,6 +834,21 @@ class Poller:
         owner_reply = self.wait_for_owner_reply(request_id, question_text)
         if not owner_reply:
             self.log("owner reply timed out or room closed before reply")
+            # Clear the waiting_owner flag on the server by submitting a placeholder reply.
+            # This prevents the continuation hint from looping on "awaiting_owner" forever.
+            try:
+                placeholder = "Owner did not respond in time. Proceeding with best available info."
+                request_json(
+                    "GET",
+                    f"{self.api_base}/act/{self.room_id}/owner-reply"
+                    f"?token={urllib.parse.quote(self.participant_token)}"
+                    f"&text={urllib.parse.quote(placeholder)}",
+                    retries=2,
+                    retry_delay_seconds=1.0,
+                )
+                self.log("cleared waiting_owner flag with placeholder reply after timeout")
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"failed to clear waiting_owner after timeout: {exc}")
             return
         owner_message = self.generate_owner_reply_message(room=room, question_text=question_text, owner_reply=owner_reply)
         self.send_message(owner_message)
@@ -855,7 +890,11 @@ class Poller:
                     if joined_count >= 2 and int(room.get("turn_count") or 0) == 0:
                         try:
                             self.log("both sides joined; generating host opening message")
-                            opening = self.generate_model_message(room=room, latest_event=None)
+                            continuation = getattr(self, "_latest_continuation", None) or batch.get("continuation") or {}
+                            opening = self.generate_model_message(
+                                room=room, latest_event=None,
+                                continuation_hint=continuation if continuation.get("state") == "needs_more_work" else None
+                            )
                             if opening.get("intent") in {"NOTE", "DONE", "OWNER_REPLY"}:
                                 opening["intent"] = "ANSWER"
                                 opening["expect_reply"] = True
@@ -886,7 +925,12 @@ class Poller:
                             continue
                         if not event_requires_reply(event):
                             continue
-                        outgoing = self.generate_model_message(room=room, latest_event=event)
+                        # Pass continuation hint passively into the prompt
+                        continuation = getattr(self, "_latest_continuation", None) or batch.get("continuation") or {}
+                        outgoing = self.generate_model_message(
+                            room=room, latest_event=event,
+                            continuation_hint=continuation if continuation.get("state") == "needs_more_work" else None
+                        )
                         self.send_message(outgoing)
                         self._event_fail_counts.pop(event_id, None)
                         handled = True
@@ -906,6 +950,12 @@ class Poller:
 
                 if advance_cursor:
                     self.cursor = batch_next_cursor
+
+                # CONTINUATION HINT (passive): store the latest server hint
+                # so the next normal LLM call can include it as context.
+                # We do NOT force extra LLM calls — that creates race conditions
+                # when the LLM produces unexpected output (e.g. ASK_OWNER instead of fill).
+                self._latest_continuation = batch.get("continuation") or {}
 
                 if not handled:
                     time.sleep(max(0.5, self.args.poll_seconds))

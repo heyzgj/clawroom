@@ -1582,6 +1582,18 @@ export class RoomDurableObject implements DurableObject {
         next_attempt_at TEXT,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS action_tokens (
+        digest TEXT PRIMARY KEY,
+        action TEXT NOT NULL,
+        scope_json TEXT NOT NULL DEFAULT '{}',
+        single_use INTEGER NOT NULL DEFAULT 1,
+        issued_at TEXT NOT NULL,
+        expires_at TEXT,
+        consumed_at TEXT,
+        revoked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_action_tokens_action ON action_tokens(action, issued_at DESC);
 	    `);
     this.ensureRoomColumns();
     this.ensureParticipantColumns();
@@ -3524,12 +3536,19 @@ export class RoomDurableObject implements DurableObject {
     };
     await this.publishRoomSnapshot("init", snapshot);
 
+    // Mint signed action tokens for owner-clickable URLs (cancel)
+    const cancelToken = await this.mintActionToken("cancel", { room_id: roomId }, { singleUse: true, ttlSeconds: 86400 });
+    const cancelUrl = `https://api.clawroom.cc/rooms/${roomId}/act/cancel?token=${encodeURIComponent(cancelToken)}`;
+
     return json({
       room: snapshot,
       host_token: hostToken,
       invites: inviteTokens,
       join_links: joinLinks,
       monitor_link: monitorLink,
+      action_urls: {
+        cancel: cancelUrl,
+      },
       config: { turn_limit: turnLimit, stall_limit: stallLimit, timeout_minutes: timeoutMinutes, ttl_minutes: ttlMinutes }
     });
   }
@@ -5230,7 +5249,89 @@ export class RoomDurableObject implements DurableObject {
 
     const room = await this.snapshot(roomId);
     const nextCursor = events.length ? events[events.length - 1].id : after;
-    return json({ room, events, next_cursor: nextCursor });
+    const continuation = isMonitor ? null : this.computeContinuationHint(room, audience);
+    return json({ room, events, next_cursor: nextCursor, continuation });
+  }
+
+  /**
+   * Compute server-side hint about what the agent should do next.
+   * This is the "force continuation" mechanism — the poller reads this and
+   * forces another LLM turn if the room is not in a stable state, instead of
+   * trusting the LLM to detect "all fields filled, send DONE".
+   */
+  private computeContinuationHint(room: any, participantName: string): any {
+    if (!room || typeof room !== "object") return { state: "idle", reasons: [] };
+    if (room.status === "closed") return { state: "done", reasons: [] };
+
+    const requiredFields: string[] = Array.isArray(room.required_fields) ? room.required_fields : [];
+    const fields = (room.fields || {}) as Record<string, { value?: string }>;
+    const placeholders = new Set([
+      "tbd", "pending", "unknown", "n/a", "na", "none", "null",
+      "待确认", "待提供", "待定", "未确定",
+    ]);
+    const filledFields = requiredFields.filter((f) => {
+      const v = String((fields[f] || {}).value || "").trim().toLowerCase();
+      return v.length > 0 && !placeholders.has(v);
+    });
+    const missingFields = requiredFields.filter((f) => !filledFields.includes(f));
+
+    const participants: any[] = Array.isArray(room.participants) ? room.participants : [];
+    const me = participants.find((p) => p.name === participantName);
+    const other = participants.find((p) => p.name !== participantName);
+
+    if (me?.waiting_owner) {
+      return {
+        state: "awaiting_owner",
+        reasons: ["ask_owner_pending"],
+        missing_fields: missingFields,
+      };
+    }
+
+    // I'm done but fields are missing — force me to fill them
+    if (me?.done && missingFields.length > 0) {
+      return {
+        state: "needs_more_work",
+        reasons: ["done_with_unfilled_fields"],
+        required_action: "fill_missing_fields",
+        missing_fields: missingFields,
+      };
+    }
+
+    // All fields filled, both sides done → done
+    if (missingFields.length === 0 && me?.done && other?.done) {
+      return { state: "done", reasons: [] };
+    }
+
+    // All fields filled, I haven't sent DONE yet → force DONE
+    if (missingFields.length === 0 && !me?.done) {
+      return {
+        state: "needs_more_work",
+        reasons: ["all_fields_filled_no_done"],
+        required_action: "send_done",
+        missing_fields: [],
+      };
+    }
+
+    // All fields filled, I'm done, waiting for other side
+    if (missingFields.length === 0 && me?.done && !other?.done) {
+      return {
+        state: "waiting_other_party",
+        reasons: ["other_not_done"],
+        missing_fields: [],
+      };
+    }
+
+    // Fields still missing
+    if (missingFields.length > 0) {
+      return {
+        state: "needs_more_work",
+        reasons: ["unfilled_fields"],
+        required_action: "fill_more_fields",
+        missing_fields: missingFields,
+      };
+    }
+
+    return { state: "idle", reasons: [], missing_fields: [] };
   }
 
   private async handleResult(request: Request, roomId: string, isMonitor: boolean): Promise<Response> {
@@ -5462,6 +5563,61 @@ export class RoomDurableObject implements DurableObject {
   }
 
   /**
+   * Mint a server-side action token for owner-clickable URLs (cancel, pause, status).
+   * Uses opaque DB-backed token (not HMAC/JWT) for revocability.
+   * Returns the plaintext token to be embedded in the URL.
+   */
+  private async mintActionToken(action: string, scope: Record<string, unknown>, opts?: { singleUse?: boolean; ttlSeconds?: number }): Promise<string> {
+    const singleUse = opts?.singleUse !== false;
+    const ttlSeconds = opts?.ttlSeconds || 86400; // 24h default
+    // Generate cryptographically random token
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const plaintext = "at_" + btoa(String.fromCharCode(...bytes)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+    // Hash for storage
+    const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(plaintext));
+    const digest = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+    this.sql.exec(
+      "INSERT INTO action_tokens (digest, action, scope_json, single_use, issued_at, expires_at, consumed_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+      digest,
+      action,
+      JSON.stringify(scope),
+      singleUse ? 1 : 0,
+      now,
+      expiresAt,
+    );
+    return plaintext;
+  }
+
+  /**
+   * Verify an action token. Returns the scope if valid, throws if invalid.
+   * Marks single-use tokens as consumed.
+   */
+  private async verifyActionToken(plaintext: string, expectedAction: string): Promise<Record<string, unknown>> {
+    if (!plaintext.startsWith("at_")) throw new Error("invalid_token_format");
+    const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(plaintext));
+    const digest = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const row = this.sql
+      .exec("SELECT action, scope_json, single_use, expires_at, consumed_at, revoked_at FROM action_tokens WHERE digest=? LIMIT 1", digest)
+      .toArray()[0] as any;
+    if (!row) throw new Error("token_not_found");
+    if (row.revoked_at) throw new Error("token_revoked");
+    if (row.action !== expectedAction) throw new Error("token_action_mismatch");
+    if (row.expires_at && new Date(String(row.expires_at)).getTime() < Date.now()) throw new Error("token_expired");
+    if (row.consumed_at && Number(row.single_use) === 1) {
+      // Already consumed — return scope but indicate already done (idempotent)
+      const scope = JSON.parse(String(row.scope_json || "{}"));
+      throw Object.assign(new Error("token_already_consumed"), { scope, alreadyConsumed: true });
+    }
+    if (Number(row.single_use) === 1) {
+      this.sql.exec("UPDATE action_tokens SET consumed_at=? WHERE digest=?", new Date().toISOString(), digest);
+    }
+    return JSON.parse(String(row.scope_json || "{}"));
+  }
+
+  /**
    * GET-able action endpoint for exec-disabled agents (e.g., OpenClaw with web_fetch).
    * Allows agents to join, send messages, check status, and close rooms via GET requests.
    * All auth is via query param tokens. Text is URL-encoded in query params (max 1500 chars).
@@ -5572,6 +5728,32 @@ export class RoomDurableObject implements DurableObject {
         headers: new Headers({ "x-participant-token": token }),
       });
       return await this.handleEvents(syntheticReq, roomId, false);
+    }
+
+    if (action === "cancel") {
+      // Owner-clickable cancel URL. Token is an action_token (at_*), not a participant token.
+      // This bypasses the LLM entirely — owner clicks link, room closes.
+      try {
+        const scope = await this.verifyActionToken(token, "cancel");
+        if (String(scope.room_id) !== roomId) {
+          return json({ error: "scope_mismatch" }, { status: 403 });
+        }
+        // Force close the room
+        const room = await this.snapshot(roomId);
+        if (room.status === "closed") {
+          return json({ ok: true, already_closed: true, room });
+        }
+        await this.forceCloseRoom(roomId, "manual_close", "owner_clicked_cancel_url");
+        const closed = await this.snapshot(roomId);
+        await this.publishRoomSnapshot("close", closed);
+        return json({ ok: true, room: closed });
+      } catch (e: any) {
+        if (e?.alreadyConsumed) {
+          // Idempotent: already canceled is success, not error
+          return json({ ok: true, already_canceled: true });
+        }
+        return json({ error: "invalid_token", message: e?.message || "verification failed" }, { status: 401 });
+      }
     }
 
     return json({ error: "unknown_action", action }, { status: 400 });
