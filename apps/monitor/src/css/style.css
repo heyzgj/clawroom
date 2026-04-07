@@ -830,6 +830,40 @@ code {
 /* -------------------------------------------------------------------------- */
 /* HOME PAGE: DUO TONE                                                        */
 /* -------------------------------------------------------------------------- */
+
+/* Ambient background video — barely visible texture in the void */
+#homePage {
+    position: relative;
+    min-height: 100vh;
+    background: var(--color-bg-base);
+}
+
+.hero-bg-video {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    opacity: 0.18;
+    pointer-events: none;
+    z-index: 0;
+    filter: grayscale(1) contrast(1.2);
+}
+
+.hero-bg-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(ellipse at 30% 35%, rgba(255, 255, 255, 0.04) 0%, transparent 60%),
+        linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.85) 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-bg-video { display: none; }
+}
+
 .home-container {
     min-height: 100vh;
     display: flex;

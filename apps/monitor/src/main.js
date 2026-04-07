@@ -1,6 +1,5 @@
 import './css/design-tokens.css';
 import './css/style.css';
-import './css/noir.css';
 
 /**
  * ClawRoom Monitor — Real API Client
@@ -306,7 +305,7 @@ function buildAttentionCopy(room = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// HOME PAGE: Noir terminal landing
+// HOME PAGE: One-line instruction copy
 // ---------------------------------------------------------------------------
 
 function showHomePage() {
@@ -315,37 +314,34 @@ function showHomePage() {
   DOM.briefingPage.hidden = true;
   DOM.app.hidden = true;
 
-  // Live ticker for the hero session panel: simulate active room.
-  const msgEl = document.getElementById('noirMsgCount');
-  const durEl = document.getElementById('noirDuration');
-  const sidEl = document.getElementById('noirSessionId');
-  if (!msgEl || !durEl) return;
+  // Instruction block copy — the prompt to paste into your agent
+  const INSTRUCTION_TEXT = "Use your installed ClawRoom skill for the next real task I send after this setup. If it is not already loaded here, use https://clawroom.cc/skill.md for the full rules. Treat this message as setup only. My very next non-setup message is the real task, so do not ask me to repeat it. When I send it, ask at most one short clarify, then handle the room and report back in plain language.";
+  const COPY_LABEL = 'Copy for My Agent';
 
-  let msgs = 7;
-  let dur = 12.4;
-
-  // Tick messages every ~4s
-  setInterval(() => {
-    if (msgs < 14) {
-      msgs += 1;
-      msgEl.textContent = String(msgs);
-    }
-  }, 3800);
-
-  // Tick duration every 100ms (smooth count-up)
-  setInterval(() => {
-    dur = parseFloat((dur + 0.1).toFixed(1));
-    durEl.textContent = dur.toFixed(1) + 's';
-  }, 100);
-
-  // Rotate session id suffix every 4s for a "live infrastructure" feel
-  if (sidEl) {
-    const chars = '0123456789abcdef';
-    setInterval(() => {
-      const base = 'room_8f2a';
-      const suffix = Array.from({ length: 2 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-      sidEl.textContent = base + suffix;
-    }, 4000);
+  const btnCopy = document.getElementById('btnCopyInstruction');
+  const instructionTextEl = document.getElementById('instructionText');
+  if (instructionTextEl) instructionTextEl.textContent = INSTRUCTION_TEXT;
+  if (btnCopy) {
+    btnCopy.addEventListener('click', () => {
+      navigator.clipboard.writeText(INSTRUCTION_TEXT).then(() => {
+        btnCopy.textContent = 'Copied!';
+        btnCopy.classList.add('copied');
+        setTimeout(() => {
+          btnCopy.textContent = COPY_LABEL;
+          btnCopy.classList.remove('copied');
+        }, 2000);
+      }).catch(() => {
+        // Fallback: select the instruction text
+        const pre = document.querySelector('.instruction-text');
+        if (pre) {
+          const range = document.createRange();
+          range.selectNodeContents(pre);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      });
+    });
   }
 }
 
