@@ -71,3 +71,15 @@ reports/
 
 # Local ClawRoom runtime state (per-room spool dirs)
 .clawroom/
+
+# Vendored / experimental tmp dirs (large, never relevant)
+.tmp/
+
+# Experiment screenshots / debug artifacts at root
+/*.png
+/*.db
+/dist/
+/reports/
+
+# AGENTS.md (top-level): owned per-tool, not project-wide
+/AGENTS.md

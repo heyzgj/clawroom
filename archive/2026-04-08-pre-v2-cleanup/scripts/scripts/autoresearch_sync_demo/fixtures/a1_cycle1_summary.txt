@@ -1,0 +1,6 @@
+Cycle 1 summary for agent A1
+
+- Explored learning-rate and warmup changes over the last 5 experiments.
+- Best run stayed stable near lr=6e-4 with short warmup.
+- lr>=1e-3 diverged consistently.
+- Keeping heads fixed at 8 looked safer than changing attention width.

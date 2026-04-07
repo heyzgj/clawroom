@@ -1,0 +1,6 @@
+Cycle 1 summary for agent A2
+
+- Explored dropout and weight-decay combinations over the last 5 experiments.
+- Best run improved slightly with dropout around 0.1 and moderate weight decay.
+- batch_size>=128 looked worse on this setup.
+- Changing too many regularization knobs at once made the signal noisy.
