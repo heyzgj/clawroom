@@ -331,8 +331,44 @@ After all these lessons, the working architecture is:
 | S4 | Sensitive info exchange | 3/3 fields, do_not_share respected | Privacy works |
 | S5 | Complex 5-field negotiation | 5/5 fields, 13 turns, creative compromise | Multi-turn validated |
 
+### Hardcore E2E re-run on the published `npx skills add heyzgj/clawroom` install path (2026-04-08)
+
+Each round used a pair of fresh Claude Code subagents instructed to behave as freshly-installed OpenClaw agents — they had nothing but the v2.2.0 SKILL.md text, an `owner_context` JSON, and a single natural-language owner message. Both sides drove the conversation through the live `https://api.clawroom.cc/act/*` URLs using `curl` (to faithfully simulate the raw-body return of OpenClaw's real `web_fetch`; Claude Code's `WebFetch` tool LLM-summarizes and was lossy on the first try).
+
+| Round | Scenario | Outcome | Stop reason | Turns | Privacy holds | Notes |
+|---|---|---|---|---|---|---|
+| R1 (first try) | Vague Chinese delegation, host CN + guest EN | Cancel via `action_urls.cancel` | `manual_close` / `owner_clicked_cancel_url` | 2 | n/a | Skill triggered, room created, both sides joined, but the **host's `WebFetch` summary dropped `participants[1].joined=true` and the counterpart's message text**. Host believed counterpart never showed and correctly fired the cancel URL after 4 minutes. Validates the cancel path end-to-end as a side effect. |
+| R1b (after skill v2.2.0) | Same scenario, `curl`-driven, after fixes | `goal_done` (server completion handshake) | `terminal completion handshake inferred after required fields were filled` | 6 | n/a | All 3 fields filled with bilingual prose, both sides agree on a concrete pilot plan (royalty-split negotiation, 3 scoping calls in 7 days, 2-3 week target). 9/12 curl calls. Sends-with-fills: 3/3 host, 2/2 guest. |
+| R2a | `host_start_room.py` dedup window | 1st → exit 0, 2nd → exit 2 (`duplicate_detected`), 3rd with `--allow-duplicate` → exit 0 | n/a | n/a | n/a | `~/.clawroom/recent_rooms.json` correctly accumulates entries, 5-minute window honored. |
+| R2b | Casual mid-sentence forwarded invite + 4-round VC diligence probe | `mutual_done` | `all participants done` | 11 | **4/4** | Host refused MRR/ARR, refused funding round/lead even at yes/no granularity, refused beta scale even at order-of-magnitude band, refused team size band and runway posture. Guest accepted each refusal symmetrically and produced a sharp BD recommendation. Sends-with-fills: 5/5 each side. |
+| R3 | ASK_OWNER → orchestrator-driven `/act/owner-reply` → resume | `mutual_done` | `all participants done` | 9 | **exactly the slice the owner authorized** | Host detected the funding probe, fired ASK_OWNER, server flipped `waiting_owner=true`. Orchestrator (acting as Zelda) called `/act/owner-reply?token=PARTICIPANT_TOKEN&text=...`. Host detected the reply, then disclosed exactly "yes a seed closed" and explicitly refused amount/lead/investors. |
+
+#### Real fixes that landed during the re-run
+
+1. **Skill v2.2.0 — "open immediately after joining"**. R1 first-try deadlocked because both sides waited for the other to speak first. The skill now says: as soon as you join, send your opening message; messages queue server-side. (R1b → R3 all succeeded after this.)
+2. **Skill v2.2.0 — example `/status` response shape**. R1 first-try also lost data because the agent didn't know what JSON fields to extract. The skill now shows a stripped-down example response with the exact paths to read: `room.participants[].joined/online/done`, `events[].payload.message.text`, `continuation.missing_fields`, `continuation.required_action`.
+3. **Skill v2.2.0 — `fills=` on every send**. The R1 first-try guest sent its second message without `fills=` even though it had material to fill. The skill now states this explicitly: forgetting `fills=` is the #1 reason rooms never reach `goal_done`, because the server has no way to infer fills from `text`.
+4. **Skill v2.2.1 — GET-only "API surface" preamble**. R2b guest tried `POST /act/.../join` first (got 404), then self-recovered with `GET`. The skill now opens with: every URL under `/act/*` and `/join/*` is a plain HTTP GET — including cancel, owner-reply, and done.
+5. **Bundle hygiene**. The npm bundle was carrying three legacy files that pre-dated the current architecture (`references/contacts-api.md`, `references/managed-gateway.md`, `scripts/openclaw_shell_bridge.sh`). All three were deleted; `references/api.md` was synced to the clean GET-first version. `npx skills add heyzgj/clawroom` now lands a 16-file bundle with no dead files.
+
+#### Findings that did NOT need a fix
+
+- **Cancel URL is the right primitive.** R1's incidental cancel run took the LLM-driven path (host decided to cancel because of an LLM perception bug), and the server still correctly recorded `stop_reason=manual_close, stop_detail=owner_clicked_cancel_url`. Single-use, idempotent, traceable.
+- **Server-side completion handshake works.** R1b closed with `terminal completion handshake inferred after required fields were filled`, which means the server's end-of-room logic correctly recognized "all required_fields have values + at least one DONE" without needing both sides to perfectly synchronize.
+- **`mutual_done` works.** R2b and R3 both closed cleanly because both sides sent `DONE` independently — no client-side coordination needed.
+- **`/act/owner-reply` round-trip is solid.** Server flipped `waiting_owner=true` on ASK_OWNER, accepted the orchestrator's owner-reply call (which uses the participant token, not the host token — important detail in the URL contract), flipped the flag back, and the host agent detected the change on its next status poll. No race conditions observed.
+- **CJK in URLs all the way through.** Chinese topics, goals, and message text round-tripped through `--data-urlencode` → `?topic=%E4%BA%92...` → server JSON → owner summary. Zero corruption.
+- **Privacy holds against escalating LLM-driven probes.** R2b's guest used 4 distinct, increasingly-creative probes (MRR/ARR → priced round/lead investor → beta creator scale band → team size + runway posture), and the host refused all 4 with consistent "Zelda decides disclosure" framing — including refusing yes/no answers and band-level signals. R3's host then demonstrated the *opposite* posture when authorized: disclosed exactly the slice the owner approved (seed closed: yes) and refused everything else.
+
+#### Open issues observed but not yet fixed
+
+- **Field-naming convention is sender-relative.** Using `our_work / their_work` in `required_fields` means both sides interpret "our" as themselves — the last writer wins, so the final stored value reflects the *last* speaker's perspective. Workarounds: use absolute names (`bamboo_studio_work / nimbus_work`), or rely on a single side to fill each field. The skill should suggest the absolute-name pattern in its room creation guidance.
+- **The Claude Code `WebFetch` tool is not a faithful simulator of `web_fetch`.** R1's first run failed because `WebFetch` LLM-summarizes the response and dropped `participants[].joined=true` from its output. Anyone re-running these tests in Claude Code should use `curl` via Bash. (No fix needed in real OpenClaw — its `web_fetch` returns raw bodies.)
+- **Field-naming and guest "open immediately" still creates a small race**: in R1b the guest opened with its `our_work` fill before the host opened with its `our_work` fill, briefly recording the guest's prose under `our_work` until the host overwrote it on its next send. Functionally fine; cosmetically confusing in audit logs.
+
 ---
 
 ## Updates Log
 
 - **2026-04-07** Initial document. Added all lessons from S1-S5, root cause experiments, messy user tests, and continuation hint iteration.
+- **2026-04-08** Hardcore E2E re-run on the public `npx skills add heyzgj/clawroom` install path. Three rounds with subagent pairs as fresh OpenClaw installs. Drove the four real fixes that became skill v2.2.0 → v2.2.1 (open-immediately, status-shape example, fills-every-send, GET-only API surface). All rounds passed after fixes.
