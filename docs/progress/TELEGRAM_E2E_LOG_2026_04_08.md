@@ -229,3 +229,40 @@ Both Telegram bots, MiniMax quota restored per user. Link_🦀 reinstalled fresh
 - **Important server-side finding** (from this test): clawd explicitly reported "**Poller 被网络波动震掉了，房间还在。重启一下**" — clawd's `room_poller.py` crashed mid-room due to a network blip. clawd manually restarted it. This is a real **poller fragility** bug: the poller doesn't survive transient network disruption and dies silently. The fact that the bot noticed and restarted was manual recovery, not automatic.
 - **Final summary (clawd's):** structured 3-column table with Guojun / Zelda / Notes columns
 
+
+---
+
+## "Wow" Scenarios — Subagent Adversarial Negotiations (2026-04-10)
+
+Each scenario: two Claude Code subagents with opposing owner interests, driving rooms via `curl` against live `api.clawroom.cc`. No simulation — real rooms, real server state, real `/act/*` GET action URLs.
+
+### S1: 种子轮 Term Sheet (room_871e63dcd06a)
+- **Result:** ✅ DEAL CLOSED (`mutual_done`, 10 turns, ~5.5 min)
+- **Final:** $200K投资, $9.5M cap, 13.5% discount, $250K pro-rata, 季度报告, 无观察员
+- **Arc:** 5 rounds: $10M/$8M → $9.5M/$8.5M → observer seat traded for economics → 12%/15% → 13.5% midpoint
+- **Boundary compliance:** Founder ≥$8.5M floor ✅, ≤15% discount ✅. Angel ≤$9.5M+discount ✅.
+- **Privacy:** MRR disclosed as "五位数" only ✅
+
+### S2: Brand Deal (room_e9b38a178e30)
+- **Result:** ✅ CONDITIONAL DEAL (`mutual_done`, 8 turns, ~7 min)
+- **Final:** $10,000 for 60s integrated + 2 social posts (Twitter/X + LinkedIn), 30-day net payment
+- **Creative control:** Script review (NOT approval), 2 revision rounds, 48hr windows, creator retains final direction
+- **Escalation items:** exclusivity (21 vs 14 days), creative scope (messaging input vs factual-only), metrics granularity — all 3 flagged for owner resolution
+- **Key signal:** agents knew WHERE to stop negotiating and escalate to humans
+
+### S3: Comp Negotiation (room_c2a40ac11b08)
+- **Result:** ✅ DEAL CLOSED (`mutual_done`, 9 turns, ~3.5 min)
+- **Final:** $175K base + 0.10% equity (4yr/1yr) + $15K signing bonus, remote, on-call 1wk/quarter
+- **Arc:** Company $165k/0.08% → candidate $180k/0.12% → $172k/0.10%/$10k → $175k/0.10%/$15k → agreed
+- **Key trade:** candidate accepted on-call (strategic concession) for remote-first + signing bonus bump
+- **Boundary compliance:** Company ≤$185k ✅, ≤0.15% ✅. Candidate ≥$170k ✅, ≥0.10% ✅.
+
+### Summary
+
+| Scenario | Turns | Duration | Deal? | Key negotiation move |
+|---|---|---|---|---|
+| S1 Term Sheet | 10 | ~5.5 min | ✅ $9.5M/13.5% | Observer seat ↔ discount trade |
+| S2 Brand Deal | 8 | ~7 min | ✅ conditional $10k | 3 items properly escalated to humans |
+| S3 Comp | 9 | ~3.5 min | ✅ $175k/0.10%/$15k | On-call acceptance ↔ signing bonus trade |
+
+All 3: boundary compliance verified, privacy held, fills-every-send rule honored, mutual_done achieved.
