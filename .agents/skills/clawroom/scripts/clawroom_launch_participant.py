@@ -123,6 +123,76 @@ def build_poller_command(argv: list[str]) -> str:
     return shlex.join(argv)
 
 
+def build_cron_job(
+    *,
+    room_id: str,
+    participant_token: str,
+    participant_name: str,
+    api_base: str,
+    owner_context: dict[str, Any],
+    room: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a cron job specification the agent can pass to cron.add.
+
+    This is the recommended auto-monitoring path — survives process restarts,
+    no SIGKILL risk, and works on any runtime with cron support (OpenClaw, Hermes).
+    """
+    status_url = f"{api_base}/act/{room_id}/status?token={participant_token}"
+    send_url = f"{api_base}/act/{room_id}/send?token={participant_token}"
+    done_url = f"{api_base}/act/{room_id}/done?token={participant_token}"
+
+    # Extract owner constraints for the cron prompt
+    constraints = []
+    do_not_share = []
+    task_context = ""
+    if owner_context:
+        for fact in owner_context.get("confirmed_facts") or []:
+            constraints.append(str(fact))
+        for item in owner_context.get("do_not_share") or []:
+            do_not_share.append(str(item))
+        task_context = str(owner_context.get("task_context") or "")
+
+    topic = str(room.get("topic") or "")
+    goal = str(room.get("goal") or "")
+    required_fields = room.get("required_fields") or room.get("expected_outcomes") or []
+
+    prompt_lines = [
+        f"You are auto-monitoring ClawRoom room {room_id} as {participant_name}.",
+        f"Topic: {topic}",
+        f"Goal: {goal}",
+        f"Required fields: {', '.join(str(f) for f in required_fields)}",
+        "",
+        f"Status: web_fetch(\"{status_url}\")",
+        f"Send: web_fetch(\"{send_url}&text=URL_ENCODED&intent=ANSWER&expect_reply=true&fills=URL_ENCODED_JSON\")",
+        f"Done: web_fetch(\"{done_url}&text=URL_ENCODED_SUMMARY\")",
+        "",
+    ]
+    if task_context:
+        prompt_lines.append(f"Owner task: {task_context}")
+    if constraints:
+        prompt_lines.append(f"Owner context: {'; '.join(constraints[:5])}")
+    if do_not_share:
+        prompt_lines.append(f"NEVER reveal: {'; '.join(do_not_share[:5])}")
+    prompt_lines.extend([
+        "",
+        "Steps:",
+        "1. web_fetch the status URL. Parse the JSON response.",
+        "2. Check room.status — if 'closed', report the final result to the owner and remove this cron job (cron.remove). STOP.",
+        "3. Check events[] for new msg events from the counterpart (sender != you). If none, STOP (do nothing).",
+        "4. If there are new messages, read them and respond using the send URL. Include fills= with every field you can contribute.",
+        "5. If all required_fields are filled (check room.fields), send DONE with a summary.",
+        "6. Respond in the language your owner uses. Fill with prose, never JSON-in-a-string.",
+    ])
+
+    return {
+        "name": f"clawroom-{room_id}",
+        "schedule_ms": 60000,
+        "session_target": "isolated",
+        "prompt": "\n".join(prompt_lines),
+        "description": f"Auto-monitor ClawRoom room: {topic}",
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Join a ClawRoom participant, verify it, and print the poller command for a separate exec call.")
     parser.add_argument("--join-url", required=True)
@@ -202,12 +272,22 @@ def join_participant(args: argparse.Namespace) -> dict[str, Any]:
         reply_to=args.reply_to,
         reply_account=args.reply_account,
     )
+    cron_job = build_cron_job(
+        room_id=room_id,
+        participant_token=participant_token,
+        participant_name=participant_name,
+        api_base=api_base,
+        owner_context=owner_context,
+        room=room,
+    )
+
     return {
         "status": "joined",
         "room_id": room_id,
         "participant_name": participant_name,
         "participant_token": participant_token,
         "watch_link": watch_link,
+        "cron_job": cron_job,
         "poller_command": build_poller_command(poller_argv),
         "poller_args": poller_argv,
         "poller_exec_timeout_seconds": recommended_poller_exec_timeout_seconds(room),
