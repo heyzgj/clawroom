@@ -853,8 +853,12 @@ class Poller:
         owner_message = self.generate_owner_reply_message(room=room, question_text=question_text, owner_reply=owner_reply)
         self.send_message(owner_message)
 
+    # Transient network errors that should trigger retry instead of crash
+    TRANSIENT_ERRORS = (urllib.error.URLError, ConnectionError, TimeoutError, OSError, ssl.SSLError)
+
     def run(self) -> None:
         self.acquire_pid_lock()
+        net_backoff = 2.0  # exponential backoff for transient network failures
         try:
             self.log("starting poller")
             joined = self.ensure_joined()
@@ -865,7 +869,15 @@ class Poller:
 
             while not self.should_stop:
                 self.maybe_heartbeat()
-                batch, batch_next_cursor = self.poll_events()
+                try:
+                    batch, batch_next_cursor = self.poll_events()
+                except self.TRANSIENT_ERRORS as exc:
+                    self.log(f"transient network error during poll: {exc}; retrying in {net_backoff:.0f}s")
+                    time.sleep(net_backoff)
+                    net_backoff = min(30.0, net_backoff * 2)
+                    continue
+                # Reset backoff on successful poll
+                net_backoff = 2.0
                 room = batch.get("room") or {}
                 events = [event for event in (batch.get("events") or []) if isinstance(event, dict)]
                 joined_count = sum(1 for participant in (room.get("participants") or []) if participant.get("joined"))
@@ -874,13 +886,19 @@ class Poller:
                     self.log(observation)
                     self.last_observation = observation
                 if str(room.get("status") or "").lower() != "active":
-                    result = request_json(
-                        "GET",
-                        f"{self.api_base}/rooms/{self.room_id}/result",
-                        headers={"X-Participant-Token": self.participant_token},
-                        retries=3,
-                        retry_delay_seconds=1.0,
-                    )
+                    try:
+                        result = request_json(
+                            "GET",
+                            f"{self.api_base}/rooms/{self.room_id}/result",
+                            headers={"X-Participant-Token": self.participant_token},
+                            retries=3,
+                            retry_delay_seconds=1.0,
+                        )
+                    except self.TRANSIENT_ERRORS as exc:
+                        self.log(f"transient network error fetching result: {exc}; retrying in {net_backoff:.0f}s")
+                        time.sleep(net_backoff)
+                        net_backoff = min(30.0, net_backoff * 2)
+                        continue
                     write_json_atomic(final_result_path(self.room_id, self.participant_name), result)
                     self.notify_owner_result(room, result.get("result") or {})
                     self.log("room closed; final result delivered to owner")
@@ -1001,15 +1019,27 @@ def main() -> None:
     args = parser.parse_args()
     poller = Poller(args)
     install_signal_handlers(poller)
-    try:
-        poller.run()
-    except Exception as exc:  # noqa: BLE001
+    crash_restart_delay = 5.0
+    while True:
         try:
-            poller.log(f"fatal error: {exc}")
-            append_text_line(poller.log_path, traceback.format_exc().rstrip("\n"))
-        except Exception:  # noqa: BLE001
-            pass
-        raise
+            poller.run()
+            break  # clean exit (room closed or signal received)
+        except SystemExit:
+            raise  # honour explicit exits (e.g. missing args, pid lock)
+        except KeyboardInterrupt:
+            break
+        except Exception as exc:  # noqa: BLE001
+            try:
+                poller.log(f"crash guard: unexpected error: {exc}")
+                append_text_line(poller.log_path, traceback.format_exc().rstrip("\n"))
+                poller.log(f"crash guard: restarting poll loop in {crash_restart_delay:.0f}s")
+            except Exception:  # noqa: BLE001
+                pass
+            if poller.should_stop:
+                break
+            time.sleep(crash_restart_delay)
+            crash_restart_delay = min(30.0, crash_restart_delay * 2)
+            continue
 
 
 if __name__ == "__main__":

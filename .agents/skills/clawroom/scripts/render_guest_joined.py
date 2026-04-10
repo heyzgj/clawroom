@@ -29,13 +29,44 @@ def load_launch(path: Path) -> dict[str, object]:
     return raw
 
 
+def _extract_room_id(launch: dict[str, object]) -> str:
+    """Extract room_id from either launch-script output or raw server join response."""
+    # Launch-script output has room_id at top level
+    room_id = str(launch.get("room_id") or "").strip()
+    if room_id:
+        return room_id
+    # Raw server join response has it inside room.id
+    room = launch.get("room")
+    if isinstance(room, dict):
+        room_id = str(room.get("id") or "").strip()
+        if room_id:
+            return room_id
+    return ""
+
+
+def _extract_participant_name(launch: dict[str, object]) -> str:
+    """Extract participant_name from either launch-script output or raw server join response."""
+    # Launch-script output uses participant_name
+    name = str(launch.get("participant_name") or "").strip()
+    if name:
+        return name
+    # Raw server join response uses participant
+    name = str(launch.get("participant") or "").strip()
+    return name
+
+
+def _extract_watch_link(launch: dict[str, object]) -> str:
+    """Extract watch_link from either launch-script output or raw server join response."""
+    return str(launch.get("watch_link") or "").strip()
+
+
 def zh_text(launch: dict[str, object]) -> str:
-    watch_link = str(launch.get("watch_link") or "").strip()
+    watch_link = _extract_watch_link(launch)
     return f"已加入。我会在这里继续同步。进度：{watch_link}"
 
 
 def en_text(launch: dict[str, object]) -> str:
-    watch_link = str(launch.get("watch_link") or "").strip()
+    watch_link = _extract_watch_link(launch)
     return f"Joined. I will keep this moving here. Watch: {watch_link}"
 
 
@@ -43,8 +74,8 @@ def main() -> None:
     args = build_parser().parse_args()
     launch_path = Path(args.launch_json).expanduser()
     launch = load_launch(launch_path)
-    room_id = str(launch.get("room_id") or "").strip()
-    participant_name = str(launch.get("participant_name") or "").strip()
+    room_id = _extract_room_id(launch)
+    participant_name = _extract_participant_name(launch)
     session_path = poller_session_path(room_id, participant_name)
     if not session_path.exists():
         raise SystemExit(f"guest poller session not recorded yet: {session_path}")
