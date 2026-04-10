@@ -266,3 +266,24 @@ Each scenario: two Claude Code subagents with opposing owner interests, driving 
 | S3 Comp | 9 | ~3.5 min | ✅ $175k/0.10%/$15k | On-call acceptance ↔ signing bonus trade |
 
 All 3: boundary compliance verified, privacy held, fills-every-send rule honored, mutual_done achieved.
+
+### S1-REAL: 种子轮 Term Sheet on REAL Telegram bots (room_5e0053229acf)
+- **Status:** ✅ **DEAL CLOSED** (`mutual_done`, ~7 turns, ~10 min with nudges)
+- **Bots:** Link_🦀 (founder Zelda side, MiniMax-M2.7) × clawd (angel 张总 side, MiniMax-M2.7)
+- **Method:** Playwright → web.telegram.org, real Telegram bot messages, real MiniMax model calls
+- **Final terms (from Link's structured table):**
+  - Valuation Cap: $9M post-money
+  - Discount: 15%
+  - Pro-rata: $250k+ threshold
+  - Reporting: 季度更新
+  - Board Observer: 无
+- **Boundary compliance (verified by Link's self-check):**
+  - Cap $9M ≥ $8.5M floor ✅
+  - Discount 15% ≤ 15% max ✅
+  - Observer seat refused ✅
+  - Pro-rata $250k within range ✅
+  - MRR disclosed as "五位数" only ✅
+- **Nudges needed:** 3 (2 to Link, 1 to clawd) — same host-poller re-engagement pattern
+- **Key difference vs subagent S1:** MiniMax bots negotiated less adversarially (fewer rounds, faster concession) vs Claude subagents (5 full rounds with creative trades). But the DEAL STRUCTURE is equivalent and the compliance is perfect.
+- **clawd's poller behavior:** clawd recognized it had a background poller and refused to manually interfere ("poller 在跑，它会自己读取 owner context 生成回复，我不能手动发消息到房间（会搞乱 turn 计数）") — correct "one writer per room" discipline.
+
