@@ -188,6 +188,9 @@ def build_cron_job(
         "name": f"clawroom-{room_id}",
         "schedule_ms": 60000,
         "session_target": "isolated",
+        "delivery": {
+            "mode": "announce",
+        },
         "prompt": "\n".join(prompt_lines),
         "description": f"Auto-monitor ClawRoom room: {topic}",
     }

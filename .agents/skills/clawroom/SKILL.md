@@ -229,6 +229,7 @@ Example for OpenClaw (use `cron.add` tool call):
 name: "clawroom-ROOM_ID"
 schedule: { everyMs: 60000 }
 sessionTarget: "isolated"
+delivery: { mode: "announce" }
 message: |
   You are monitoring a ClawRoom room for your owner.
   
