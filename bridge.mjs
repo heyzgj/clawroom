@@ -653,16 +653,23 @@ function resolveTelegramConfig() {
   };
 }
 
-async function telegramNotify(text) {
+async function telegramNotify(text, options = {}) {
   const { botToken, chatId } = resolveTelegramConfig();
   if (!botToken || !chatId) {
     log("notify skipped: missing Telegram bot token or chat_id");
     return { ok: false, message_id: null, chat_id: null };
   }
+  const requestBody = { chat_id: chatId, text };
+  if (options.forceReply) {
+    requestBody.reply_markup = {
+      force_reply: true,
+      input_field_placeholder: "Approve, reject, or give instructions",
+    };
+  }
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Telegram API ${response.status}: ${await response.text()}`);
@@ -770,27 +777,22 @@ async function notifyOwnerQuestion(question, questionText) {
     return null;
   }
   const endpoint = ownerReplyEndpoint();
-  const payload = {
-    token: question.owner_reply_token || "",
-    question_id: question.question_id || "",
-    role,
-    text: "REPLACE_WITH_OWNER_DECISION",
-  };
   const text = [
-    "ClawRoom authorization needed",
+    "ClawRoom needs your decision",
     `Room: ${threadId}`,
     `Role: ${role}`,
     "",
     questionText,
     "",
-    "Reply path v0:",
-    "Submit this as a POST request. Replace REPLACE_WITH_OWNER_DECISION with your decision. Do not open this as a GET URL.",
-    `Endpoint: ${endpoint}`,
-    `JSON: ${JSON.stringify(payload)}`,
+    "Reply directly to this Telegram message.",
+    "Say approve, reject, or give a counter-instruction. Other chats will keep going to your normal OpenClaw agent.",
     "",
-    "Reply examples: approve; reject; do not go above 65000 JPY; offer extra deliverables instead.",
-  ].join("\n");
-  const delivered = await telegramNotify(text);
+    "Examples: approve; reject; do not go above 65000 JPY; offer extra deliverables instead.",
+    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? "" : null,
+    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? "Debug fallback:" : null,
+    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? `Endpoint: ${endpoint}` : null,
+  ].filter((line) => line !== null).join("\n");
+  const delivered = await telegramNotify(text, { forceReply: true });
   return {
     ...delivered,
     owner_reply_endpoint: endpoint,
@@ -953,6 +955,10 @@ async function handleWaitingOwner() {
   const waiting = bridgeState.waiting_owner;
   if (!waiting?.question_id) return false;
 
+  if (ownerWaitExpired(waiting)) {
+    return await handleOwnerWaitExpired(waiting);
+  }
+
   await maybeHeartbeat("waiting_owner", false, { waiting_owner: publicWaitingOwner(waiting) });
   const messages = await getMessages(bridgeState.cursor ?? -1, POLL_WAIT_SECONDS);
   if (!messages.length) return true;
@@ -998,6 +1004,42 @@ async function handleWaitingOwner() {
     setCursor(message.id);
   }
   return true;
+}
+
+function ownerWaitExpired(waiting) {
+  const expiresAt = Number(waiting?.expires_at || 0);
+  return Number.isFinite(expiresAt) && expiresAt > 0 && Date.now() > expiresAt;
+}
+
+async function handleOwnerWaitExpired(waiting) {
+  const summary = `Owner authorization ${waiting.question_id} expired without a reply. Closing without approving the requested exception.`;
+  const key = idempotencyKey("close", threadId, role, "owner-timeout", waiting.question_id, sha(summary));
+  log(`Owner reply expired question_id=${waiting.question_id}; closing room`);
+
+  const result = await closeThread(summary, key);
+  if (result?.id != null) setCursor(result.id);
+
+  delete bridgeState.waiting_owner;
+  persistState();
+
+  await notifyOwnerOnce(`owner-timeout:${waiting.question_id}`, [
+    "ClawRoom authorization expired",
+    `Room: ${threadId}`,
+    "",
+    "No reply was recorded before the question expired, so I closed without approving the exception.",
+  ].join("\n")).catch((error) => {
+    log(`owner timeout notify failed: ${error.message}`);
+  });
+
+  await maybeHeartbeat("stopped", true, {
+    stop_reason: "owner_reply_timeout",
+    close_result: {
+      id: result?.id ?? null,
+      error: result?.error || null,
+      closed: result?.closed ?? null,
+    },
+  });
+  return false;
 }
 
 async function sendOpeningIfNeeded() {

@@ -728,6 +728,20 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Lesson:** A one-time side-effect token in a chat surface must not be invokable by GET. Link previews are actors. Treat GET as read-only, especially around authorization.
 
+### AL. ASK_OWNER Must Be a Human Reply UX, Not Just a Notification
+
+**What:** Strict T3 v1 room `t_e5f0c995-23e` reached the real ASK_OWNER gate across local clawd + Railway Link: host and guest negotiated to `¥75,000`, host posted `ask_owner`, the bridge delivered Telegram message `1887`, and it wrote the `(chat_id, message_id) -> owner_reply_token` binding. No `owner_reply` with `source: telegram_inbound` reached the relay before the monitor timed out.
+
+**What this proves:** The bridge/relay/runtime path can reach the owner authorization point on real cross-machine infrastructure. It does not prove the ordinary-owner reply path, because Codex cannot impersonate George's Telegram user, Telegram Desktop was not automatable in this environment, and Telegram Web was not logged in.
+
+**Product failure:** The owner notification was still too developer-shaped. It described a reply path but did not make the 99% action obvious enough: "reply directly to this Telegram message." In an average-user E2E, delivery is not success; the user must be naturally guided into the action that the bot can route.
+
+**Fix applied:** `bridge.mjs` now sends ASK_OWNER Telegram messages with normal owner copy, hides the debug POST fallback unless `CLAWROOM_DEBUG_OWNER_REPLY=true`, and uses Telegram `ForceReply` so the client prompts the owner to reply to the exact message that has a binding.
+
+**Second fix applied:** `waiting_owner` now has an expiry path. If the owner reply is not observed before `expires_at`, the bridge closes without approving the exception and records `stop_reason: owner_reply_timeout` instead of hanging forever.
+
+**Lesson:** ASK_OWNER is not just a protocol event. It is a human interruption. The passing criterion must include a real Telegram reply from the owner account with `source: telegram_inbound`, and the fallback behavior must be explicit when the owner does nothing.
+
 ---
 
 ## Updates Log
@@ -739,3 +753,4 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-14** v3.1 hardening and real Telegram E2E. Added Part 7 (DO relay + verified bridge + Telegram self-launch path), lessons Z-AH, and the first passing local clawd plus Railway Link run (`t_92615621-4a8`, mutual close, 4 relay events, both owner notifications delivered). Redacted artifact co-located at [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](progress/v3_1_t_92615621-4a8.redacted.json). Added Lesson AI for REPLY:/CLAWROOM_CLOSE: marker-scan robustness before the next multi-turn / ASK_OWNER E2E.
 - **2026-04-15** Review fixes plus T2-full E2E. Fixed README commands, made redacted artifacts self-validating with embedded transcripts, changed "signed invite URL" wording to tokenized invite URL, hardened marker parsing, and added `--min-messages`. Room `t_f8d18771-716` is committed as a failed artifact (closed after 4 messages); room `t_0b3602a9-e3b` passed T2-full transport/runtime gates with 8 negotiation messages. Added Lesson AJ.
 - **2026-04-15** T3 v0 mandate guard E2E. Added owner-reply protocol, relay control events, ASK_OWNER/mandate intercept in bridge, and auto owner-reply E2E harness support. Room `t_1f72571a-3f4` failed because a mutating GET owner-reply URL was consumed with placeholder text; fix made owner replies POST-only. Room `t_fb3fda2d-563` then passed T3 v0 with ASK_OWNER, concrete owner_reply, close at `¥65,000`, and both runtimes stopped. Added Lesson AK.
+- **2026-04-15** Strict T3 v1 average-user E2E attempt. Room `t_e5f0c995-23e` reached ASK_OWNER on real local + Railway bridges and wrote the Telegram binding, but no human Telegram reply entered OpenClaw inbound before timeout. Committed a failed redacted artifact and hardened bridge owner UX with ForceReply plus `owner_reply_timeout`. Added Lesson AL.
