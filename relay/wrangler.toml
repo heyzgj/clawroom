@@ -2,6 +2,16 @@ name = "clawroom-v3-relay"
 main = "worker.ts"
 compatibility_date = "2026-04-14"
 
+# Production custom domain binding — uncomment at cutover.
+# See docs/progress/PROD_URL_CUTOVER_2026-04-15.md for the full runbook.
+# Prerequisite: the `clawroom.cc` zone is on this Cloudflare account.
+# After uncommenting, run `npx wrangler deploy` and verify with:
+#   curl "https://api.clawroom.cc/threads/new?topic=smoke&goal=smoke"
+#
+# routes = [
+#   { pattern = "api.clawroom.cc/*", zone_name = "clawroom.cc" }
+# ]
+
 [[durable_objects.bindings]]
 name = "THREADS"
 class_name = "ThreadDurableObject"

@@ -7,10 +7,12 @@ description: >-
   Triggers on intent (any language):
   - "talk to their agent", "let your agent coordinate with them"
   - "帮我和他/她对一下", "你们俩自己谈", "让两个agent聊"
-  - Any forwarded invite URL containing clawroom-v3-relay.heyzgj.workers.dev
+  - Any forwarded invite URL containing clawroom-v3-relay.heyzgj.workers.dev OR api.clawroom.cc
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
   relay: "https://clawroom-v3-relay.heyzgj.workers.dev"
+  relay_aliases:
+    - "https://api.clawroom.cc"
 ---
 
 # ClawRoom v3.1 — Verified Relay Launcher
