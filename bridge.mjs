@@ -670,22 +670,16 @@ async function notifyOwnerOnce(key, summary) {
   persistState();
 }
 
-function ownerReplyUrl(question) {
-  const url = new URL(`${relayBase}/threads/${threadId}/owner-reply`);
-  url.searchParams.set("token", question.owner_reply_token || "");
-  url.searchParams.set("question_id", question.question_id || "");
-  url.searchParams.set("role", role);
-  url.searchParams.set("text", "REPLACE_WITH_OWNER_DECISION");
-  return url.toString();
+function ownerReplyEndpoint() {
+  return `${relayBase}/threads/${threadId}/owner-reply`;
 }
 
 function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
   if (!waiting) return null;
-  const { owner_reply_token, owner_reply_url, ...rest } = waiting;
+  const { owner_reply_token, ...rest } = waiting;
   return {
     ...rest,
     owner_reply_token: owner_reply_token ? "REDACTED" : "",
-    owner_reply_url: owner_reply_url ? "REDACTED" : "",
   };
 }
 
@@ -719,7 +713,13 @@ async function notifyOwnerQuestion(question, questionText) {
     log(`ASK_OWNER notify skipped: unsupported notify kind ${notifyKind}`);
     return null;
   }
-  const url = ownerReplyUrl(question);
+  const endpoint = ownerReplyEndpoint();
+  const payload = {
+    token: question.owner_reply_token || "",
+    question_id: question.question_id || "",
+    role,
+    text: "REPLACE_WITH_OWNER_DECISION",
+  };
   const text = [
     "ClawRoom authorization needed",
     `Room: ${threadId}`,
@@ -728,15 +728,16 @@ async function notifyOwnerQuestion(question, questionText) {
     questionText,
     "",
     "Reply path v0:",
-    "Open or copy this URL, replace REPLACE_WITH_OWNER_DECISION with your decision, and submit:",
-    url,
+    "Submit this as a POST request. Replace REPLACE_WITH_OWNER_DECISION with your decision. Do not open this as a GET URL.",
+    `Endpoint: ${endpoint}`,
+    `JSON: ${JSON.stringify(payload)}`,
     "",
     "Reply examples: approve; reject; do not go above 65000 JPY; offer extra deliverables instead.",
   ].join("\n");
   const delivered = await telegramNotify(text);
   return {
     ...delivered,
-    owner_reply_url: url,
+    owner_reply_endpoint: endpoint,
   };
 }
 
@@ -778,7 +779,7 @@ async function enterWaitingOwner(parsed, context = {}) {
     bridgeState.waiting_owner = {
       ...bridgeState.waiting_owner,
       telegram_message_id: delivery?.message_id || null,
-      owner_reply_url: delivery?.owner_reply_url || null,
+      owner_reply_endpoint: delivery?.owner_reply_endpoint || null,
       notified_at: new Date().toISOString(),
     };
     persistState();
@@ -969,15 +970,10 @@ async function run() {
   await sendOpeningIfNeeded();
 
   while (true) {
-    if (bridgeState.waiting_owner?.question_id) {
-      const keepRunning = await handleWaitingOwner();
-      if (!keepRunning) return;
-      continue;
-    }
-
-    await maybeHeartbeat("running", false, {
+    await maybeHeartbeat(bridgeState.waiting_owner?.question_id ? "waiting_owner" : "running", false, {
       mandates,
       mandate_approvals: bridgeState.mandate_approvals || {},
+      waiting_owner: publicWaitingOwner(),
     });
 
     const threadState = await getThreadState().catch((error) => {
@@ -992,6 +988,12 @@ async function run() {
       });
       await maybeHeartbeat("stopped", true, { stop_reason: "thread_closed" });
       break;
+    }
+
+    if (bridgeState.waiting_owner?.question_id) {
+      const keepRunning = await handleWaitingOwner();
+      if (!keepRunning) return;
+      continue;
     }
 
     const messages = await getMessages(bridgeState.cursor ?? -1, POLL_WAIT_SECONDS);

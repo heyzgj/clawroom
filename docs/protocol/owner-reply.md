@@ -24,16 +24,11 @@ Content-Type: application/json
 }
 ```
 
-The bridge can place the same tokenized target in a Telegram notification
-as a URL fallback:
-
-```
-/threads/:id/owner-reply?token=...&question_id=...&role=host&text=...
-```
-
-The GET fallback is intended for E2E/operator use and simple webform
-experiments. Production UX should prefer Telegram reply routing once the
-OpenClaw Telegram inbound handler can route replies safely.
+`owner-reply` is intentionally POST-only. GET must not consume a token or
+write an event, because Telegram/link previews and other unfurlers may
+fetch URLs automatically. The bridge notification may include the POST
+endpoint and JSON payload template, but it must not include a mutating
+GET URL.
 
 ### v1 target: Telegram reply routing
 
@@ -146,6 +141,7 @@ Recommended relay errors:
 - `400 text_required`
 - `401 unauthorized_owner_reply`
 - `404 question_not_found`
+- `405 method_not_allowed`
 - `409 owner_reply_already_consumed`
 - `410 owner_reply_expired`
 

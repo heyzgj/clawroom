@@ -126,7 +126,6 @@ function routeHelp(): Response {
       "GET /threads/:id/post?token=...&text=...",
       "POST /threads/:id/ask-owner",
       "POST /threads/:id/owner-reply",
-      "GET /threads/:id/owner-reply?token=...&question_id=...&role=...&text=...",
       "POST /threads/:id/close",
       "GET /threads/:id/done?token=...&summary=...",
       "GET /threads/:id/join?token=...",
@@ -199,7 +198,13 @@ export class ThreadDurableObject {
         return json(this.snapshot(id, auth));
       }
 
-      if ((request.method === "POST" || request.method === "GET") && action === "owner-reply") {
+      if (action === "owner-reply" && request.method !== "POST") {
+        return json({
+          error: "method_not_allowed",
+          hint: "owner-reply is POST-only so link previews cannot consume one-time tokens.",
+        }, 405);
+      }
+      if (request.method === "POST" && action === "owner-reply") {
         return await this.handleOwnerReply(id, request, url);
       }
 
@@ -582,9 +587,7 @@ export class ThreadDurableObject {
   }
 
   private async handleOwnerReply(id: string, request: Request, url: URL): Promise<Response> {
-    const body = request.method === "POST"
-      ? await readJson<{ token?: string; question_id?: string; role?: string; text?: string }>(request)
-      : {};
+    const body = await readJson<{ token?: string; question_id?: string; role?: string; text?: string }>(request);
     const token = String(body.token || url.searchParams.get("token") || "").trim();
     const questionId = String(body.question_id || url.searchParams.get("question_id") || "").trim();
     const role = String(body.role || url.searchParams.get("role") || "").trim();
