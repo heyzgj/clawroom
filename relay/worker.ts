@@ -8,6 +8,8 @@
  *   POST /threads              - create thread
  *   POST /threads/:id/messages - send message
  *   GET  /threads/:id/messages - poll messages (?after=N&wait=20)
+ *   POST /threads/:id/ask-owner - create an owner authorization question
+ *   POST /threads/:id/owner-reply - answer an owner authorization question
  *   POST /threads/:id/close    - mark this side closed
  *   POST /threads/:id/heartbeat - bridge runtime heartbeat
  *
@@ -42,10 +44,11 @@ interface MessageRow {
   from: string;
   text: string;
   ts: number;
-  kind: "message" | "close";
+  kind: "message" | "close" | "ask_owner" | "owner_reply";
 }
 
 const MAX_WAIT_SECONDS = 25;
+const OWNER_REPLY_TTL_MS = 30 * 60 * 1000;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -73,6 +76,10 @@ function threadId(): string {
 
 function randomToken(role: "host" | "guest"): string {
   return `${role}_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+function randomOwnerReplyToken(): string {
+  return `owner_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
 async function readJson<T = Record<string, unknown>>(request: Request): Promise<T> {
@@ -115,6 +122,9 @@ function routeHelp(): Response {
       "GET /threads/:id/msgs?token=...&after=N&wait=20",
       "GET /threads/:id/messages?token=...&after=N&wait=20",
       "GET /threads/:id/post?token=...&text=...",
+      "POST /threads/:id/ask-owner",
+      "POST /threads/:id/owner-reply",
+      "GET /threads/:id/owner-reply?token=...&question_id=...&role=...&text=...",
       "POST /threads/:id/close",
       "GET /threads/:id/done?token=...&summary=...",
       "GET /threads/:id/join?token=...",
@@ -145,7 +155,7 @@ export default {
         return await createThread(request, env, body.topic || "untitled", body.goal || "");
       }
 
-      const match = path.match(/^\/threads\/([^/]+)\/(\w+)$/);
+      const match = path.match(/^\/threads\/([^/]+)\/([A-Za-z0-9_-]+)$/);
       if (!match) return routeHelp();
 
       const [, id, action] = match;
@@ -175,7 +185,7 @@ export class ThreadDurableObject {
       }
 
       this.ensureSchema();
-      const match = url.pathname.match(/^\/threads\/([^/]+)\/(\w+)$/);
+      const match = url.pathname.match(/^\/threads\/([^/]+)\/([A-Za-z0-9_-]+)$/);
       if (!match) return routeHelp();
 
       const [, id, action] = match;
@@ -185,6 +195,10 @@ export class ThreadDurableObject {
         const auth = this.authenticate(request, url);
         if (!auth) return this.unauthorized();
         return json(this.snapshot(id, auth));
+      }
+
+      if ((request.method === "POST" || request.method === "GET") && action === "owner-reply") {
+        return await this.handleOwnerReply(id, request, url);
       }
 
       const auth = this.authenticate(request, url);
@@ -202,6 +216,17 @@ export class ThreadDurableObject {
         const body = await readJson<{ text?: string; idempotency_key?: string }>(request);
         const key = this.idempotencyKey(request, url, body.idempotency_key);
         return this.handleSend(id, auth, body.text || "", key, "message");
+      }
+      if (request.method === "POST" && action === "ask-owner") {
+        const body = await readJson<{ text?: string; idempotency_key?: string; ttl_seconds?: number }>(request);
+        const key = this.idempotencyKey(request, url, body.idempotency_key);
+        return this.handleAskOwner(id, auth, body.text || "", key, body.ttl_seconds);
+      }
+      if (request.method === "GET" && action === "ask-owner") {
+        const text = url.searchParams.get("text") || "";
+        const key = this.idempotencyKey(request, url);
+        const ttlSeconds = Number(url.searchParams.get("ttl_seconds") || 0);
+        return this.handleAskOwner(id, auth, text, key, ttlSeconds);
       }
       if (request.method === "GET" && action === "done") {
         const summary = url.searchParams.get("summary") || "";
@@ -250,6 +275,25 @@ export class ThreadDurableObject {
         ts INTEGER NOT NULL,
         kind TEXT NOT NULL DEFAULT 'message'
       )
+    `);
+    this.state.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS owner_questions (
+        question_id TEXT PRIMARY KEY,
+        role TEXT NOT NULL,
+        ask_message_id INTEGER NOT NULL,
+        owner_reply_token TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        consumed INTEGER NOT NULL DEFAULT 0,
+        consumed_at INTEGER NOT NULL DEFAULT 0,
+        reply_text TEXT NOT NULL DEFAULT '',
+        reply_message_id INTEGER NOT NULL DEFAULT -1
+      )
+    `);
+    this.state.storage.sql.exec(`
+      CREATE INDEX IF NOT EXISTS owner_questions_token_idx
+      ON owner_questions(owner_reply_token)
     `);
     this.state.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS idempotency (
@@ -365,8 +409,20 @@ export class ThreadDurableObject {
         from: String(row.sender),
         text: String(row.text || ""),
         ts: Number(row.ts || 0),
-        kind: String(row.kind || "message") === "close" ? "close" : "message",
+        kind: this.normalizeKind(String(row.kind || "message")),
       }));
+  }
+
+  private normalizeKind(kind: string): MessageRow["kind"] {
+    if (kind === "close" || kind === "ask_owner" || kind === "owner_reply") return kind;
+    return "message";
+  }
+
+  private nextMessageId(): number {
+    const nextIdRow = this.state.storage.sql
+      .exec("SELECT COALESCE(MAX(id) + 1, 0) AS next_id FROM messages")
+      .toArray()[0] as Record<string, unknown> | undefined;
+    return Number(nextIdRow?.next_id || 0);
   }
 
   private handleSend(
@@ -388,7 +444,7 @@ export class ThreadDurableObject {
     }
 
     const last = this.state.storage.sql
-      .exec("SELECT id, role FROM messages ORDER BY id DESC LIMIT 1")
+      .exec("SELECT id, role FROM messages WHERE kind IN ('message', 'close') ORDER BY id DESC LIMIT 1")
       .toArray()[0] as Record<string, unknown> | undefined;
 
     if (last && String(last.role) === auth.role) {
@@ -400,10 +456,7 @@ export class ThreadDurableObject {
       }, 409);
     }
 
-    const nextIdRow = this.state.storage.sql
-      .exec("SELECT COALESCE(MAX(id) + 1, 0) AS next_id FROM messages")
-      .toArray()[0] as Record<string, unknown> | undefined;
-    const nextId = Number(nextIdRow?.next_id || 0);
+    const nextId = this.nextMessageId();
     const now = Date.now();
 
     this.state.storage.sql.exec(
@@ -435,6 +488,126 @@ export class ThreadDurableObject {
       close_state: this.closeState(),
     };
     this.recordIdempotency(auth.role, idempotencyKey, 201, response);
+    this.wake();
+    return json(response, 201);
+  }
+
+  private handleAskOwner(
+    id: string,
+    auth: AuthContext,
+    rawText: string,
+    idempotencyKey: string,
+    ttlSeconds?: number,
+  ): Response {
+    const text = String(rawText || "").trim().slice(0, 4000);
+    if (!text) return json({ error: "text_required" }, 400);
+
+    const existing = this.idempotencyHit(auth.role, idempotencyKey);
+    if (existing) return json(existing.body, existing.status);
+
+    const row = this.threadRow();
+    if (Boolean(Number(row?.closed || 0))) {
+      return json({ error: "thread is closed" }, 400);
+    }
+
+    const nextId = this.nextMessageId();
+    const now = Date.now();
+    const ttlMs = Math.max(60_000, Math.min(OWNER_REPLY_TTL_MS, Number(ttlSeconds || 0) * 1000 || OWNER_REPLY_TTL_MS));
+    const questionId = `q_${crypto.randomUUID().slice(0, 12)}`;
+    const ownerReplyToken = randomOwnerReplyToken();
+    const expiresAt = now + ttlMs;
+
+    this.state.storage.sql.exec(
+      "INSERT INTO messages (id, role, text, ts, kind) VALUES (?, ?, ?, ?, ?)",
+      nextId,
+      auth.role,
+      text,
+      now,
+      "ask_owner",
+    );
+    this.state.storage.sql.exec(
+      `INSERT INTO owner_questions
+       (question_id, role, ask_message_id, owner_reply_token, text, created, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      questionId,
+      auth.role,
+      nextId,
+      ownerReplyToken,
+      text,
+      now,
+      expiresAt,
+    );
+    this.state.storage.sql.exec("UPDATE thread SET updated=? WHERE id=?", now, id);
+
+    const response = {
+      id: nextId,
+      from: auth.role,
+      text,
+      ts: now,
+      kind: "ask_owner",
+      question_id: questionId,
+      owner_reply_token: ownerReplyToken,
+      expires_at: expiresAt,
+    };
+    this.recordIdempotency(auth.role, idempotencyKey, 201, response);
+    this.wake();
+    return json(response, 201);
+  }
+
+  private async handleOwnerReply(id: string, request: Request, url: URL): Promise<Response> {
+    const body = request.method === "POST"
+      ? await readJson<{ token?: string; question_id?: string; role?: string; text?: string }>(request)
+      : {};
+    const token = String(body.token || url.searchParams.get("token") || "").trim();
+    const questionId = String(body.question_id || url.searchParams.get("question_id") || "").trim();
+    const role = String(body.role || url.searchParams.get("role") || "").trim();
+    const text = String(body.text || url.searchParams.get("text") || "").trim().slice(0, 4000);
+
+    if (!token || !questionId || !role) return json({ error: "invalid_owner_reply" }, 400);
+    if (!["host", "guest"].includes(role)) return json({ error: "invalid_owner_reply" }, 400);
+    if (!text) return json({ error: "text_required" }, 400);
+
+    const question = this.state.storage.sql
+      .exec("SELECT * FROM owner_questions WHERE question_id=? AND role=? LIMIT 1", questionId, role)
+      .toArray()[0] as Record<string, unknown> | undefined;
+    if (!question) return json({ error: "question_not_found" }, 404);
+    if (String(question.owner_reply_token || "") !== token) return json({ error: "unauthorized_owner_reply" }, 401);
+    if (Boolean(Number(question.consumed || 0))) return json({ error: "owner_reply_already_consumed" }, 409);
+
+    const now = Date.now();
+    const expiresAt = Number(question.expires_at || 0);
+    if (expiresAt && now > expiresAt) return json({ error: "owner_reply_expired" }, 410);
+
+    const nextId = this.nextMessageId();
+    this.state.storage.sql.exec(
+      "INSERT INTO messages (id, role, text, ts, kind) VALUES (?, ?, ?, ?, ?)",
+      nextId,
+      role,
+      text,
+      now,
+      "owner_reply",
+    );
+    this.state.storage.sql.exec(
+      `UPDATE owner_questions
+       SET consumed=1, consumed_at=?, reply_text=?, reply_message_id=?
+       WHERE question_id=? AND role=?`,
+      now,
+      text,
+      nextId,
+      questionId,
+      role,
+    );
+    this.state.storage.sql.exec("UPDATE thread SET updated=? WHERE id=?", now, id);
+
+    const response = {
+      id: nextId,
+      from: role,
+      text,
+      ts: now,
+      kind: "owner_reply",
+      question_id: questionId,
+      ok: true,
+    };
     this.wake();
     return json(response, 201);
   }
@@ -542,7 +715,7 @@ export class ThreadDurableObject {
         from: String(last.sender),
         text: String(last.text || ""),
         ts: Number(last.ts || 0),
-        kind: String(last.kind || "message"),
+        kind: this.normalizeKind(String(last.kind || "message")),
       } : null,
       runtime_heartbeats: heartbeats,
     };
