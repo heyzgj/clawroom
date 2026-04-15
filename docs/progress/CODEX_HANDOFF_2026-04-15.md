@@ -138,9 +138,9 @@ OpenClaw `deliver` (Lesson F2 risks notification-as-instruction).
 | Cross-machine (macOS × Railway Linux) | ✅ | host PID 61589, guest PID 250, both heartbeats stopped |
 | Direct Telegram Bot API notification | ✅ | both owners' DMs delivered at close |
 | T2 — multi-turn negotiation | ✅ transport/runtime | room `t_0b3602a9-e3b`, 8 negotiation messages + 2 closes |
-| T3 — ASK_OWNER round-trip | ❌ | not yet tested on v3.1 stack |
+| T3 — ASK_OWNER round-trip | ✅ v0 | room `t_fb3fda2d-563`, tokenized POST owner-reply path |
 | T4 — webhook push | ruled out | Lesson H; replaced by long-poll |
-| Mandate/authorization guard | ❌ | `t_0b3602a9-e3b` exceeded host ceiling; T3 remains required |
+| Mandate/authorization guard | ✅ v0 | `t_fb3fda2d-563` closed at `¥65,000`; `t_0b3602a9-e3b` now fails validator |
 
 ---
 
@@ -150,7 +150,13 @@ Run the next round of E2E on the v3.1 stack. Two independent test objects:
 
 ### 6a. T3 — ASK_OWNER round-trip E2E
 
-Scenario shape (example — refine as you design the test):
+Status update: T3 v0 passed on room `t_fb3fda2d-563` after failed room
+`t_1f72571a-3f4` exposed that mutating GET owner-reply URLs can be
+consumed by link previews/placeholders. The passing path uses the
+tokenized POST owner-reply API via the E2E harness. Telegram
+reply-to-message inbound routing remains future OpenClaw integration.
+
+Original scenario shape:
 
 - **Host owner context**: "agree on a brand deal with Tom's agent, budget
   ceiling is ¥50k; if Tom proposes above that, ask me first."
@@ -213,7 +219,7 @@ Every E2E run you perform produces THREE committed artifacts in
    and a `coverage_note` tail naming which T's this run proves.
 
 2. **Lesson entry** in `docs/LESSONS_LEARNED.md`. Next free letter as of
-   this handoff update: **AK**. Format per Z-AJ: `### <letter>. <Title>` /
+   this handoff update: **AL**. Format per Z-AK: `### <letter>. <Title>` /
    `**What:**` / `**Source check:**` or `**Why preemptive:**` (if
    applicable) / `**Symptom:**` (if a bug) / `**Fix:**` / `**Lesson:**`.
    Keep it under 30 lines.
@@ -289,9 +295,8 @@ Pin these in your context before executing any E2E:
 
 - Tolerant marker scan — T2-full passed with bilingual content after
   hardening, but no unmatched-marker fallback was observed yet.
-- Does T3 work at all given Lesson F2 (notification-as-instruction)?
-  Direct Bot API is designed to avoid it, but T3 is the first end-to-end
-  validation.
+- Telegram reply-to-message routing still needs OpenClaw inbound support.
+  T3 v0 used tokenized POST from the harness, not Telegram reply routing.
 - Multi-turn bilingual marker scan stress — LLMs love switching colon
   styles between `:` and `：` when code-switching EN/CN. Regex handles
   it; confirm on real run.
@@ -313,7 +318,7 @@ Answer these to confirm you're oriented:
 3. Where do E2E artifacts go? (`clawroom/docs/progress/`, redacted)
 4. Which OpenClaw agent runs the bridge? (`clawroom-relay`, not `main`)
 5. Why is there no webhook push? (Lesson H: gateway loopback-only)
-6. What's the next free lesson letter? (AK)
+6. What's the next free lesson letter? (AL)
 7. What's the difference between "validator passed" and "Telegram looks
    good"? (The former is evidence; the latter is not — Lesson AG)
 

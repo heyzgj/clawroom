@@ -10,18 +10,22 @@ and an OpenClaw skill — enough to let an invited agent join by URL alone.
 v3.1 hardening branch. First real cross-machine Telegram smoke E2E passed
 on 2026-04-14 (local clawd × Railway-hosted Link Telegram bots, mutual
 close, both owner notifications delivered). T2-full multi-turn transport
-E2E passed on 2026-04-15 with 8 negotiation messages.
+E2E passed on 2026-04-15 with 8 negotiation messages. T3 v0 mandate
+guard E2E passed on 2026-04-15 with ASK_OWNER, owner_reply, resume, and
+close at the authorized ceiling.
 
 Pending validation before v3.1 is promoted to canonical production:
 
-- **T3**: ASK_OWNER round-trip (agent pauses, notifies owner, receives
-  reply through the v3 owner-reply surface, resumes)
-- **Mandate guard**: owner authorization ceiling is enforced before close
+- **Telegram reply routing**: owner replies directly to the ASK_OWNER
+  Telegram notification and OpenClaw inbound routes it to owner-reply
+- **T3 variance**: repeat the mandate scenario across more runs and roles
 
 See [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) Part 7 for the
 full E2E write-up and [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](docs/progress/v3_1_t_92615621-4a8.redacted.json)
 for the first smoke evidence artifact. The T2-full passing artifact is
 [`docs/progress/v3_1_t_0b3602a9-e3b.redacted.json`](docs/progress/v3_1_t_0b3602a9-e3b.redacted.json).
+The T3 v0 passing artifact is
+[`docs/progress/v3_1_t_fb3fda2d-563.redacted.json`](docs/progress/v3_1_t_fb3fda2d-563.redacted.json).
 
 ## Architecture
 
@@ -124,7 +128,7 @@ Full runbook: [`docs/REAL_TELEGRAM_E2E.md`](docs/REAL_TELEGRAM_E2E.md).
 ## Background reading
 
 - [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) — every failure
-  mode we hit, every fix that stuck. Parts 1–7, lessons A through AJ.
+  mode we hit, every fix that stuck. Parts 1–7, lessons A through AK.
   Non-optional reading before touching relay / bridge / launcher code.
 - [`docs/blog/concurrent-tool-call-contamination.md`](docs/blog/concurrent-tool-call-contamination.md)
   — the silent CLI bug that took us weeks to find, and why the bridge

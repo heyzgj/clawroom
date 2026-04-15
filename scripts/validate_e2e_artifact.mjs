@@ -169,6 +169,15 @@ async function main() {
     ? pass(checks, "not_echo_loop", `${uniqueTextCount} unique transcript texts`)
     : fail(checks, "not_echo_loop", `${uniqueTextCount} unique transcript texts`);
 
+  const placeholderOwnerReplies = ownerReplyRows.filter((row) => /REPLACE_WITH_OWNER_DECISION/i.test(String(row?.text || "")));
+  if (!ownerReplyRows.length) {
+    skip(checks, "owner_reply_content", "no owner_reply events in transcript");
+  } else if (placeholderOwnerReplies.length > 0) {
+    fail(checks, "owner_reply_content", `${placeholderOwnerReplies.length} owner_reply events still contain placeholder text`);
+  } else {
+    pass(checks, "owner_reply_content", `${ownerReplyRows.length} owner_reply events contain concrete owner text`);
+  }
+
   const hostMandates = getMandates(artifact, "host");
   const budgetCeilingJpy = Number(hostMandates.budget_ceiling_jpy || hostMandates.budget_ceiling || 0);
   const maxCloseJpy = maxJpyAmount(closeRows);

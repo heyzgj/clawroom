@@ -716,6 +716,18 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Lesson:** Numeric protocol constraints belong in bridge code, not only in natural-language goals. Authorization constraints need their own gate, not just better wording.
 
+### AK. Owner-Reply Tokens Must Never Ride Mutating GET URLs
+
+**What:** First T3 room `t_1f72571a-3f4` correctly emitted `ASK_OWNER` after a `¥75,000` proposal exceeded the host's `¥65,000` mandate, but the Telegram notification contained a tokenized GET owner-reply URL with placeholder text.
+
+**Symptom:** The relay recorded repeated `owner_reply` events whose text was `REPLACE_WITH_OWNER_DECISION`. This strongly indicates a link preview/unfurl or bot-side automation fetched the URL and consumed the single-use token before the owner/harness replied.
+
+**Fix:** Make `/threads/:id/owner-reply` POST-only, remove mutating GET URLs from bridge notifications, add `owner_reply_content` validator checks, and make `waiting_owner` bridges observe closed rooms before polling owner replies.
+
+**Result:** Follow-up room `t_fb3fda2d-563` passed T3 v0: `ASK_OWNER` -> concrete `owner_reply` -> host resumed at `¥65,000` -> mutual close within mandate -> both runtimes stopped.
+
+**Lesson:** A one-time side-effect token in a chat surface must not be invokable by GET. Link previews are actors. Treat GET as read-only, especially around authorization.
+
 ---
 
 ## Updates Log
@@ -725,4 +737,5 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-13** v3 relay experiments. Added Q (skill keyword hijacking), R (cron.add vs background process), S (duplicate cron.add from confirm step), T (relay reliability baseline), U (v3 confirmation of LLM-as-executor failure). Updated pending item: cron path is NOT blocked by WARP DNS — blocked by Gateway service disabled state.
 - **2026-04-13** C2 results. Added V (cron timing non-deterministic beyond early fires — 16min delay observed on fire 3 despite 60s nominal interval). B experiment PASSED 3/3 (main session web_fetch reliable). C2 PARTIAL PASS (all 3 pings arrived but fire 3 delayed ~16min).
 - **2026-04-14** v3.1 hardening and real Telegram E2E. Added Part 7 (DO relay + verified bridge + Telegram self-launch path), lessons Z-AH, and the first passing local clawd plus Railway Link run (`t_92615621-4a8`, mutual close, 4 relay events, both owner notifications delivered). Redacted artifact co-located at [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](progress/v3_1_t_92615621-4a8.redacted.json). Added Lesson AI for REPLY:/CLAWROOM_CLOSE: marker-scan robustness before the next multi-turn / ASK_OWNER E2E.
-- **2026-04-15** Review fixes plus T2-full E2E. Fixed README commands, made redacted artifacts self-validating with embedded transcripts, changed "signed invite URL" wording to tokenized invite URL, hardened marker parsing, and added `--min-messages`. Room `t_f8d18771-716` is committed as a failed artifact (closed after 4 messages); room `t_0b3602a9-e3b` passed T2-full transport/runtime gates with 8 negotiation messages. Added Lesson AJ; T3/mandate guard remains pending.
+- **2026-04-15** Review fixes plus T2-full E2E. Fixed README commands, made redacted artifacts self-validating with embedded transcripts, changed "signed invite URL" wording to tokenized invite URL, hardened marker parsing, and added `--min-messages`. Room `t_f8d18771-716` is committed as a failed artifact (closed after 4 messages); room `t_0b3602a9-e3b` passed T2-full transport/runtime gates with 8 negotiation messages. Added Lesson AJ.
+- **2026-04-15** T3 v0 mandate guard E2E. Added owner-reply protocol, relay control events, ASK_OWNER/mandate intercept in bridge, and auto owner-reply E2E harness support. Room `t_1f72571a-3f4` failed because a mutating GET owner-reply URL was consumed with placeholder text; fix made owner replies POST-only. Room `t_fb3fda2d-563` then passed T3 v0 with ASK_OWNER, concrete owner_reply, close at `¥65,000`, and both runtimes stopped. Added Lesson AK.

@@ -1,0 +1,349 @@
+{
+  "_redaction_notice": {
+    "source": "/Users/supergeorge/.clawroom-v3/e2e/t_1f72571a-3f4.json",
+    "redacted_on": "2026-04-15",
+    "redacted_fields": [
+      "thread.host_token",
+      "thread.guest_token",
+      "thread.invite_url",
+      "snapshot.token",
+      "finalSnapshot.token"
+    ],
+    "rationale": "Thread tokens and token-bearing URLs are redacted. Bot handles, PIDs, timestamps, transcript rows, owner-reply text, summaries, and validator output are retained as E2E evidence.",
+    "full_artifact_available_at": "local-only: ~/.clawroom-v3/e2e/t_1f72571a-3f4.json"
+  },
+  "phase": "closed",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_1f72571a-3f4",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/threads/t_1f72571a-3f4/join?token=REDACTED"
+  },
+  "hostBot": "@singularitygz_bot",
+  "guestBot": "@link_clawd_bot",
+  "hostPromptPath": "local-only: ~/.clawroom-v3/e2e/t_1f72571a-3f4-host-prompt.txt",
+  "guestPromptPath": "local-only: ~/.clawroom-v3/e2e/t_1f72571a-3f4-guest-prompt.txt",
+  "owner_contexts": {
+    "host": {
+      "mandates": {
+        "budget_ceiling_jpy": 65000
+      },
+      "source": "redacted parsed mandate from host owner context"
+    },
+    "guest": {
+      "mandates": {},
+      "source": "redacted parsed mandate from guest owner context"
+    }
+  },
+  "ownerReplies": [],
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "text": "Hi! I'm reaching out on behalf of George at Zedlands to discuss a potential sponsorship collaboration. We'd love to explore a package that works for both sides — what's your best opening offer for a branded content or game sponsorship deal?",
+      "ts": 1776242159748,
+      "kind": "message"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "text": "Hi! Thanks for reaching out. Tom's opening offer is ¥75,000 for 2 short branded videos, a 1-hour Bilibili livestream, and 45-day usage rights. Does that align with George's budget?",
+      "ts": 1776242193865,
+      "kind": "message"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "text": "Tom's opening is ¥75,000 — ¥10,000 over your ceiling. I can counter at ¥65,000 or propose extra deliverables instead. Shall I offer ¥65,000 cash + bonus content, or do you want to stretch?",
+      "ts": 1776242215784,
+      "kind": "ask_owner",
+      "question_id": "q_db501366-cb4",
+      "expires_at": 1776244015784
+    },
+    {
+      "id": 3,
+      "from": "host",
+      "text": "REPLACE_WITH_OWNER_DECISION",
+      "ts": 1776242217988,
+      "kind": "owner_reply",
+      "question_id": "q_db501366-cb4"
+    },
+    {
+      "id": 4,
+      "from": "host",
+      "text": "George's ceiling is ¥65,000 — slightly below the opening. Can you do the same deliverables (2 branded videos + 1-hour livestream) at ¥65,000, or extend usage rights to 60 days as a trade-off?",
+      "ts": 1776242238756,
+      "kind": "message"
+    },
+    {
+      "id": 5,
+      "from": "guest",
+      "text": "¥65,000 works if payment is 50% upfront and Tom gets approval rights on final edits. Can George confirm both? That closes the gap cleanly.",
+      "ts": 1776242257466,
+      "kind": "message"
+    },
+    {
+      "id": 6,
+      "from": "host",
+      "text": "Tom accepted ¥65,000 with 50% upfront and approval on final edits — please confirm to close the deal.",
+      "ts": 1776242296817,
+      "kind": "ask_owner",
+      "question_id": "q_433508cf-dc6",
+      "expires_at": 1776244096817
+    },
+    {
+      "id": 7,
+      "from": "host",
+      "text": "REPLACE_WITH_OWNER_DECISION",
+      "ts": 1776242298126,
+      "kind": "owner_reply",
+      "question_id": "q_433508cf-dc6"
+    },
+    {
+      "id": 8,
+      "from": "host",
+      "text": "Tom accepted ¥65,000 with 50% upfront and approval on final edits. Terms are within your ceiling. Please confirm \"yes\" to close, or reply with any changes.",
+      "ts": 1776242316846,
+      "kind": "ask_owner",
+      "question_id": "q_43672ec8-624",
+      "expires_at": 1776244116846
+    },
+    {
+      "id": 9,
+      "from": "host",
+      "text": "REPLACE_WITH_OWNER_DECISION",
+      "ts": 1776242317923,
+      "kind": "owner_reply",
+      "question_id": "q_43672ec8-624"
+    },
+    {
+      "id": 10,
+      "from": "host",
+      "text": "George — Tom confirmed ¥65,000, 50% upfront, 50% on delivery, approval on final edits. Please reply \"yes\" to close or specify any changes needed.",
+      "ts": 1776242339117,
+      "kind": "ask_owner",
+      "question_id": "q_77568431-382",
+      "expires_at": 1776244139117
+    },
+    {
+      "id": 11,
+      "from": "host",
+      "text": "REPLACE_WITH_OWNER_DECISION",
+      "ts": 1776242340184,
+      "kind": "owner_reply",
+      "question_id": "q_77568431-382"
+    },
+    {
+      "id": 12,
+      "from": "host",
+      "text": "George, Tom's deal is ¥65,000 (within your ¥65,000 ceiling) — 50% upfront, 50% on delivery, approval on final edits. Say \"yes\" to close or note any changes.",
+      "ts": 1776242362392,
+      "kind": "ask_owner",
+      "question_id": "q_b46826dc-7ba",
+      "expires_at": 1776244162392
+    },
+    {
+      "id": 13,
+      "from": "host",
+      "text": "REPLACE_WITH_OWNER_DECISION",
+      "ts": 1776242363527,
+      "kind": "owner_reply",
+      "question_id": "q_b46826dc-7ba"
+    },
+    {
+      "id": 14,
+      "from": "host",
+      "text": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room.",
+      "ts": 1776242371608,
+      "kind": "close"
+    },
+    {
+      "id": 15,
+      "from": "guest",
+      "text": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room.",
+      "ts": 1776242372469,
+      "kind": "close"
+    }
+  ],
+  "snapshot": {
+    "thread_id": "t_1f72571a-3f4",
+    "role": "host",
+    "topic": "ClawRoom v3.1 T3 Mandate Guard",
+    "goal": "Negotiate a creator-brand sponsorship package. Host must not accept above the owner mandate. If an above-ceiling term appears, ASK_OWNER before continuing. Final terms must include price, deliverables, payment timing, usage rights, approval rights, and a concise owner-ready summary.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room."
+    },
+    "last_message": {
+      "id": 15,
+      "from": "guest",
+      "text": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room.",
+      "ts": 1776242372469,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 14,
+        "pid": "6092",
+        "bridge_version": "v3.1.0",
+        "updated": 1776242372664
+      },
+      {
+        "role": "host",
+        "status": "waiting_owner",
+        "cursor": 12,
+        "pid": "4946",
+        "bridge_version": "v3.1.0",
+        "updated": 1776242363494
+      }
+    ]
+  },
+  "finalSnapshot": {
+    "thread_id": "t_1f72571a-3f4",
+    "role": "host",
+    "topic": "ClawRoom v3.1 T3 Mandate Guard",
+    "goal": "Negotiate a creator-brand sponsorship package. Host must not accept above the owner mandate. If an above-ceiling term appears, ASK_OWNER before continuing. Final terms must include price, deliverables, payment timing, usage rights, approval rights, and a concise owner-ready summary.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room."
+    },
+    "last_message": {
+      "id": 15,
+      "from": "guest",
+      "text": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room.",
+      "ts": 1776242372469,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 14,
+        "pid": "6092",
+        "bridge_version": "v3.1.0",
+        "updated": 1776242372664
+      },
+      {
+        "role": "host",
+        "status": "waiting_owner",
+        "cursor": 12,
+        "pid": "4946",
+        "bridge_version": "v3.1.0",
+        "updated": 1776242363494
+      }
+    ]
+  },
+  "coverage_note": "Failed T3 v0: bridge correctly emitted ASK_OWNER after an above-ceiling ¥75,000 proposal, but the mutating GET owner-reply fallback in the Telegram notification was consumed automatically with REPLACE_WITH_OWNER_DECISION placeholder text. This led to repeated bogus owner_reply events until the test room was manually closed.",
+  "review_notes": [
+    "Failure source was protocol surface, not mandate detection: ASK_OWNER fired as expected.",
+    "Fix applied afterward: owner-reply is POST-only and bridge notifications no longer include a mutating GET URL.",
+    "This run also exposed that waiting_owner bridges must observe closed rooms before polling for owner replies."
+  ],
+  "validator": {
+    "ok": false,
+    "room_id": "t_1f72571a-3f4",
+    "stop_reason": "mutual_close",
+    "turn_count": 16,
+    "message_count": 4,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "mandate": {
+      "host_budget_ceiling_jpy": 65000,
+      "max_close_jpy": null,
+      "max_transcript_jpy": 75000,
+      "approved_excess": false
+    },
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "16 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "4 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": false,
+        "detail": "stopped roles: guest"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "T3 failed: mutating GET owner-reply URL was consumed by link preview/automation with placeholder text. Closing test room."
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "11 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": false,
+        "detail": "5 owner_reply events still contain placeholder text"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "detail": "close max n/a within host ceiling ¥65000"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": true,
+        "detail": "5 ask_owner and 5 owner_reply events"
+      }
+    ],
+    "checks_passed": [
+      "room_closed",
+      "mutual_close",
+      "event_count",
+      "message_count",
+      "close_roles",
+      "turn_taking",
+      "summary_present",
+      "not_echo_loop",
+      "mandate_compliance",
+      "ask_owner_evidence"
+    ],
+    "checks_failed": [
+      "runtime_stopped",
+      "owner_reply_content"
+    ],
+    "checks_skipped": []
+  }
+}

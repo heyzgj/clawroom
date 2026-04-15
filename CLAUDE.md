@@ -26,8 +26,11 @@ authorization, and zero install on the invited side."
 - T2-full multi-turn transport/runtime E2E passed on 2026-04-15
   (`t_0b3602a9-e3b`, 8 negotiation messages). Evidence:
   [`docs/progress/v3_1_t_0b3602a9-e3b.redacted.json`](docs/progress/v3_1_t_0b3602a9-e3b.redacted.json).
-- Pending validation: T3 (ASK_OWNER round-trip) and mandate/authorization
-  guard on the v3.1 stack.
+- T3 v0 mandate guard E2E passed on 2026-04-15 (`t_fb3fda2d-563`,
+  ASK_OWNER -> owner_reply -> resume -> close at `¥65,000`). Evidence:
+  [`docs/progress/v3_1_t_fb3fda2d-563.redacted.json`](docs/progress/v3_1_t_fb3fda2d-563.redacted.json).
+- Pending validation: Telegram reply-to-message inbound routing and
+  additional T3 variance runs.
 
 ## How to work on this project
 
@@ -58,7 +61,7 @@ When an E2E run happens (yours or a subagent's):
 2. Redact tokens + chat ids and copy to
    `docs/progress/v3_1_<room_id>.redacted.json`.
 3. Write the lesson into `docs/LESSONS_LEARNED.md` (continue the lettered
-   series — next free letter at time of writing is AK).
+   series — next free letter at time of writing is AL).
 4. Update the Updates Log entry for the date.
 5. Commit all three together.
 
@@ -154,12 +157,13 @@ Not because they're bad ideas, but because they're premature or misaligned:
 |---|---|---|---|
 | T1 | create + join | passed | `t_92615621-4a8` |
 | T2 | multi-turn negotiation | passed transport/runtime gate | `t_0b3602a9-e3b` |
-| T3 | ASK_OWNER round-trip | pending | next E2E target |
+| T3 | ASK_OWNER round-trip | passed v0 tokenized POST path | `t_fb3fda2d-563` |
 | T4 | push-triggered resume | ruled out (Lesson H); replaced by long-poll | validated via T1/T5 |
 | T5 | mutual close | passed | `t_92615621-4a8` |
 | Cross-machine | local macOS × Railway Linux | passed | PIDs 61589 × 250 in artifact |
 | Owner notification (direct Bot API) | passed | both Telegram DMs delivered at close |
-| Mandate guard | pending | `t_0b3602a9-e3b` exceeded host ceiling, so T3 remains required |
+| Mandate guard | passed v0 budget_ceiling_jpy path | `t_fb3fda2d-563` closed at `¥65,000`; `t_0b3602a9-e3b` now fails validator |
+| Telegram reply routing | pending | v0 uses tokenized POST via harness, not reply-to-message inbound |
 
 ## Repo layout quick reference
 
@@ -188,7 +192,9 @@ clawroom/
 │   │   ├── TELEGRAM_E2E_LOG_2026_04_08.md         # pre-v3 real-bot log
 │   │   ├── v3_1_t_92615621-4a8.redacted.json      # first smoke evidence
 │   │   ├── v3_1_t_f8d18771-716.failed.redacted.json
-│   │   └── v3_1_t_0b3602a9-e3b.redacted.json      # T2-full evidence
+│   │   ├── v3_1_t_0b3602a9-e3b.redacted.json      # T2-full evidence
+│   │   ├── v3_1_t_1f72571a-3f4.failed.redacted.json
+│   │   └── v3_1_t_fb3fda2d-563.redacted.json      # T3 v0 evidence
 │   └── design/
 │       ├── landing-design.md       # Landing visual identity context
 │       └── landing-mockup.html     # Locked mockup (Space Mono / IBM Plex / pure black)
