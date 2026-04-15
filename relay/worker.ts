@@ -47,6 +47,7 @@ interface MessageRow {
   kind: "message" | "close" | "ask_owner" | "owner_reply";
   question_id?: string;
   expires_at?: number;
+  source?: string;
 }
 
 const MAX_WAIT_SECONDS = 25;
@@ -431,6 +432,7 @@ export class ThreadDurableObject {
     };
     if (metadata.question_id) out.question_id = String(metadata.question_id);
     if (Number.isFinite(Number(metadata.expires_at))) out.expires_at = Number(metadata.expires_at);
+    if (metadata.source) out.source = this.sanitizeMetadataText(metadata.source, 64);
     return out;
   }
 
@@ -446,6 +448,13 @@ export class ThreadDurableObject {
   private normalizeKind(kind: string): MessageRow["kind"] {
     if (kind === "close" || kind === "ask_owner" || kind === "owner_reply") return kind;
     return "message";
+  }
+
+  private sanitizeMetadataText(value: unknown, maxLength: number): string {
+    return String(value || "")
+      .trim()
+      .replace(/[^a-zA-Z0-9_.:-]/g, "_")
+      .slice(0, maxLength);
   }
 
   private nextMessageId(): number {
@@ -587,11 +596,12 @@ export class ThreadDurableObject {
   }
 
   private async handleOwnerReply(id: string, request: Request, url: URL): Promise<Response> {
-    const body = await readJson<{ token?: string; question_id?: string; role?: string; text?: string }>(request);
+    const body = await readJson<{ token?: string; question_id?: string; role?: string; text?: string; source?: string }>(request);
     const token = String(body.token || url.searchParams.get("token") || "").trim();
     const questionId = String(body.question_id || url.searchParams.get("question_id") || "").trim();
     const role = String(body.role || url.searchParams.get("role") || "").trim();
     const text = String(body.text || url.searchParams.get("text") || "").trim().slice(0, 4000);
+    const source = this.sanitizeMetadataText(body.source || url.searchParams.get("source") || "", 64);
 
     if (!token || !questionId || !role) return json({ error: "invalid_owner_reply" }, 400);
     if (!["host", "guest"].includes(role)) return json({ error: "invalid_owner_reply" }, 400);
@@ -627,7 +637,11 @@ export class ThreadDurableObject {
       text,
       now,
       "owner_reply",
-      JSON.stringify({ question_id: questionId, ask_message_id: Number(question.ask_message_id || -1) }),
+      JSON.stringify({
+        question_id: questionId,
+        ask_message_id: Number(question.ask_message_id || -1),
+        ...(source ? { source } : {}),
+      }),
     );
     this.state.storage.sql.exec(
       `UPDATE owner_questions
@@ -648,6 +662,7 @@ export class ThreadDurableObject {
       ts: now,
       kind: "owner_reply",
       question_id: questionId,
+      ...(source ? { source } : {}),
       ok: true,
     };
     this.wake();

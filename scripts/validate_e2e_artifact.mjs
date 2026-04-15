@@ -205,6 +205,23 @@ async function main() {
     pass(checks, "owner_reply_role_verified", `${ownerReplyRows.length} owner_reply roles match ask_owner roles`);
   }
 
+  const requiredOwnerReplySource = String(
+    args["require-owner-reply-source"] ||
+      (boolArg(args, "require-telegram-inbound-owner-reply") ? "telegram_inbound" : ""),
+  ).trim();
+  const ownerReplySources = Array.from(
+    new Set(ownerReplyRows.map((row) => String(row?.source || "")).filter(Boolean)),
+  );
+  if (!requiredOwnerReplySource) {
+    skip(checks, "owner_reply_source", ownerReplySources.length ? `sources: ${ownerReplySources.join(",")}` : "no source requirement");
+  } else if (!ownerReplyRows.length) {
+    fail(checks, "owner_reply_source", `required ${requiredOwnerReplySource}, but no owner_reply events exist`);
+  } else if (ownerReplyRows.some((row) => String(row?.source || "") !== requiredOwnerReplySource)) {
+    fail(checks, "owner_reply_source", `required ${requiredOwnerReplySource}, saw ${ownerReplySources.join(",") || "none"}`);
+  } else {
+    pass(checks, "owner_reply_source", `${ownerReplyRows.length} owner_reply events from ${requiredOwnerReplySource}`);
+  }
+
   const hostMandates = getMandates(artifact, "host");
   const budgetCeilingJpy = Number(hostMandates.budget_ceiling_jpy || hostMandates.budget_ceiling || 0);
   const maxCloseJpy = maxJpyAmount(closeRows);
@@ -243,6 +260,7 @@ async function main() {
     message_count: messageRows.length,
     close_count: closeRows.length,
     transcript_source: transcriptSource,
+    owner_reply_sources: ownerReplySources,
     mandate: mandateBinding ? {
       host_budget_ceiling_jpy: budgetCeilingJpy,
       max_close_jpy: maxCloseJpy,

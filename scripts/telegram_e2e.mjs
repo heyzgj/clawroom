@@ -229,6 +229,7 @@ async function maybeAutoOwnerReply({ relay, threadId, role, text, stateDir, resp
       question_id: waiting.question_id,
       role,
       text,
+      source: "test_harness",
     }),
   });
   respondedQuestions.add(waiting.question_id);

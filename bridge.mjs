@@ -11,6 +11,7 @@
  */
 
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -57,7 +58,7 @@ const goal = String(args.goal || "");
 const minMessages = Math.max(0, Number(args["min-messages"] || process.env.CLAWROOM_MIN_MESSAGES || 0) || 0);
 const agentId = String(args["agent-id"] || process.env.CLAWROOM_AGENT_ID || "clawroom-relay");
 const sessionKey = String(args["session-key"] || `agent:${agentId}:clawroom:${threadId}:${role}`);
-const openClawStateDir = resolve(String(process.env.OPENCLAW_STATE_DIR || join(homedir(), ".openclaw")));
+const openClawStateDir = resolve(String(process.env.OPENCLAW_STATE_DIR || process.env.CLAWDBOT_STATE_DIR || join(homedir(), ".openclaw")));
 const defaultStateDir = process.env.OPENCLAW_STATE_DIR ? join(openClawStateDir, "clawroom-v3") : join(homedir(), ".clawroom-v3");
 const stateDir = resolve(String(args["state-dir"] || process.env.CLAWROOM_STATE_DIR || defaultStateDir));
 const notifyKind = String(args["notify-kind"] || process.env.CLAWROOM_NOTIFY_KIND || "telegram");
@@ -96,11 +97,25 @@ function writeJsonAtomic(path, payload) {
   mkdirSync(join(path, ".."), { recursive: true });
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  try {
+    chmodSync(tmp, 0o600);
+  } catch {
+    // Best-effort hardening; some filesystems reject chmod.
+  }
   renameSync(tmp, path);
 }
 
 function sha(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 24);
+}
+
+function chatIdHash(chatId) {
+  return createHash("sha256").update(String(chatId)).digest("hex").slice(0, 16);
+}
+
+function chatIdSuffix(chatId) {
+  const value = String(chatId || "");
+  return value ? value.slice(-4) : "";
 }
 
 function idempotencyKey(...parts) {
@@ -642,7 +657,7 @@ async function telegramNotify(text) {
   const { botToken, chatId } = resolveTelegramConfig();
   if (!botToken || !chatId) {
     log("notify skipped: missing Telegram bot token or chat_id");
-    return { ok: false, message_id: null };
+    return { ok: false, message_id: null, chat_id: null };
   }
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
@@ -652,8 +667,9 @@ async function telegramNotify(text) {
   });
   if (!response.ok) throw new Error(`Telegram API ${response.status}: ${await response.text()}`);
   const body = await response.json().catch(() => ({}));
-  log(`Telegram delivered to chat_id=...${String(chatId).slice(-4)}`);
-  return { ok: true, message_id: body?.result?.message_id || null };
+  const resolvedChatId = body?.result?.chat?.id != null ? String(body.result.chat.id) : String(chatId);
+  log(`Telegram delivered to chat_id=...${chatIdSuffix(resolvedChatId)}`);
+  return { ok: true, message_id: body?.result?.message_id || null, chat_id: resolvedChatId };
 }
 
 async function notifyOwnerOnce(key, summary) {
@@ -672,6 +688,46 @@ async function notifyOwnerOnce(key, summary) {
 
 function ownerReplyEndpoint() {
   return `${relayBase}/threads/${threadId}/owner-reply`;
+}
+
+function askOwnerBindingPath(chatId, messageId) {
+  const dir = join(openClawStateDir, "clawroom-v3", "ask-owner-bindings");
+  const safeMessageId = String(messageId || "").replace(/[^0-9a-zA-Z_.:-]/g, "_");
+  return join(dir, `${chatIdHash(chatId)}.${safeMessageId}.json`);
+}
+
+function writeAskOwnerTelegramBinding(question, delivery) {
+  if (!delivery?.ok || !delivery.message_id || !delivery.chat_id) {
+    return { ok: false, reason: "missing_telegram_delivery_fields" };
+  }
+  const messageId = delivery.message_id;
+  const chatId = String(delivery.chat_id);
+  const path = askOwnerBindingPath(chatId, messageId);
+  const binding = {
+    version: 1,
+    source: "clawroom_bridge",
+    created_at: new Date().toISOString(),
+    expires_at: question.expires_at || null,
+    relay: relayBase,
+    thread_id: threadId,
+    role,
+    question_id: question.question_id || "",
+    ask_event_id: question.id ?? null,
+    owner_reply_token: question.owner_reply_token || "",
+    telegram: {
+      chat_id_hash: chatIdHash(chatId),
+      chat_id_suffix: chatIdSuffix(chatId),
+      message_id: messageId,
+    },
+  };
+  writeJsonAtomic(path, binding);
+  return {
+    ok: true,
+    path,
+    chat_id_hash: binding.telegram.chat_id_hash,
+    chat_id_suffix: binding.telegram.chat_id_suffix,
+    message_id: messageId,
+  };
 }
 
 function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
@@ -776,9 +832,23 @@ async function enterWaitingOwner(parsed, context = {}) {
 
   try {
     const delivery = await notifyOwnerQuestion(question, questionText);
+    let binding = { ok: false, reason: "not_attempted" };
+    try {
+      binding = writeAskOwnerTelegramBinding(question, delivery);
+      if (binding.ok) {
+        log(`ASK_OWNER Telegram binding written message_id=${binding.message_id} chat_id=...${binding.chat_id_suffix}`);
+      } else {
+        log(`ASK_OWNER Telegram binding skipped: ${binding.reason}`);
+      }
+    } catch (error) {
+      binding = { ok: false, reason: "write_failed" };
+      log(`ASK_OWNER Telegram binding write failed: ${error.message}`);
+    }
     bridgeState.waiting_owner = {
       ...bridgeState.waiting_owner,
       telegram_message_id: delivery?.message_id || null,
+      telegram_chat_hash: binding.ok ? binding.chat_id_hash : null,
+      telegram_binding_written: Boolean(binding.ok),
       owner_reply_endpoint: delivery?.owner_reply_endpoint || null,
       notified_at: new Date().toISOString(),
     };
