@@ -81,6 +81,10 @@ The bridge then sends the owner a Telegram notification and enters
 - It is single-use.
 - Default TTL is 30 minutes.
 - A reply must cite both `question_id` and `role`.
+- The relay MUST reject a POST whose `role` field does not exactly
+  match the role recorded with the question. A host's
+  `owner_reply_token` cannot answer a guest question, and vice versa.
+  Mismatch returns `401 unauthorized_owner_reply`.
 - Replay, wrong role, wrong question, expired token, malformed payload,
   and missing text are all hard 4xx responses.
 

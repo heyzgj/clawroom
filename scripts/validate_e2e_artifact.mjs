@@ -178,6 +178,33 @@ async function main() {
     pass(checks, "owner_reply_content", `${ownerReplyRows.length} owner_reply events contain concrete owner text`);
   }
 
+  const askOwnerRoleByQuestion = new Map(
+    askOwnerRows
+      .filter((row) => row?.question_id)
+      .map((row) => [String(row.question_id), row.from || row.role]),
+  );
+  const ownerReplyMissingQuestions = ownerReplyRows.filter((row) => {
+    const questionId = row?.question_id ? String(row.question_id) : "";
+    return !questionId || !askOwnerRoleByQuestion.has(questionId);
+  });
+  const ownerReplyRoleMismatches = ownerReplyRows.filter((row) => {
+    const questionId = row?.question_id ? String(row.question_id) : "";
+    const askRole = questionId ? askOwnerRoleByQuestion.get(questionId) : null;
+    if (!askRole) return false;
+    return askRole !== (row.from || row.role);
+  });
+  if (!ownerReplyRows.length) {
+    skip(checks, "owner_reply_role_verified", "no owner_reply events in transcript");
+  } else if (ownerReplyMissingQuestions.length > 0) {
+    fail(checks, "owner_reply_role_verified", `${ownerReplyMissingQuestions.length} owner_reply events lack matching ask_owner question_id`);
+  } else if (ownerReplyRoleMismatches.length > 0) {
+    fail(checks, "owner_reply_role_verified", `${ownerReplyRoleMismatches.length} owner_reply roles mismatch their ask_owner role`);
+  } else if (askOwnerRoleByQuestion.size === 0) {
+    skip(checks, "owner_reply_role_verified", "owner_reply events present but no question_id-linked ask_owner rows");
+  } else {
+    pass(checks, "owner_reply_role_verified", `${ownerReplyRows.length} owner_reply roles match ask_owner roles`);
+  }
+
   const hostMandates = getMandates(artifact, "host");
   const budgetCeilingJpy = Number(hostMandates.budget_ceiling_jpy || hostMandates.budget_ceiling || 0);
   const maxCloseJpy = maxJpyAmount(closeRows);

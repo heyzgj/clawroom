@@ -598,9 +598,20 @@ export class ThreadDurableObject {
     if (!text) return json({ error: "text_required" }, 400);
 
     const question = this.state.storage.sql
-      .exec("SELECT * FROM owner_questions WHERE question_id=? AND role=? LIMIT 1", questionId, role)
+      .exec("SELECT * FROM owner_questions WHERE question_id=? LIMIT 1", questionId)
       .toArray()[0] as Record<string, unknown> | undefined;
     if (!question) return json({ error: "question_not_found" }, 404);
+    const storedRole = String(question.role || "");
+    if (storedRole !== role) {
+      console.warn(JSON.stringify({
+        event: "owner_reply_role_mismatch",
+        thread_id: id,
+        question_id: questionId,
+        requested_role: role,
+        stored_role: storedRole,
+      }));
+      return json({ error: "unauthorized_owner_reply" }, 401);
+    }
     if (String(question.owner_reply_token || "") !== token) return json({ error: "unauthorized_owner_reply" }, 401);
     if (Boolean(Number(question.consumed || 0))) return json({ error: "owner_reply_already_consumed" }, 409);
 
