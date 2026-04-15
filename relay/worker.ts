@@ -45,6 +45,8 @@ interface MessageRow {
   text: string;
   ts: number;
   kind: "message" | "close" | "ask_owner" | "owner_reply";
+  question_id?: string;
+  expires_at?: number;
 }
 
 const MAX_WAIT_SECONDS = 25;
@@ -273,9 +275,13 @@ export class ThreadDurableObject {
         role TEXT NOT NULL,
         text TEXT NOT NULL,
         ts INTEGER NOT NULL,
-        kind TEXT NOT NULL DEFAULT 'message'
+        kind TEXT NOT NULL DEFAULT 'message',
+        metadata_json TEXT NOT NULL DEFAULT '{}'
       )
     `);
+    try {
+      this.state.storage.sql.exec("ALTER TABLE messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'");
+    } catch {}
     this.state.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS owner_questions (
         question_id TEXT PRIMARY KEY,
@@ -402,15 +408,34 @@ export class ThreadDurableObject {
 
   private messagesAfter(after: number): MessageRow[] {
     return this.state.storage.sql
-      .exec("SELECT id, role AS sender, text, ts, kind FROM messages WHERE id>? ORDER BY id ASC", Number.isFinite(after) ? after : -1)
+      .exec("SELECT id, role AS sender, text, ts, kind, metadata_json FROM messages WHERE id>? ORDER BY id ASC", Number.isFinite(after) ? after : -1)
       .toArray()
       .map((row: any) => ({
-        id: Number(row.id),
-        from: String(row.sender),
-        text: String(row.text || ""),
-        ts: Number(row.ts || 0),
-        kind: this.normalizeKind(String(row.kind || "message")),
+        ...this.publicMessageRow(row),
       }));
+  }
+
+  private publicMessageRow(row: any): MessageRow {
+    const metadata = this.parseMetadata(row?.metadata_json);
+    const out: MessageRow = {
+      id: Number(row.id),
+      from: String(row.sender || row.role || ""),
+      text: String(row.text || ""),
+      ts: Number(row.ts || 0),
+      kind: this.normalizeKind(String(row.kind || "message")),
+    };
+    if (metadata.question_id) out.question_id = String(metadata.question_id);
+    if (Number.isFinite(Number(metadata.expires_at))) out.expires_at = Number(metadata.expires_at);
+    return out;
+  }
+
+  private parseMetadata(value: unknown): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(String(value || "{}"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
   }
 
   private normalizeKind(kind: string): MessageRow["kind"] {
@@ -460,12 +485,13 @@ export class ThreadDurableObject {
     const now = Date.now();
 
     this.state.storage.sql.exec(
-      "INSERT INTO messages (id, role, text, ts, kind) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO messages (id, role, text, ts, kind, metadata_json) VALUES (?, ?, ?, ?, ?, ?)",
       nextId,
       auth.role,
       text,
       now,
       kind,
+      "{}",
     );
 
     if (kind === "close") {
@@ -518,12 +544,13 @@ export class ThreadDurableObject {
     const expiresAt = now + ttlMs;
 
     this.state.storage.sql.exec(
-      "INSERT INTO messages (id, role, text, ts, kind) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO messages (id, role, text, ts, kind, metadata_json) VALUES (?, ?, ?, ?, ?, ?)",
       nextId,
       auth.role,
       text,
       now,
       "ask_owner",
+      JSON.stringify({ question_id: questionId, expires_at: expiresAt }),
     );
     this.state.storage.sql.exec(
       `INSERT INTO owner_questions
@@ -580,12 +607,13 @@ export class ThreadDurableObject {
 
     const nextId = this.nextMessageId();
     this.state.storage.sql.exec(
-      "INSERT INTO messages (id, role, text, ts, kind) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO messages (id, role, text, ts, kind, metadata_json) VALUES (?, ?, ?, ?, ?, ?)",
       nextId,
       role,
       text,
       now,
       "owner_reply",
+      JSON.stringify({ question_id: questionId, ask_message_id: Number(question.ask_message_id || -1) }),
     );
     this.state.storage.sql.exec(
       `UPDATE owner_questions
@@ -698,7 +726,7 @@ export class ThreadDurableObject {
       .exec("SELECT role, status, cursor, pid, bridge_version, updated FROM runtime_heartbeats ORDER BY role")
       .toArray();
     const last = this.state.storage.sql
-      .exec("SELECT id, role AS sender, text, ts, kind FROM messages ORDER BY id DESC LIMIT 1")
+      .exec("SELECT id, role AS sender, text, ts, kind, metadata_json FROM messages ORDER BY id DESC LIMIT 1")
       .toArray()[0] as Record<string, unknown> | undefined;
 
     return {
@@ -710,13 +738,7 @@ export class ThreadDurableObject {
       closed: Boolean(Number(row?.closed || 0)),
       summary: String(row?.summary || ""),
       close_state: this.closeState(),
-      last_message: last ? {
-        id: Number(last.id),
-        from: String(last.sender),
-        text: String(last.text || ""),
-        ts: Number(last.ts || 0),
-        kind: this.normalizeKind(String(last.kind || "message")),
-      } : null,
+      last_message: last ? this.publicMessageRow(last) : null,
       runtime_heartbeats: heartbeats,
     };
   }
