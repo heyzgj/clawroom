@@ -133,6 +133,24 @@ async function fetchJson(url, options = {}) {
   return body;
 }
 
+async function fetchJsonWithStatus(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(Number(options.timeoutMs || 20_000)),
+  });
+  const text = await response.text();
+  let body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { raw: text };
+  }
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${url}: ${JSON.stringify(body).slice(0, 500)}`);
+  }
+  return { status: response.status, body };
+}
+
 function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, assetBase, minMessages }) {
   const lines = [
     "ClawRoom v3.1 E2E launch request.",
@@ -196,12 +214,61 @@ async function createThread({ relay, topic, goal, noCreate }) {
   return fetchJson(url);
 }
 
-async function monitorThread({ relay, threadId, hostToken, timeoutSeconds, pollSeconds, artifactPath }) {
+async function maybeAutoOwnerReply({ relay, threadId, role, text, stateDir, respondedQuestions }) {
+  if (!text) return null;
+  const state = readJsonFile(join(stateDir, `${threadId}-${role}.state.json`));
+  const waiting = state?.waiting_owner || null;
+  if (!waiting?.question_id || !waiting?.owner_reply_token) return null;
+  if (respondedQuestions.has(waiting.question_id)) return null;
+
+  const response = await fetchJsonWithStatus(`${relay}/threads/${threadId}/owner-reply`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: waiting.owner_reply_token,
+      question_id: waiting.question_id,
+      role,
+      text,
+    }),
+  });
+  respondedQuestions.add(waiting.question_id);
+  return {
+    role,
+    question_id: waiting.question_id,
+    status: response.status,
+    text,
+    ts: Date.now(),
+  };
+}
+
+async function monitorThread({
+  relay,
+  threadId,
+  hostToken,
+  timeoutSeconds,
+  pollSeconds,
+  artifactPath,
+  autoOwnerReplyRole,
+  autoOwnerReplyText,
+  autoOwnerStateDir,
+}) {
   const deadline = Date.now() + timeoutSeconds * 1000;
   let last = null;
+  const respondedQuestions = new Set();
   while (Date.now() < deadline) {
     last = await fetchJson(`${relay}/threads/${threadId}/join?token=${encodeURIComponent(hostToken)}`);
-    writeFileSync(artifactPath, `${JSON.stringify({ ...readJsonFile(artifactPath), phase: "monitoring", snapshot: last }, null, 2)}\n`);
+    const currentArtifact = readJsonFile(artifactPath);
+    const ownerReplies = Array.isArray(currentArtifact.ownerReplies) ? currentArtifact.ownerReplies : [];
+    const autoReply = await maybeAutoOwnerReply({
+      relay,
+      threadId,
+      role: autoOwnerReplyRole,
+      text: autoOwnerReplyText,
+      stateDir: autoOwnerStateDir,
+      respondedQuestions,
+    }).catch((error) => ({ error: error.message, ts: Date.now(), role: autoOwnerReplyRole }));
+    if (autoReply) ownerReplies.push(autoReply);
+    writeFileSync(artifactPath, `${JSON.stringify({ ...currentArtifact, phase: "monitoring", snapshot: last, ownerReplies }, null, 2)}\n`);
     const rawHeartbeats = Array.isArray(last.runtime_heartbeats) ? last.runtime_heartbeats : Object.values(last.runtime_heartbeats || {});
     const heartbeats = rawHeartbeats.map((row) => row?.role || row?.status || "?").join(",");
     console.log(
@@ -237,6 +304,9 @@ async function main() {
   const timeoutSeconds = Number(args["timeout-seconds"] || 900);
   const pollSeconds = Number(args["poll-seconds"] || 10);
   const artifactDir = resolve(String(args["artifact-dir"] || join(homedir(), ".clawroom-v3", "e2e")));
+  const autoOwnerReplyRole = String(args["auto-owner-reply-role"] || "host");
+  const autoOwnerReplyText = String(args["auto-owner-reply-text"] || "").trim();
+  const autoOwnerStateDir = resolve(String(args["auto-owner-state-dir"] || process.env.CLAWROOM_STATE_DIR || join(homedir(), ".clawroom-v3")));
   mkdirSync(artifactDir, { recursive: true });
 
   const thread = await createThread({ relay, topic, goal, noCreate });
@@ -289,8 +359,19 @@ async function main() {
   }
 
   if (monitor) {
-    const finalSnapshot = await monitorThread({ relay, threadId, hostToken, timeoutSeconds, pollSeconds, artifactPath });
-    writeFileSync(artifactPath, `${JSON.stringify({ ...readJsonFile(artifactPath), phase: "closed", relay, thread, finalSnapshot }, null, 2)}\n`);
+    const finalSnapshot = await monitorThread({
+      relay,
+      threadId,
+      hostToken,
+      timeoutSeconds,
+      pollSeconds,
+      artifactPath,
+      autoOwnerReplyRole,
+      autoOwnerReplyText,
+      autoOwnerStateDir,
+    });
+    const transcript = await fetchJson(`${relay}/threads/${threadId}/msgs?token=${encodeURIComponent(hostToken)}&after=-1`);
+    writeFileSync(artifactPath, `${JSON.stringify({ ...readJsonFile(artifactPath), phase: "closed", relay, thread, transcript, finalSnapshot }, null, 2)}\n`);
     console.log(JSON.stringify({ phase: "closed", thread_id: threadId, finalSnapshot }, null, 2));
   }
 }
