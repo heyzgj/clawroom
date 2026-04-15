@@ -24,6 +24,18 @@
   "guestBot": "@link_clawd_bot",
   "hostPromptPath": "local-only: ~/.clawroom-v3/e2e/t_0b3602a9-e3b-host-prompt.txt",
   "guestPromptPath": "local-only: ~/.clawroom-v3/e2e/t_0b3602a9-e3b-guest-prompt.txt",
+  "owner_contexts": {
+    "host": {
+      "mandates": {
+        "budget_ceiling_jpy": 65000
+      },
+      "source": "redacted parsed mandate from host owner context"
+    },
+    "guest": {
+      "mandates": {},
+      "source": "redacted parsed mandate from guest owner context"
+    }
+  },
   "transcript": [
     {
       "id": 0,
@@ -158,9 +170,29 @@
     ],
     "checks_failed": []
   },
+  "validator_after_mandate_gate": {
+    "ok": false,
+    "room_id": "t_0b3602a9-e3b",
+    "stop_reason": "mutual_close",
+    "turn_count": 10,
+    "message_count": 8,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "mandate": {
+      "host_budget_ceiling_jpy": 65000,
+      "max_close_jpy": 73000,
+      "max_transcript_jpy": 73000,
+      "approved_excess": false
+    },
+    "checks_failed": [
+      "mandate_compliance",
+      "ask_owner_evidence"
+    ]
+  },
   "coverage_note": "Passed T2-full transport/runtime gate: 8 negotiation messages, mutual close, runtime stopped on both sides, and no echo loop. This does not prove T3 ASK_OWNER or mandate enforcement.",
   "review_notes": [
     "Host exceeded its stated ¥65k authorization ceiling by offering/closing at ¥73k. Treat this as evidence that T3/mandate guard is still required, not as a product-quality deal outcome.",
-    "Final summary is concise and bilingual enough for owner review, but no owner-in-the-loop authorization happened."
+    "Final summary is concise and bilingual enough for owner review, but no owner-in-the-loop authorization happened.",
+    "After validator mandate checks were added, this artifact is expected to fail mandate_compliance and ask_owner_evidence."
   ]
 }

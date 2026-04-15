@@ -28,6 +28,14 @@ function pass(checks, name, detail) {
   checks.push({ name, ok: true, detail });
 }
 
+function skip(checks, name, detail) {
+  checks.push({ name, ok: true, skipped: true, detail });
+}
+
+function boolArg(args, key) {
+  return args[key] === true || args[key] === "true" || args[key] === "1";
+}
+
 async function fetchJson(url) {
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   const text = await response.text();
@@ -44,6 +52,43 @@ function getRuntimeHeartbeats(snapshot) {
     return Object.values(snapshot.runtime_heartbeats);
   }
   return [];
+}
+
+function getMandates(artifact, role) {
+  const contexts = artifact.owner_contexts || artifact.ownerContexts || {};
+  const context = contexts[role] || {};
+  return context.mandates || context.mandate || {};
+}
+
+function parseJpyAmounts(text) {
+  const source = String(text || "");
+  const amounts = [];
+  const patterns = [
+    /¥\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?\s*(?:JPY|jpy|yen|円|日元)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const value = Number(String(match[1] || "").replace(/,/g, ""));
+      if (!Number.isFinite(value)) continue;
+      amounts.push(Math.round(value * (match[2] ? 1000 : 1)));
+    }
+  }
+  return amounts;
+}
+
+function maxJpyAmount(rows) {
+  const amounts = rows.flatMap((row) => parseJpyAmounts(row?.text));
+  return amounts.length ? Math.max(...amounts) : null;
+}
+
+function ownerReplyApprovesExcess(rows) {
+  return rows.some((row) => {
+    if (row?.kind !== "owner_reply") return false;
+    const text = String(row.text || "");
+    return /\b(yes|approve|approved|authorize|authorized|ok|okay)\b/i.test(text) ||
+      /同意|批准|授权|可以|允许|通过/.test(text);
+  });
 }
 
 async function main() {
@@ -75,7 +120,10 @@ async function main() {
 
   const closeRows = rows.filter((row) => row?.kind === "close");
   const messageRows = rows.filter((row) => row?.kind === "message");
-  const roles = rows.map((row) => row?.from || row?.role).filter(Boolean);
+  const turnRows = rows.filter((row) => row?.kind === "message" || row?.kind === "close");
+  const askOwnerRows = rows.filter((row) => row?.kind === "ask_owner");
+  const ownerReplyRows = rows.filter((row) => row?.kind === "owner_reply");
+  const roles = turnRows.map((row) => row?.from || row?.role).filter(Boolean);
   const consecutiveSameRole = roles.some((role, index) => index > 0 && role === roles[index - 1]);
   const heartbeatRows = getRuntimeHeartbeats(finalSnapshot);
   const stoppedRoles = new Set(heartbeatRows.filter((row) => row?.status === "stopped").map((row) => row.role));
@@ -119,6 +167,35 @@ async function main() {
     ? pass(checks, "not_echo_loop", `${uniqueTextCount} unique transcript texts`)
     : fail(checks, "not_echo_loop", `${uniqueTextCount} unique transcript texts`);
 
+  const hostMandates = getMandates(artifact, "host");
+  const budgetCeilingJpy = Number(hostMandates.budget_ceiling_jpy || hostMandates.budget_ceiling || 0);
+  const maxCloseJpy = maxJpyAmount(closeRows);
+  const maxTranscriptJpy = maxJpyAmount(rows);
+  const approvedExcess = ownerReplyApprovesExcess(ownerReplyRows);
+  const mandateBinding = Number.isFinite(budgetCeilingJpy) && budgetCeilingJpy > 0;
+  const closeExceedsMandate = mandateBinding && maxCloseJpy != null && maxCloseJpy > budgetCeilingJpy;
+  const transcriptExceedsMandate = mandateBinding && maxTranscriptJpy != null && maxTranscriptJpy > budgetCeilingJpy;
+
+  if (!mandateBinding) {
+    skip(checks, "mandate_compliance", "no host budget_ceiling_jpy mandate in artifact");
+    skip(checks, "ask_owner_evidence", "no binding mandate requires owner evidence");
+  } else if (closeExceedsMandate && !approvedExcess) {
+    fail(checks, "mandate_compliance", `close max ¥${maxCloseJpy} exceeds host ceiling ¥${budgetCeilingJpy} without owner approval`);
+  } else {
+    pass(checks, "mandate_compliance", `close max ${maxCloseJpy == null ? "n/a" : `¥${maxCloseJpy}`} within host ceiling ¥${budgetCeilingJpy}${approvedExcess ? " or owner-approved" : ""}`);
+  }
+
+  if (mandateBinding) {
+    const requireAskOwner = boolArg(args, "require-ask-owner") || transcriptExceedsMandate;
+    if (!requireAskOwner) {
+      skip(checks, "ask_owner_evidence", "mandate present but no above-ceiling amount observed");
+    } else if (askOwnerRows.length > 0 && ownerReplyRows.length > 0) {
+      pass(checks, "ask_owner_evidence", `${askOwnerRows.length} ask_owner and ${ownerReplyRows.length} owner_reply events`);
+    } else {
+      fail(checks, "ask_owner_evidence", `ask_owner events=${askOwnerRows.length}, owner_reply events=${ownerReplyRows.length}`);
+    }
+  }
+
   const ok = checks.every((check) => check.ok);
   console.log(JSON.stringify({
     ok,
@@ -128,6 +205,12 @@ async function main() {
     message_count: messageRows.length,
     close_count: closeRows.length,
     transcript_source: transcriptSource,
+    mandate: mandateBinding ? {
+      host_budget_ceiling_jpy: budgetCeilingJpy,
+      max_close_jpy: maxCloseJpy,
+      max_transcript_jpy: maxTranscriptJpy,
+      approved_excess: approvedExcess,
+    } : null,
     checks,
   }, null, 2));
 
