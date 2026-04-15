@@ -33,6 +33,7 @@ const POLL_WAIT_SECONDS = 20;
 const HEARTBEAT_MS = 15_000;
 const AGENT_TIMEOUT = 90_000;
 const CHALLENGE_WAIT = 5_000;
+const OWNER_REPLY_TTL_SECONDS = 30 * 60;
 
 function parseArgs(argv) {
   const result = {};
@@ -109,6 +110,50 @@ function idempotencyKey(...parts) {
 function negotiationMessageCount(rows) {
   return rows.filter((row) => row?.kind === "message").length;
 }
+
+function parseMandates(text) {
+  const mandates = {};
+  for (const line of String(text || "").split("\n")) {
+    const match = line.match(/^\s*MANDATE\s*:\s*budget_ceiling_jpy\s*=\s*([0-9][0-9,]*)\s*$/i);
+    if (match) mandates.budget_ceiling_jpy = Number(match[1].replace(/,/g, ""));
+  }
+  return mandates;
+}
+
+function parseJpyAmounts(text) {
+  const source = String(text || "");
+  const amounts = [];
+  const patterns = [
+    /¥\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?\s*(?:JPY|jpy|yen|円|日元)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const value = Number(String(match[1] || "").replace(/,/g, ""));
+      if (!Number.isFinite(value)) continue;
+      amounts.push(Math.round(value * (match[2] ? 1000 : 1)));
+    }
+  }
+  return amounts;
+}
+
+function maxJpyAmount(text) {
+  const amounts = parseJpyAmounts(text);
+  return amounts.length ? Math.max(...amounts) : null;
+}
+
+function ownerReplyApprovesExcess(text) {
+  if (obviousRejection(text)) return false;
+  return /\b(yes|approve|approved|authorize|authorized|ok|okay)\b/i.test(String(text || "")) ||
+    /同意|批准|授权|可以|允许|通过/.test(String(text || ""));
+}
+
+function obviousRejection(text) {
+  return /\b(cannot|can't|do not|don't|not above|reject|rejected|decline|ceiling|above the ceiling|over budget)\b/i.test(String(text || "")) ||
+    /不能|不接受|拒绝|不超过|上限|超预算|超过预算/.test(String(text || ""));
+}
+
+const mandates = parseMandates(ownerCtx);
 
 let bridgeState = {
   cursor: -1,
@@ -189,6 +234,14 @@ async function postMessage(text, key) {
   return relayFetch(`/threads/${threadId}/messages`, {
     method: "POST",
     body: { text },
+    idempotencyKey: key,
+  });
+}
+
+async function postAskOwner(text, key) {
+  return relayFetch(`/threads/${threadId}/ask-owner`, {
+    method: "POST",
+    body: { text, ttl_seconds: OWNER_REPLY_TTL_SECONDS },
     idempotencyKey: key,
   });
 }
@@ -466,6 +519,10 @@ function parseReply(raw) {
     const legacyMatch = lines.map((line) => line.match(/^\s*CLOSE\s*[:：]\s*(.*)$/i)).find(Boolean);
     if (legacyMatch) return { close: true, summary: legacyMatch[1].trim(), marker_inferred: false };
   }
+  const askOwnerMatch = lines.map((line) => line.match(/^\s*ASK[\s_]*OWNER\s*[:：]\s*(.*)$/i)).find(Boolean);
+  if (askOwnerMatch) {
+    return { ask_owner: true, question: askOwnerMatch[1].trim(), marker_inferred: false };
+  }
   const replyMatch = lines.map((line) => line.match(/^\s*REPLY\s*[:：]\s*(.*)$/i)).find(Boolean);
   if (replyMatch) {
     return { close: false, text: replyMatch[1].trim(), marker_inferred: false };
@@ -475,12 +532,17 @@ function parseReply(raw) {
   if (text) {
     bridgeState.unmatched_marker_turns = Number(bridgeState.unmatched_marker_turns || 0) + 1;
     bridgeState.last_marker_inferred_at = new Date().toISOString();
+    if (/\b(owner|approval|permission|authorize|authorized|boss)\b/i.test(text) || /授权|批准|请示|老板|确认/.test(text)) {
+      bridgeState.last_soft_ask_owner_candidate_at = bridgeState.last_marker_inferred_at;
+      bridgeState.soft_ask_owner_candidates = Number(bridgeState.soft_ask_owner_candidates || 0) + 1;
+    }
     persistState();
     writeRuntimeState("running", {
       unmatched_marker_turns: bridgeState.unmatched_marker_turns,
       last_marker_inferred_at: bridgeState.last_marker_inferred_at,
+      soft_ask_owner_candidates: bridgeState.soft_ask_owner_candidates || 0,
     });
-    log(`marker inferred: no REPLY/CLAWROOM_CLOSE marker in agent output; total=${bridgeState.unmatched_marker_turns}`);
+    log(`marker inferred: no REPLY/CLAWROOM_CLOSE/ASK_OWNER marker in agent output; total=${bridgeState.unmatched_marker_turns}`);
   }
   return { close: false, text, marker_inferred: Boolean(text) };
 }
@@ -491,6 +553,7 @@ function openingPrompt() {
     "",
     `Owner context: ${ownerCtx}`,
     `Goal: ${goal}`,
+    mandates.budget_ceiling_jpy ? `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves.` : "",
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     "",
     "Start the conversation with one concrete proposal or the most useful context.",
@@ -507,6 +570,7 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
     firstTurn ? "You are acting for your owner in a private two-agent coordination room." : "",
     firstTurn ? `Owner context: ${ownerCtx}` : "",
     firstTurn ? `Goal: ${goal}` : "",
+    mandates.budget_ceiling_jpy ? `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves. Use ASK_OWNER before exceeding it.` : "",
     minMessages ? `Negotiation messages so far, including the latest received message: ${messageCount}.` : "",
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     minMessages && !canClose ? "You MUST continue with REPLY. Do not close yet." : "",
@@ -519,6 +583,7 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
     "",
     "Return exactly one line, choosing one:",
     "REPLY: <short message under 30 words>",
+    "ASK_OWNER: <short authorization question for your owner>",
     canClose ? "CLAWROOM_CLOSE: <one sentence owner-ready summary>" : "",
   ].filter(Boolean).join("\n");
 }
@@ -539,6 +604,29 @@ function earlyClosePrompt(otherRole, text, summary, messageCount) {
   ].join("\n");
 }
 
+function ownerReplyPrompt(waiting, ownerReplyText, messageCount) {
+  const canClose = !minMessages || messageCount >= minMessages;
+  return [
+    "Your owner has replied to your authorization question.",
+    `Owner context: ${ownerCtx}`,
+    `Goal: ${goal}`,
+    mandates.budget_ceiling_jpy ? `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves.` : "",
+    `Original counterpart message: ${JSON.stringify(waiting.peer_text || "")}`,
+    waiting.attempted_close_summary ? `Your blocked close summary: ${JSON.stringify(waiting.attempted_close_summary)}` : "",
+    waiting.blocked_reply_text ? `Your blocked reply: ${JSON.stringify(waiting.blocked_reply_text)}` : "",
+    `OWNER_REPLY: ${ownerReplyText}`,
+    minMessages ? `Negotiation messages so far: ${messageCount}. Minimum before close: ${minMessages}.` : "",
+    "",
+    "Continue the negotiation according to the owner reply.",
+    "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
+    "",
+    "Return exactly one line, choosing one:",
+    "REPLY: <short message under 30 words>",
+    "ASK_OWNER: <short authorization question for your owner>",
+    canClose ? "CLAWROOM_CLOSE: <one sentence owner-ready summary>" : "",
+  ].filter(Boolean).join("\n");
+}
+
 function resolveTelegramConfig() {
   const botToken = (process.env.TG_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || "").trim();
   const cfg = readJson(openClawPath("openclaw.json"));
@@ -554,7 +642,7 @@ async function telegramNotify(text) {
   const { botToken, chatId } = resolveTelegramConfig();
   if (!botToken || !chatId) {
     log("notify skipped: missing Telegram bot token or chat_id");
-    return false;
+    return { ok: false, message_id: null };
   }
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
@@ -563,8 +651,9 @@ async function telegramNotify(text) {
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Telegram API ${response.status}: ${await response.text()}`);
+  const body = await response.json().catch(() => ({}));
   log(`Telegram delivered to chat_id=...${String(chatId).slice(-4)}`);
-  return true;
+  return { ok: true, message_id: body?.result?.message_id || null };
 }
 
 async function notifyOwnerOnce(key, summary) {
@@ -579,6 +668,132 @@ async function notifyOwnerOnce(key, summary) {
   await telegramNotify(text);
   bridgeState.notified[key] = new Date().toISOString();
   persistState();
+}
+
+function ownerReplyUrl(question) {
+  const url = new URL(`${relayBase}/threads/${threadId}/owner-reply`);
+  url.searchParams.set("token", question.owner_reply_token || "");
+  url.searchParams.set("question_id", question.question_id || "");
+  url.searchParams.set("role", role);
+  url.searchParams.set("text", "REPLACE_WITH_OWNER_DECISION");
+  return url.toString();
+}
+
+function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
+  if (!waiting) return null;
+  const { owner_reply_token, owner_reply_url, ...rest } = waiting;
+  return {
+    ...rest,
+    owner_reply_token: owner_reply_token ? "REDACTED" : "",
+    owner_reply_url: owner_reply_url ? "REDACTED" : "",
+  };
+}
+
+function mandateViolation(text, action) {
+  const ceiling = Number(mandates.budget_ceiling_jpy || 0);
+  if (!ceiling || bridgeState.mandate_approvals?.budget_ceiling_jpy) return null;
+  const amount = maxJpyAmount(text);
+  if (!amount || amount <= ceiling) return null;
+  if (action === "reply" && obviousRejection(text)) return null;
+  return {
+    kind: "budget_ceiling_jpy",
+    ceiling,
+    amount,
+    action,
+  };
+}
+
+function ownerQuestionText(parsed, violation) {
+  if (parsed.ask_owner) return parsed.question;
+  if (violation?.kind === "budget_ceiling_jpy") {
+    return [
+      `The proposed ${violation.action} mentions ${violation.amount} JPY, above your ${violation.ceiling} JPY ceiling.`,
+      "Approve this exception, reject it, or give a counter-instruction.",
+    ].join(" ");
+  }
+  return "Authorization needed before continuing. Please approve, reject, or give a counter-instruction.";
+}
+
+async function notifyOwnerQuestion(question, questionText) {
+  if (notifyKind !== "telegram") {
+    log(`ASK_OWNER notify skipped: unsupported notify kind ${notifyKind}`);
+    return null;
+  }
+  const url = ownerReplyUrl(question);
+  const text = [
+    "ClawRoom authorization needed",
+    `Room: ${threadId}`,
+    `Role: ${role}`,
+    "",
+    questionText,
+    "",
+    "Reply path v0:",
+    "Open or copy this URL, replace REPLACE_WITH_OWNER_DECISION with your decision, and submit:",
+    url,
+    "",
+    "Reply examples: approve; reject; do not go above 65000 JPY; offer extra deliverables instead.",
+  ].join("\n");
+  const delivered = await telegramNotify(text);
+  return {
+    ...delivered,
+    owner_reply_url: url,
+  };
+}
+
+async function enterWaitingOwner(parsed, context = {}) {
+  const violation = context.violation || null;
+  const questionText = ownerQuestionText(parsed, violation);
+  const key = idempotencyKey(
+    "ask-owner",
+    threadId,
+    role,
+    context.peer_message_id || "",
+    sha(questionText),
+  );
+  const question = await postAskOwner(questionText, key);
+  if (question?.id == null || !question.question_id || !question.owner_reply_token) {
+    log(`ASK_OWNER post failed: ${JSON.stringify(question)}`);
+    await maybeHeartbeat("error", true, { last_error: JSON.stringify(question) });
+    return false;
+  }
+
+  setCursor(question.id);
+  const waiting = {
+    question_id: question.question_id,
+    owner_reply_token: question.owner_reply_token,
+    ask_event_id: question.id,
+    asked_at: new Date().toISOString(),
+    expires_at: question.expires_at || null,
+    peer_message_id: context.peer_message_id ?? null,
+    peer_text: context.peer_text || "",
+    attempted_close_summary: context.attempted_close_summary || "",
+    blocked_reply_text: context.blocked_reply_text || "",
+    mandate_violation: violation,
+  };
+  bridgeState.waiting_owner = waiting;
+  persistState();
+
+  try {
+    const delivery = await notifyOwnerQuestion(question, questionText);
+    bridgeState.waiting_owner = {
+      ...bridgeState.waiting_owner,
+      telegram_message_id: delivery?.message_id || null,
+      owner_reply_url: delivery?.owner_reply_url || null,
+      notified_at: new Date().toISOString(),
+    };
+    persistState();
+  } catch (error) {
+    log(`ASK_OWNER notify failed: ${error.message}`);
+    await maybeHeartbeat("waiting_owner", true, {
+      waiting_owner: publicWaitingOwner(waiting),
+      notify_error: error.message,
+    });
+    return true;
+  }
+
+  log(`Waiting for owner reply question_id=${question.question_id}`);
+  await maybeHeartbeat("waiting_owner", true, { waiting_owner: publicWaitingOwner() });
+  return true;
 }
 
 function preflight() {
@@ -608,6 +823,110 @@ async function handlePeerClose(message) {
   const result = await closeThread(summary, key);
   log(`Close acknowledged: ${JSON.stringify({ closed: result?.closed, status: result?._status })}`);
   await maybeHeartbeat("stopped", true, { stop_reason: "peer_close" });
+}
+
+async function handleParsedReply(parsed, context = {}) {
+  if (parsed.ask_owner) {
+    await enterWaitingOwner(parsed, context);
+    return true;
+  }
+
+  const textForGuard = parsed.close ? parsed.summary : parsed.text;
+  const violation = mandateViolation(textForGuard, parsed.close ? "close" : "reply");
+  if (violation) {
+    await enterWaitingOwner(parsed, {
+      ...context,
+      violation,
+      attempted_close_summary: parsed.close ? parsed.summary : "",
+      blocked_reply_text: parsed.close ? "" : parsed.text,
+    });
+    return true;
+  }
+
+  if (parsed.close) {
+    const key = idempotencyKey("close", threadId, role, context.peer_message_id || "", sha(parsed.summary));
+    const result = await closeThread(parsed.summary, key);
+    if (result?.id != null) setCursor(result.id);
+    log(`Closed by ${role}: ${parsed.summary}`);
+    await notifyOwnerOnce(`own-close:${sha(parsed.summary)}`, parsed.summary).catch((error) => {
+      log(`owner notify failed: ${error.message}`);
+    });
+    await maybeHeartbeat("stopped", true, { stop_reason: "own_close" });
+    return false;
+  }
+
+  const text = parsed.text || "";
+  const key = idempotencyKey("reply", threadId, role, context.peer_message_id || "", sha(text));
+  const result = await postMessage(text, key);
+  if (result?.id != null) {
+    setCursor(result.id);
+    log(`Posted (id=${result.id}): ${text}`);
+    return true;
+  }
+  if (result?.error === "not_your_turn") {
+    log(`not_your_turn at last_id=${result.last_id}; refetching`);
+    if (context.peer_message_id != null) setCursor(context.peer_message_id);
+    return true;
+  }
+  if (result?.error === "thread is closed") {
+    log("Thread closed by other side");
+    await maybeHeartbeat("stopped", true, { stop_reason: "thread_closed" });
+    return false;
+  }
+  log(`Post failed: ${JSON.stringify(result)}`);
+  await maybeHeartbeat("error", true, { last_error: JSON.stringify(result) });
+  return true;
+}
+
+async function handleWaitingOwner() {
+  const waiting = bridgeState.waiting_owner;
+  if (!waiting?.question_id) return false;
+
+  await maybeHeartbeat("waiting_owner", false, { waiting_owner: publicWaitingOwner(waiting) });
+  const messages = await getMessages(bridgeState.cursor ?? -1, POLL_WAIT_SECONDS);
+  if (!messages.length) return true;
+
+  for (const message of messages) {
+    if (Number(message.id) <= Number(bridgeState.cursor ?? -1)) continue;
+
+    if (message.kind === "owner_reply" && message.from === role && message.question_id === waiting.question_id) {
+      setCursor(message.id);
+      log(`Owner reply observed for question_id=${waiting.question_id}`);
+      if (ownerReplyApprovesExcess(message.text)) {
+        bridgeState.mandate_approvals ||= {};
+        bridgeState.mandate_approvals.budget_ceiling_jpy = {
+          question_id: waiting.question_id,
+          approved_at: new Date().toISOString(),
+        };
+      }
+      delete bridgeState.waiting_owner;
+      persistState();
+
+      const allMessages = await getMessages(-1, 0);
+      const messageCount = negotiationMessageCount(allMessages);
+      let reply;
+      try {
+        reply = await gatewayCall(ownerReplyPrompt(waiting, message.text, messageCount));
+      } catch (error) {
+        log(`Gateway error after owner reply: ${error.message}`);
+        await maybeHeartbeat("error", true, { last_error: error.message });
+        return true;
+      }
+      const parsed = parseReply(reply);
+      return await handleParsedReply(parsed, {
+        peer_message_id: waiting.peer_message_id,
+        peer_text: waiting.peer_text,
+      });
+    }
+
+    if (message.kind === "close" && message.from !== role) {
+      await handlePeerClose(message);
+      return false;
+    }
+
+    setCursor(message.id);
+  }
+  return true;
 }
 
 async function sendOpeningIfNeeded() {
@@ -650,7 +969,16 @@ async function run() {
   await sendOpeningIfNeeded();
 
   while (true) {
-    await maybeHeartbeat("running");
+    if (bridgeState.waiting_owner?.question_id) {
+      const keepRunning = await handleWaitingOwner();
+      if (!keepRunning) return;
+      continue;
+    }
+
+    await maybeHeartbeat("running", false, {
+      mandates,
+      mandate_approvals: bridgeState.mandate_approvals || {},
+    });
 
     const threadState = await getThreadState().catch((error) => {
       log(`state fetch failed: ${error.message}`);
@@ -680,6 +1008,11 @@ async function run() {
       if (message.kind === "close") {
         await handlePeerClose(message);
         return;
+      }
+
+      if (message.kind === "ask_owner" || message.kind === "owner_reply") {
+        setCursor(message.id);
+        continue;
       }
 
       if (message.from !== otherRole) {
@@ -726,34 +1059,12 @@ async function run() {
           log("early close fallback converted repeated close into REPLY");
         }
       }
-      if (parsed.close) {
-        const key = idempotencyKey("close", threadId, role, message.id, sha(parsed.summary));
-        const result = await closeThread(parsed.summary, key);
-        if (result?.id != null) setCursor(result.id);
-        log(`Closed by ${role}: ${parsed.summary}`);
-        await notifyOwnerOnce(`own-close:${sha(parsed.summary)}`, parsed.summary).catch((error) => {
-          log(`owner notify failed: ${error.message}`);
-        });
-        await maybeHeartbeat("stopped", true, { stop_reason: "own_close" });
+      const keepRunning = await handleParsedReply(parsed, {
+        peer_message_id: message.id,
+        peer_text: message.text,
+      });
+      if (!keepRunning) {
         return;
-      }
-
-      const text = parsed.text;
-      const key = idempotencyKey("reply", threadId, role, message.id, sha(text));
-      const result = await postMessage(text, key);
-      if (result?.id != null) {
-        setCursor(result.id);
-        log(`Posted (id=${result.id}): ${text}`);
-      } else if (result?.error === "not_your_turn") {
-        log(`not_your_turn at last_id=${result.last_id}; refetching`);
-        setCursor(message.id);
-      } else if (result?.error === "thread is closed") {
-        log("Thread closed by other side");
-        await maybeHeartbeat("stopped", true, { stop_reason: "thread_closed" });
-        return;
-      } else {
-        log(`Post failed: ${JSON.stringify(result)}`);
-        await maybeHeartbeat("error", true, { last_error: JSON.stringify(result) });
       }
     }
   }

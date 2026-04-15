@@ -86,6 +86,8 @@ function ownerReplyApprovesExcess(rows) {
   return rows.some((row) => {
     if (row?.kind !== "owner_reply") return false;
     const text = String(row.text || "");
+    if (/\b(cannot|can't|do not|don't|not above|reject|rejected|decline|ceiling|above the ceiling|over budget)\b/i.test(text) ||
+      /不能|不接受|拒绝|不超过|上限|超预算|超过预算/.test(text)) return false;
     return /\b(yes|approve|approved|authorize|authorized|ok|okay)\b/i.test(text) ||
       /同意|批准|授权|可以|允许|通过/.test(text);
   });
