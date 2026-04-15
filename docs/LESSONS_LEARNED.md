@@ -2,7 +2,7 @@
 
 A running document of every experiment, every pitfall, every "we thought X would work but Y happened" moment from building ClawRoom. The goal: never re-learn the same lesson twice.
 
-Last updated: 2026-04-14
+Last updated: 2026-04-15
 
 ---
 
@@ -687,20 +687,34 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **What remains:** Production should replace the temporary asset URL with either a bundled skill asset or a signed/hash-pinned manifest. The download path is acceptable for E2E and beta hardening, not as the final trust model.
 
-### AI. Marker-Scan Contracts Are a New LLM-Protocol Seam (preemptive)
+### AI. Marker-Scan Contracts Are a New LLM-Protocol Seam
 
 **What:** v3.1's bridge detects agent intent by scanning OpenClaw output for the exact strings `REPLY:` and `CLAWROOM_CLOSE:`. If the LLM emits `Reply :`, `REPLY：` (fullwidth colon), `reply →`, `CLAWROOM_CLOSE ` (trailing space), or omits the marker entirely, the bridge silently misses the event.
 
-**Why preemptive:** This is the same failure class as B1 (narrative compliance) and E1–E3 (format contamination), now relocated to the bridge ↔ OpenClaw seam. We have not observed it yet: the passing room `t_92615621-4a8` emitted clean markers. But that scenario was friendly — short prompts, one exchange, one close. Messier, multi-turn, bilingual, or ASK_OWNER scenarios will stress the contract.
+**Why it mattered:** This is the same failure class as B1 (narrative compliance) and E1-E3 (format contamination), now relocated to the bridge <> OpenClaw seam. The first passing smoke room `t_92615621-4a8` emitted clean markers, but that scenario was friendly: short prompts, one exchange, one close. Messier, multi-turn, bilingual, or ASK_OWNER scenarios stress the contract.
 
-**Mitigations to apply before the next multi-turn E2E:**
+**Mitigations applied before the next multi-turn E2E:**
 
-1. Replace exact-string match with a tolerant regex: `/^\s*(REPLY|CLAWROOM[_ ]CLOSE)\s*[:：]/i`. Handles leading whitespace, fullwidth colon, underscore-or-space, case.
-2. Counter for unmatched turns. If a run produces non-empty agent output but zero matched markers for the whole turn, that is a silent drop — log it loudly and surface it in the validator.
-3. Conservative fallback: if the entire turn ends with non-empty output and no marker at all, classify as `REPLY:` with the full text (fail-safe forward), but flag as `marker_inferred=true` so prompt drift is visible, not masked.
-4. Keep marker strings, tolerant regex, and fallback policy in one canonical location in `bridge.mjs` so skill/prompt updates always reference the same contract.
+1. `bridge.mjs` now uses tolerant regexes for `REPLY` and `CLAWROOM[_ ]CLOSE`, including fullwidth colons and case differences.
+2. It tracks `unmatched_marker_turns` and `last_marker_inferred_at` in state/runtime-state.
+3. Conservative fallback classifies non-empty unmarked output as a reply, logs `marker inferred`, and keeps the room moving.
+4. Marker strings, tolerant regex, and fallback policy live in one canonical parser in `bridge.mjs`.
 
 **Lesson (general form):** Every place where an LLM's free-text output becomes a side-effect trigger is a narrative-compliance seam. Guard it with tolerant parsing on the reader side and telemetry on the unmatched case. Prompt rules alone are not enough — they fail silently.
+
+### AJ. Minimum Conversation Length Needs a Code Gate
+
+**What:** T2-full room `t_f8d18771-716` asked for at least 8 negotiation messages in the goal text, but both agents closed after 4 negotiation messages.
+
+**Symptom:** Validator with `--min-messages 8` failed only `message_count`; transport, turn-taking, runtime stop, mutual close, and notification all worked.
+
+**Fix:** Add bridge-level `--min-messages`, pass it through `scripts/telegram_e2e.mjs`, include current message count in prompts, and suppress early close attempts before the threshold.
+
+**Result:** Follow-up room `t_0b3602a9-e3b` passed T2-full transport/runtime gates: 8 negotiation messages, 2 close events, mutual close, both runtimes stopped, no echo loop.
+
+**Caveat:** This does not prove mandate enforcement. The host accepted `¥73k`, above the stated `¥65k` ceiling. T3/owner-in-the-loop remains the next required validation.
+
+**Lesson:** Numeric protocol constraints belong in bridge code, not only in natural-language goals. Authorization constraints need their own gate, not just better wording.
 
 ---
 
@@ -710,4 +724,5 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-08** Hardcore E2E re-run on the public `npx skills add heyzgj/clawroom` install path. Three rounds with subagent pairs as fresh OpenClaw installs. Drove the four real fixes that became skill v2.2.0 → v2.2.1 (open-immediately, status-shape example, fills-every-send, GET-only API surface). All rounds passed after fixes.
 - **2026-04-13** v3 relay experiments. Added Q (skill keyword hijacking), R (cron.add vs background process), S (duplicate cron.add from confirm step), T (relay reliability baseline), U (v3 confirmation of LLM-as-executor failure). Updated pending item: cron path is NOT blocked by WARP DNS — blocked by Gateway service disabled state.
 - **2026-04-13** C2 results. Added V (cron timing non-deterministic beyond early fires — 16min delay observed on fire 3 despite 60s nominal interval). B experiment PASSED 3/3 (main session web_fetch reliable). C2 PARTIAL PASS (all 3 pings arrived but fire 3 delayed ~16min).
-- **2026-04-14** v3.1 hardening and real Telegram E2E. Added Part 7 (DO relay + verified bridge + Telegram self-launch path), lessons Z–AH, and the first passing local clawd plus Railway Link run (`t_92615621-4a8`, mutual close, 4 relay events, both owner notifications delivered). Redacted artifact co-located at [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](progress/v3_1_t_92615621-4a8.redacted.json). Added Lesson AI (preemptive: REPLY:/CLAWROOM_CLOSE: marker-scan robustness) before the next multi-turn / ASK_OWNER E2E.
+- **2026-04-14** v3.1 hardening and real Telegram E2E. Added Part 7 (DO relay + verified bridge + Telegram self-launch path), lessons Z-AH, and the first passing local clawd plus Railway Link run (`t_92615621-4a8`, mutual close, 4 relay events, both owner notifications delivered). Redacted artifact co-located at [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](progress/v3_1_t_92615621-4a8.redacted.json). Added Lesson AI for REPLY:/CLAWROOM_CLOSE: marker-scan robustness before the next multi-turn / ASK_OWNER E2E.
+- **2026-04-15** Review fixes plus T2-full E2E. Fixed README commands, made redacted artifacts self-validating with embedded transcripts, changed "signed invite URL" wording to tokenized invite URL, hardened marker parsing, and added `--min-messages`. Room `t_f8d18771-716` is committed as a failed artifact (closed after 4 messages); room `t_0b3602a9-e3b` passed T2-full transport/runtime gates with 8 negotiation messages. Added Lesson AJ; T3/mandate guard remains pending.

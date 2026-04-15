@@ -7,9 +7,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 function parseArgs(argv) {
-  const result = {};
+  const result = { _: [] };
   for (let i = 0; i < argv.length; i++) {
-    if (!argv[i].startsWith("--")) continue;
+    if (!argv[i].startsWith("--")) {
+      result._.push(argv[i]);
+      continue;
+    }
     const key = argv[i].slice(2);
     const value = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true;
     result[key] = value;
@@ -45,7 +48,7 @@ function getRuntimeHeartbeats(snapshot) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const artifactPath = args.artifact ? resolve(String(args.artifact)) : "";
+  const artifactPath = args.artifact ? resolve(String(args.artifact)) : (args._[0] ? resolve(String(args._[0])) : "");
   if (!artifactPath) throw new Error("Usage: node scripts/validate_e2e_artifact.mjs --artifact <path>");
 
   const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
@@ -55,12 +58,21 @@ async function main() {
   const finalSnapshot = artifact.finalSnapshot || artifact.snapshot || {};
   const checks = [];
 
-  if (!relay || !threadId || !hostToken) {
-    throw new Error("Artifact is missing relay, thread id, or host token.");
+  if (!relay || !threadId) {
+    throw new Error("Artifact is missing relay or thread id.");
   }
 
-  const messages = await fetchJson(`${relay}/threads/${threadId}/msgs?token=${encodeURIComponent(hostToken)}&after=-1`);
-  const rows = Array.isArray(messages) ? messages : messages.messages || messages.events || [];
+  const embeddedRows = Array.isArray(artifact.transcript) ? artifact.transcript : [];
+  let transcriptSource = "embedded";
+  let rows = embeddedRows;
+  if (hostToken && hostToken !== "REDACTED") {
+    const messages = await fetchJson(`${relay}/threads/${threadId}/msgs?token=${encodeURIComponent(hostToken)}&after=-1`);
+    rows = Array.isArray(messages) ? messages : messages.messages || messages.events || [];
+    transcriptSource = "relay";
+  } else if (!embeddedRows.length) {
+    throw new Error("Artifact has a redacted/missing host token and no embedded transcript.");
+  }
+
   const closeRows = rows.filter((row) => row?.kind === "close");
   const messageRows = rows.filter((row) => row?.kind === "message");
   const roles = rows.map((row) => row?.from || row?.role).filter(Boolean);
@@ -115,6 +127,7 @@ async function main() {
     turn_count: rows.length,
     message_count: messageRows.length,
     close_count: closeRows.length,
+    transcript_source: transcriptSource,
     checks,
   }, null, 2));
 

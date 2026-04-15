@@ -26,7 +26,7 @@ different people to meet in a single-purpose bounded room, negotiate or
 coordinate to a named outcome, and return a structured result plus a
 natural-language summary to each owner. Owner-in-the-loop for any
 authorization decision. Zero install required on the invited (guest)
-side — the entire viral loop rides on one signed HTTP URL.
+side — the entire viral loop rides on one tokenized HTTP invite URL.
 
 Differentiator (only product doing all four at once): **cross-owner +
 structured terminal outcome + owner-in-the-loop + reliable bounded
@@ -90,7 +90,7 @@ OpenClaw `deliver` (Lesson F2 risks notification-as-instruction).
 | 2026-04-11 | Three commits attempting to fix the nudge problem via `cron.add` (`0b0fdd8`, `175545f`, `7d50cec`). Well-intentioned but architecturally a band-aid for the missing runnerd. |
 | 2026-04-12 | Strategic rethink. Adopted "thin server + smart agent" principle: every failure in Part 1 came from the server trying to understand the conversation (intents, fills, continuation). Stop doing that. Let server be a mailbox. |
 | 2026-04-13/14 | v3.1 built under `~/Desktop/project/clawroom-v3/`. DO relay, verified launcher, bridge, Railway ops fixes (OPENCLAW_STATE_DIR, gateway client id, dedicated agent workspace, Telegram owner binding). Four E2E iterations: `t_a3c4d16f-959`, `t_f252d5a3-048`, `t_5eac03b0-942`, then passing `t_92615621-4a8`. Part 7 and lessons Z-AH written. |
-| 2026-04-14 evening | Commit `a0c3616` in agent-chat: Part 7 + Lessons Z-AH already lived in LESSONS_LEARNED.md; added Lesson AI (preemptive: marker-scan tolerance), redacted artifact `v3_1_t_92615621-4a8.redacted.json`, and README pointer to `../clawroom-v3/`. |
+| 2026-04-14 evening | Commit `a0c3616` in agent-chat: Part 7 + Lessons Z-AH already lived in LESSONS_LEARNED.md; added Lesson AI for marker-scan tolerance, redacted artifact `v3_1_t_92615621-4a8.redacted.json`, and README pointer to `../clawroom-v3/`. |
 | 2026-04-15 | Folder `clawroom-v3/` renamed to `clawroom/`. Migration executed: 6 docs copied from agent-chat (byte-verified), landing design + mockup moved under `docs/design/`, new top-level docs written (MIGRATION.md, CLAUDE.md v3-first, README.md v3-first). Initial commit `499be97` in clawroom. Project memory updated to record the migration. |
 
 ---
@@ -137,10 +137,10 @@ OpenClaw `deliver` (Lesson F2 risks notification-as-instruction).
 | T5 — mutual_close | ✅ | same |
 | Cross-machine (macOS × Railway Linux) | ✅ | host PID 61589, guest PID 250, both heartbeats stopped |
 | Direct Telegram Bot API notification | ✅ | both owners' DMs delivered at close |
-| T2 — multi-turn negotiation | partial | only 1 exchange (2 messages + 2 closes) on passing run |
+| T2 — multi-turn negotiation | ✅ transport/runtime | room `t_0b3602a9-e3b`, 8 negotiation messages + 2 closes |
 | T3 — ASK_OWNER round-trip | ❌ | not yet tested on v3.1 stack |
 | T4 — webhook push | ruled out | Lesson H; replaced by long-poll |
-| S1-class bilingual adversarial | ❌ | only proven via subagent+curl (pre-v3), not via bridge |
+| Mandate/authorization guard | ❌ | `t_0b3602a9-e3b` exceeded host ceiling; T3 remains required |
 
 ---
 
@@ -158,9 +158,9 @@ Scenario shape (example — refine as you design the test):
   propose up to ¥80k to secure the deal."
 - **Expected chain**: host opens → guest proposes ¥60k → host bridge
   triggers Telegram Bot API notification to host owner asking "Tom wants
-  ¥60k, OK?" → host owner replies (via signed URL or whatever v3 owner-
-  reply surface exists — if one doesn't, this test DOUBLES as a chance to
-  build it cleanly) → host bridge observes reply → continues negotiation
+  ¥60k, OK?" → host owner replies (via the v3 owner-reply surface; if one
+  doesn't exist, this test DOUBLES as a chance to build it cleanly) →
+  host bridge observes reply → continues negotiation
   → eventually mutual_close.
 
 **Pass criteria**:
@@ -208,11 +208,12 @@ Every E2E run you perform produces THREE committed artifacts in
    from `~/.clawroom-v3/e2e/<room_id>.json`, replace `host_token`,
    `guest_token`, `invite_url` token segment, and any Telegram chat id
    with `REDACTED`. Keep bot handles (they're public). Keep PIDs,
-   timestamps, summary text, heartbeats. Add a `_redaction_notice`
-   preamble and a `coverage_note` tail naming which T's this run proves.
+   timestamps, summary text, heartbeats, and a redacted `transcript`
+   array with `id/from/kind/text/ts`. Add a `_redaction_notice` preamble
+   and a `coverage_note` tail naming which T's this run proves.
 
 2. **Lesson entry** in `docs/LESSONS_LEARNED.md`. Next free letter as of
-   this handoff: **AJ**. Format per Z-AH: `### <letter>. <Title>` /
+   this handoff update: **AK**. Format per Z-AJ: `### <letter>. <Title>` /
    `**What:**` / `**Source check:**` or `**Why preemptive:**` (if
    applicable) / `**Symptom:**` (if a bug) / `**Fix:**` / `**Lesson:**`.
    Keep it under 30 lines.
@@ -256,7 +257,8 @@ Pin these in your context before executing any E2E:
   relay heartbeat, log path) before success.
 - **Oracle is state, not UX** (Lesson AG): validator output is the gate.
 - **Marker scan tolerant** (Lesson AI): regex not exact match,
-  unmatched-turn counter, conservative fallback. Harden before T3.
+  unmatched-turn counter, conservative fallback. Already hardened before
+  T2-full; keep it in place before T3.
 - **SSH diagnostic only** (Lesson AA): if your "passing" E2E started the
   bridge via SSH, it does not count as a passing E2E.
 - **railway run is local** (Lesson Z): runs locally with Railway env
@@ -285,8 +287,8 @@ Pin these in your context before executing any E2E:
 
 ## 10. Open questions (not blockers, worth flagging when relevant)
 
-- Tolerant marker scan — does it prevent the drift pattern? No evidence
-  either way yet; that's exactly why Lesson AI is preemptive.
+- Tolerant marker scan — T2-full passed with bilingual content after
+  hardening, but no unmatched-marker fallback was observed yet.
 - Does T3 work at all given Lesson F2 (notification-as-instruction)?
   Direct Bot API is designed to avoid it, but T3 is the first end-to-end
   validation.
@@ -307,11 +309,11 @@ Pin these in your context before executing any E2E:
 Answer these to confirm you're oriented:
 
 1. Which repo is canonical? (`~/Desktop/project/clawroom/`)
-2. What's the last passing E2E room id? (`t_92615621-4a8`)
+2. What's the last passing E2E room id? (`t_0b3602a9-e3b`; first smoke pass was `t_92615621-4a8`)
 3. Where do E2E artifacts go? (`clawroom/docs/progress/`, redacted)
 4. Which OpenClaw agent runs the bridge? (`clawroom-relay`, not `main`)
 5. Why is there no webhook push? (Lesson H: gateway loopback-only)
-6. What's the next free lesson letter? (AJ)
+6. What's the next free lesson letter? (AK)
 7. What's the difference between "validator passed" and "Telegram looks
    good"? (The former is evidence; the latter is not — Lesson AG)
 

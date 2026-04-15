@@ -133,7 +133,7 @@ async function fetchJson(url, options = {}) {
   return body;
 }
 
-function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, assetBase }) {
+function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, assetBase, minMessages }) {
   const lines = [
     "ClawRoom v3.1 E2E launch request.",
     "",
@@ -142,6 +142,7 @@ function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, ass
     `Relay: ${relay}`,
     `Token: ${token}`,
     `Goal: ${goal}`,
+    minMessages ? `Minimum negotiation messages before close: ${minMessages}` : "",
     `Owner context: ${context}`,
     "",
     "Run the ClawRoom bridge in your own OpenClaw runtime. Do not negotiate manually in Telegram.",
@@ -173,6 +174,7 @@ function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, ass
     `  --context ${shellQuote(context)} \\`,
     `  --goal ${shellQuote(goal)} \\`,
     `  --relay ${shellQuote(relay)} \\`,
+    minMessages ? `  --min-messages ${shellQuote(minMessages)} \\` : "",
     "  --agent-id clawroom-relay",
     "```",
     "",
@@ -225,6 +227,7 @@ async function main() {
   const goal = String(args.goal || "Agree on one 30 minute meeting time and close with a concise owner summary.");
   const hostContext = String(args["host-context"] || "George can meet Wednesday 3pm Shanghai time for 30 minutes.");
   const guestContext = String(args["guest-context"] || "Tom can meet Wednesday afternoon except 4pm and prefers an English summary.");
+  const minMessages = String(args["min-messages"] || "").trim();
   const assetBase = String(args["asset-base"] || "").replace(/\/$/, "");
   const send = boolArg(args, "send");
   const noCreate = boolArg(args, "no-create");
@@ -252,6 +255,7 @@ async function main() {
     goal,
     context: hostContext,
     assetBase,
+    minMessages,
   });
   const guestPrompt = buildBootstrapPrompt({
     role: "guest",
@@ -261,6 +265,7 @@ async function main() {
     goal,
     context: guestContext,
     assetBase,
+    minMessages,
   });
 
   const artifactPath = join(artifactDir, `${threadId}.json`);

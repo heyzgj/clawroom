@@ -53,6 +53,7 @@ const token = String(args.token || "");
 const role = String(args.role || "");
 const ownerCtx = String(args.context || "");
 const goal = String(args.goal || "");
+const minMessages = Math.max(0, Number(args["min-messages"] || process.env.CLAWROOM_MIN_MESSAGES || 0) || 0);
 const agentId = String(args["agent-id"] || process.env.CLAWROOM_AGENT_ID || "clawroom-relay");
 const sessionKey = String(args["session-key"] || `agent:${agentId}:clawroom:${threadId}:${role}`);
 const openClawStateDir = resolve(String(process.env.OPENCLAW_STATE_DIR || join(homedir(), ".openclaw")));
@@ -103,6 +104,10 @@ function sha(value) {
 
 function idempotencyKey(...parts) {
   return parts.map((part) => String(part).replace(/[^a-zA-Z0-9_.:-]/g, "_")).join(":").slice(0, 180);
+}
+
+function negotiationMessageCount(rows) {
+  return rows.filter((row) => row?.kind === "message").length;
 }
 
 let bridgeState = {
@@ -453,19 +458,31 @@ async function gatewayCall(message) {
 
 function parseReply(raw) {
   const lines = String(raw || "").split("\n").map((line) => line.trim()).filter(Boolean);
-  const closeLine = lines.find((line) => line.toUpperCase().startsWith("CLAWROOM_CLOSE:"));
-  if (closeLine) {
-    return { close: true, summary: closeLine.slice(closeLine.indexOf(":") + 1).trim() };
+  const closeMatch = lines.map((line) => line.match(/^\s*CLAWROOM[\s_]*CLOSE\s*[:：]\s*(.*)$/i)).find(Boolean);
+  if (closeMatch) {
+    return { close: true, summary: closeMatch[1].trim(), marker_inferred: false };
   }
   if (process.env.CLAWROOM_ALLOW_LEGACY_CLOSE === "true") {
-    const legacy = lines.find((line) => line.toUpperCase().startsWith("CLOSE:"));
-    if (legacy) return { close: true, summary: legacy.slice(legacy.indexOf(":") + 1).trim() };
+    const legacyMatch = lines.map((line) => line.match(/^\s*CLOSE\s*[:：]\s*(.*)$/i)).find(Boolean);
+    if (legacyMatch) return { close: true, summary: legacyMatch[1].trim(), marker_inferred: false };
   }
-  const replyLine = lines.find((line) => line.toUpperCase().startsWith("REPLY:"));
-  if (replyLine) {
-    return { close: false, text: replyLine.slice(replyLine.indexOf(":") + 1).trim() };
+  const replyMatch = lines.map((line) => line.match(/^\s*REPLY\s*[:：]\s*(.*)$/i)).find(Boolean);
+  if (replyMatch) {
+    return { close: false, text: replyMatch[1].trim(), marker_inferred: false };
   }
-  return { close: false, text: lines[0] || String(raw || "").trim() };
+
+  const text = lines[0] || String(raw || "").trim();
+  if (text) {
+    bridgeState.unmatched_marker_turns = Number(bridgeState.unmatched_marker_turns || 0) + 1;
+    bridgeState.last_marker_inferred_at = new Date().toISOString();
+    persistState();
+    writeRuntimeState("running", {
+      unmatched_marker_turns: bridgeState.unmatched_marker_turns,
+      last_marker_inferred_at: bridgeState.last_marker_inferred_at,
+    });
+    log(`marker inferred: no REPLY/CLAWROOM_CLOSE marker in agent output; total=${bridgeState.unmatched_marker_turns}`);
+  }
+  return { close: false, text, marker_inferred: Boolean(text) };
 }
 
 function openingPrompt() {
@@ -474,6 +491,7 @@ function openingPrompt() {
     "",
     `Owner context: ${ownerCtx}`,
     `Goal: ${goal}`,
+    minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     "",
     "Start the conversation with one concrete proposal or the most useful context.",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
@@ -483,22 +501,42 @@ function openingPrompt() {
   ].join("\n");
 }
 
-function replyPrompt(otherRole, text, firstTurn) {
+function replyPrompt(otherRole, text, firstTurn, messageCount) {
+  const canClose = !minMessages || messageCount >= minMessages;
   return [
     firstTurn ? "You are acting for your owner in a private two-agent coordination room." : "",
     firstTurn ? `Owner context: ${ownerCtx}` : "",
     firstTurn ? `Goal: ${goal}` : "",
+    minMessages ? `Negotiation messages so far, including the latest received message: ${messageCount}.` : "",
+    minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
+    minMessages && !canClose ? "You MUST continue with REPLY. Do not close yet." : "",
     firstTurn ? "" : "",
     `The other agent (${otherRole}) says: ${JSON.stringify(text)}`,
     "",
     "Reply with one concise message that moves toward the goal.",
-    "If the agreement is clear and ready to report to your owner, close instead.",
+    canClose ? "If the agreement is clear and ready to report to your owner, close instead." : "Do not close yet; ask a useful question, make a counteroffer, or confirm one missing detail.",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
     "",
     "Return exactly one line, choosing one:",
     "REPLY: <short message under 30 words>",
-    "CLAWROOM_CLOSE: <one sentence owner-ready summary>",
+    canClose ? "CLAWROOM_CLOSE: <one sentence owner-ready summary>" : "",
   ].filter(Boolean).join("\n");
+}
+
+function earlyClosePrompt(otherRole, text, summary, messageCount) {
+  return [
+    "You attempted to close the room before the minimum negotiation length.",
+    `Negotiation messages so far: ${messageCount}.`,
+    `Minimum negotiation messages before close: ${minMessages}.`,
+    `The other agent (${otherRole}) last said: ${JSON.stringify(text)}`,
+    `Your premature close summary was: ${JSON.stringify(summary)}`,
+    "",
+    "Continue the negotiation with one substantive question, counteroffer, or missing-detail confirmation.",
+    "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
+    "",
+    "Return exactly one line:",
+    "REPLY: <short message under 30 words>",
+  ].join("\n");
 }
 
 function resolveTelegramConfig() {
@@ -651,8 +689,10 @@ async function run() {
 
       log(`New from ${otherRole} (id=${message.id}): ${message.text}`);
       let reply;
+      const allMessages = await getMessages(-1, 0);
+      const messageCount = negotiationMessageCount(allMessages);
       try {
-        reply = await gatewayCall(replyPrompt(otherRole, message.text, includeContext));
+        reply = await gatewayCall(replyPrompt(otherRole, message.text, includeContext, messageCount));
         includeContext = false;
       } catch (error) {
         log(`Gateway error: ${error.message}`);
@@ -660,7 +700,32 @@ async function run() {
         continue;
       }
 
-      const parsed = parseReply(reply);
+      let parsed = parseReply(reply);
+      if (parsed.close && minMessages && messageCount < minMessages) {
+        bridgeState.early_close_suppressed = Number(bridgeState.early_close_suppressed || 0) + 1;
+        persistState();
+        await maybeHeartbeat("running", true, {
+          early_close_suppressed: bridgeState.early_close_suppressed,
+          message_count: messageCount,
+          min_messages: minMessages,
+        });
+        log(`early close suppressed at message_count=${messageCount}; min_messages=${minMessages}`);
+        try {
+          parsed = parseReply(await gatewayCall(earlyClosePrompt(otherRole, message.text, parsed.summary, messageCount)));
+        } catch (error) {
+          log(`Gateway error after early-close suppression: ${error.message}`);
+          await maybeHeartbeat("error", true, { last_error: error.message });
+          continue;
+        }
+        if (parsed.close) {
+          parsed = {
+            close: false,
+            text: "Before we close, let's confirm one more detail on scope, payment, usage rights, or approval.",
+            marker_inferred: true,
+          };
+          log("early close fallback converted repeated close into REPLY");
+        }
+      }
       if (parsed.close) {
         const key = idempotencyKey("close", threadId, role, message.id, sha(parsed.summary));
         const result = await closeThread(parsed.summary, key);

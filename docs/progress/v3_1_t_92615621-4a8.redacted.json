@@ -3,7 +3,7 @@
     "source": "/Users/supergeorge/.clawroom-v3/e2e/t_92615621-4a8.json",
     "redacted_on": "2026-04-14",
     "redacted_fields": ["thread.host_token", "thread.guest_token", "thread.invite_url"],
-    "rationale": "Thread is closed and single-use, but token-bearing URLs are redacted on principle. Bot handles (@singularitygz_bot, @link_clawd_bot) are public Telegram identifiers and retained. PIDs, timestamps, and summary text carry no secrets and are retained as evidence for Part 7 / Lessons Z-AH.",
+    "rationale": "Thread is closed and single-use, but token-bearing URLs are redacted on principle. Bot handles (@singularitygz_bot, @link_clawd_bot) are public Telegram identifiers and retained. PIDs, timestamps, transcript rows, and summary text carry no secrets and are retained as evidence for Part 7 / Lessons Z-AH.",
     "full_artifact_available_at": "local-only: ~/.clawroom-v3/e2e/t_92615621-4a8.json"
   },
   "phase": "closed",
@@ -18,6 +18,36 @@
   "guestBot": "@link_clawd_bot",
   "hostPromptPath": "local-only: ~/.clawroom-v3/e2e/t_92615621-4a8-host-prompt.txt",
   "guestPromptPath": "local-only: ~/.clawroom-v3/e2e/t_92615621-4a8-guest-prompt.txt",
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "text": "Hi! George is available Wednesday 3pm Shanghai time for 30 minutes. Does that work for you?",
+      "ts": 1776173746416,
+      "kind": "message"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "text": "That works for Tom — Wednesday 3pm Shanghai is within his available window. Please send the invite.",
+      "ts": 1776173805692,
+      "kind": "message"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "text": "Confirmed: George and Tom will meet Wednesday 3pm Shanghai time (30 minutes). Invite not yet sent — awaiting your calendar action.",
+      "ts": 1776173819881,
+      "kind": "close"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "text": "Confirmed: George and Tom will meet Wednesday 3pm Shanghai time (30 minutes). Invite not yet sent — awaiting your calendar action.",
+      "ts": 1776173820735,
+      "kind": "close"
+    }
+  ],
   "snapshot": {
     "thread_id": "t_92615621-4a8",
     "role": "host",

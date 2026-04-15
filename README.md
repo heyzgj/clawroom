@@ -7,20 +7,21 @@ and an OpenClaw skill — enough to let an invited agent join by URL alone.
 
 ## Status
 
-v3.1 hardening branch. First real cross-machine Telegram E2E passed on
-2026-04-14 (local clawd × Railway-hosted Link Telegram bots, mutual close,
-both owner notifications delivered).
+v3.1 hardening branch. First real cross-machine Telegram smoke E2E passed
+on 2026-04-14 (local clawd × Railway-hosted Link Telegram bots, mutual
+close, both owner notifications delivered). T2-full multi-turn transport
+E2E passed on 2026-04-15 with 8 negotiation messages.
 
 Pending validation before v3.1 is promoted to canonical production:
 
 - **T3**: ASK_OWNER round-trip (agent pauses, notifies owner, receives
-  reply via signed URL, resumes)
-- **T2-full**: one S1-class multi-turn negotiation (8+ turns, bilingual
-  allowed, non-trivial content)
+  reply through the v3 owner-reply surface, resumes)
+- **Mandate guard**: owner authorization ceiling is enforced before close
 
 See [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) Part 7 for the
 full E2E write-up and [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](docs/progress/v3_1_t_92615621-4a8.redacted.json)
-for the evidence artifact.
+for the first smoke evidence artifact. The T2-full passing artifact is
+[`docs/progress/v3_1_t_0b3602a9-e3b.redacted.json`](docs/progress/v3_1_t_0b3602a9-e3b.redacted.json).
 
 ## Architecture
 
@@ -79,18 +80,20 @@ You need:
 # 1. Deploy the relay
 cd relay
 npm install && npx wrangler deploy
+cd ..
 
 # 2. Ensure both OpenClaw runtimes have:
-#    - Node 18+ with built-in fetch and WebSocket
+#    - Node 22.4+ with stable built-in WebSocket
 #    - Writable workspace for the `clawroom-relay` dedicated agent
 #    - OPENCLAW_STATE_DIR correctly set (Railway uses /data/.openclaw)
+node -p "process.version + ' ' + typeof WebSocket"
 node scripts/fix_railway_clawroom_agent.mjs   # optional helper
 
 # 3. Drive an E2E through Telegram Desktop
 node scripts/telegram_e2e.mjs
 
 # 4. Validate the resulting artifact
-node scripts/validate_e2e_artifact.mjs ~/.clawroom-v3/e2e/<room_id>.json
+node scripts/validate_e2e_artifact.mjs --artifact ~/.clawroom-v3/e2e/<room_id>.json
 ```
 
 Full runbook: [`docs/REAL_TELEGRAM_E2E.md`](docs/REAL_TELEGRAM_E2E.md).
@@ -121,7 +124,7 @@ Full runbook: [`docs/REAL_TELEGRAM_E2E.md`](docs/REAL_TELEGRAM_E2E.md).
 ## Background reading
 
 - [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) — every failure
-  mode we hit, every fix that stuck. Parts 1–7, lessons A through AI.
+  mode we hit, every fix that stuck. Parts 1–7, lessons A through AJ.
   Non-optional reading before touching relay / bridge / launcher code.
 - [`docs/blog/concurrent-tool-call-contamination.md`](docs/blog/concurrent-tool-call-contamination.md)
   — the silent CLI bug that took us weeks to find, and why the bridge
