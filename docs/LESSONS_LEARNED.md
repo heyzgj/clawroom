@@ -744,6 +744,32 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Lesson:** ASK_OWNER is not just a protocol event. It is a human interruption. The passing criterion must include a real Telegram reply from the owner account with `source: telegram_inbound`, and the fallback behavior must be explicit when the owner does nothing.
 
+### AM. Version Strings Are Not Enough for Runtime Assets
+
+**What:** The average-user product-path E2E uncovered a split-brain bridge install. Local clawd launched `/private/tmp/clawroom-v3/bridge.mjs`, which still reported `v3.1.0` but did not contain the Telegram ASK_OWNER binding writer. Railway Link had a newer path, so Tom-side `owner_reply` was `source: telegram_inbound`, while George-side reply fell back through the main agent and was POSTed without `source`.
+
+**Symptom:** Room `t_93dc5ede-d2d` reached both owner loops and closed, but the host-side `owner_reply` text was rewritten in English and lacked `source: telegram_inbound`. The bridge log also lacked `ASK_OWNER Telegram binding written`.
+
+**Fix:** The launcher now refuses a bridge missing required feature markers, starting with `telegram-ask-owner-bindings`, and reports `bridge_sha256` plus `required_features` in launch JSON. `bridge.mjs` writes `bridge_features` into runtime-state. `SKILL.md` and the Telegram E2E bootstrap prompt now pass `--require-features telegram-ask-owner-bindings`.
+
+**Operational fix:** Updated the downloadable gist bundle used by `/tmp/clawroom-v3` installs so new self-launched runtimes fetch the feature-gated launcher and bridge.
+
+**Lesson:** A runtime asset can be stale while its semantic version still looks current. Product E2E must verify capabilities, not just `bridge_version`.
+
+### AN. Relay Network Calls Need Retry Because Idempotency Already Exists
+
+**What:** Room `t_cf09a77b-543` proved host-side Telegram inbound owner reply, then the host bridge crashed on a transient TLS `ECONNRESET` while posting the next relay event.
+
+**Why it mattered:** The relay POST paths already use idempotency keys. Without network retry, the system paid the complexity cost of idempotency but still died on a one-off socket reset.
+
+**Fix:** `bridge.mjs` now retries relay fetches, including mutating calls, with the same idempotency key. The recovered room resumed from cursor after restart, posted no duplicate messages, and reached mutual close.
+
+**Clean result:** Follow-up room `t_867a3a94-479` passed the full average-user product path without operator restart: Telegram create-room request, Telegram invite handoff to Railway Link, above-ceiling ASK_OWNER, ForceReply owner approval with `source: telegram_inbound`, mutual close, and both runtimes stopped. Redacted artifact: [`docs/progress/v3_1_t_867a3a94-479.strict-t3-clean.redacted.json`](progress/v3_1_t_867a3a94-479.strict-t3-clean.redacted.json).
+
+**Validator fix:** The validator now treats Chinese `接受` as approval, in addition to `同意` / `批准` / `授权` / `可以` / `允许` / `通过`.
+
+**Lesson:** Idempotency without retry is a half-built safety net. Once writes are idempotent, retry transient relay/network failures by default and make the validator bilingual for owner approvals.
+
 ---
 
 ## Updates Log
@@ -757,3 +783,4 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-15** T3 v0 mandate guard E2E. Added owner-reply protocol, relay control events, ASK_OWNER/mandate intercept in bridge, and auto owner-reply E2E harness support. Room `t_1f72571a-3f4` failed because a mutating GET owner-reply URL was consumed with placeholder text; fix made owner replies POST-only. Room `t_fb3fda2d-563` then passed T3 v0 with ASK_OWNER, concrete owner_reply, close at `¥65,000`, and both runtimes stopped. Added Lesson AK.
 - **2026-04-15** Strict T3 v1 average-user E2E attempt. Room `t_e5f0c995-23e` reached ASK_OWNER on real local + Railway bridges and wrote the Telegram binding, but no human Telegram reply entered OpenClaw inbound before timeout. Committed a failed redacted artifact and hardened bridge owner UX with ForceReply plus `owner_reply_timeout`. Added Lesson AL.
 - **2026-04-16** Strict T3 v1 average-user E2E passed. Room `t_2fbfc1f7-f66` used real Telegram Desktop ForceReply input; owner reply landed as `source: telegram_inbound`; room closed with 8 events, 4 negotiation messages, 2 close events, and both runtimes stopped. Added redacted artifact and cropped Telegram screenshot evidence.
+- **2026-04-16** Average-user product-path E2E hardening. Room `t_fc9adb58-da7` passed Telegram bootstrap smoke but did not trigger ASK_OWNER. Room `t_93dc5ede-d2d` exposed stale local `/tmp` bridge assets. Added launcher feature gates, bridge feature telemetry, relay fetch retries, updated the downloadable gist bundle, and fixed validator Chinese approval detection. Room `t_cf09a77b-543` is a recovered pass after retry patch/restart. Room `t_867a3a94-479` is the clean product-path T3 pass with `source: telegram_inbound`, above-ceiling approval, mutual close, and both runtimes stopped. Added Lessons AM-AN.

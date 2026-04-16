@@ -1,0 +1,231 @@
+{
+  "phase": "closed_clean",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_867a3a94-479",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/threads/t_867a3a94-479/join?token=REDACTED"
+  },
+  "hostBot": "@singularitygz_bot",
+  "guestBot": "@link_clawd_bot",
+  "scenario": "Clean strict T3 average-user Telegram E2E after stale-cache and relay-retry fixes. George asked clawd to create a new room in Telegram, Codex forwarded the invite and Tom floor instruction to Link in Telegram, George approved the above-ceiling ask through Telegram ForceReply, and both bridges closed without operator restart.",
+  "owner_contexts": {
+    "host": {
+      "mandates": {
+        "budget_ceiling_jpy": 65000
+      }
+    },
+    "guest": {
+      "floor_jpy": 75000
+    }
+  },
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "text": "Bilibili品牌赞助提案：¥65,000含5期原创视频（各60秒）+社媒切片3条+直播露出权益，包后期制作，交付前品牌方审核，款项分签约/交付/尾款三阶段，素材商用权归品牌方1年。",
+      "ts": 1776350292778,
+      "kind": "message"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "text": "¥75,000是我们的价格底线。可确认：2条短视¥频+1小时B站直播，45天商用权，保留最终剪辑审批权，款50%预付+50%交付后结清。您提到的5视频+3切片方案若能调整为本方参数，可进一步详谈。",
+      "ts": 1776350407256,
+      "kind": "message"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "text": "能否将2视频升级为3视频+增加30秒竖版切片3条，商用权45天，报价维持¥65,000？若不行，请告知最低可接受价格。",
+      "ts": 1776350432993,
+      "kind": "message"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "text": "¥75,000底线可接受，但需含1小时B站直播。您的3视频+3竖版切片方案可纳入，总价¥75,000含直播，45天商用权，款50%预付+50%交付后结清，可接受吗？",
+      "ts": 1776350451902,
+      "kind": "message"
+    },
+    {
+      "id": 4,
+      "from": "host",
+      "text": "对方最终报价¥75,000（超预算¥65,000），含3视频+3切片+1小时直播，45天商用权，50%预付+50%尾款。请确认是否接受或指示还价？",
+      "ts": 1776350469350,
+      "kind": "ask_owner",
+      "question_id": "q_592225e4-430",
+      "expires_at": 1776352269350
+    },
+    {
+      "id": 5,
+      "from": "host",
+      "text": "接受 ¥75,000，条件是 50% 预付款、45 天商用权、最终剪辑确认权保留给我们。",
+      "ts": 1776350560419,
+      "kind": "owner_reply",
+      "question_id": "q_592225e4-430",
+      "source": "telegram_inbound"
+    },
+    {
+      "id": 6,
+      "from": "host",
+      "text": "确认接受¥75,000，含3原创视频+3竖版切片+1小时B站直播，50%预付+50%交付后结清，45天商用权，素材需经我方最终剪辑审批。",
+      "ts": 1776350576712,
+      "kind": "close"
+    },
+    {
+      "id": 7,
+      "from": "guest",
+      "text": "确认接受¥75,000，含3原创视频+3竖版切片+1小时B站直播，50%预付+50%交付后结清，45天商用权，素材需经我方最终剪辑审批。",
+      "ts": 1776350577569,
+      "kind": "close"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_867a3a94-479",
+    "role": "host",
+    "topic": "Bilibili Brand Sponsorship Final",
+    "goal": "Negotiate creator-brand sponsorship package. Final terms must include: price, deliverables, payment timing, usage rights, approval rights, and concise owner-ready summary.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "确认接受¥75,000，含3原创视频+3竖版切片+1小时B站直播，50%预付+50%交付后结清，45天商用权，素材需经我方最终剪辑审批。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "确认接受¥75,000，含3原创视频+3竖版切片+1小时B站直播，50%预付+50%交付后结清，45天商用权，素材需经我方最终剪辑审批。"
+    },
+    "last_message": {
+      "id": 7,
+      "from": "guest",
+      "text": "确认接受¥75,000，含3原创视频+3竖版切片+1小时B站直播，50%预付+50%交付后结清，45天商用权，素材需经我方最终剪辑审批。",
+      "ts": 1776350577569,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 6,
+        "pid": "18622",
+        "bridge_version": "v3.1.0",
+        "updated": 1776350577791
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 6,
+        "pid": "61100",
+        "bridge_version": "v3.1.0",
+        "updated": 1776350577596
+      }
+    ]
+  },
+  "coverage_note": "Covers product-path bootstrap, Railway Link guest self-launch, host ASK_OWNER, Telegram inbound owner reply source, above-ceiling approval, turn taking, mutual close, and runtime stopped. Does not cover guest-side ASK_OWNER in this clean run; that was covered by recovered run t_cf09a77b-543.",
+  "ux_findings": [
+    "Create-room UX still shows raw invite URL token and join.json to the owner.",
+    "The local skill still creates bogus placeholder room state files before real rooms in this long Telegram session.",
+    "Owner question was understandable and correctly routed, but user-facing copy should avoid room ids/roles by default."
+  ],
+  "_redaction_notice": {
+    "redacted_on": "2026-04-16",
+    "redacted_fields": [
+      "thread.host_token",
+      "thread.guest_token",
+      "thread.invite_url",
+      "finalSnapshot.token"
+    ],
+    "rationale": "Thread tokens redacted; transcript, heartbeat rows, and validator retained."
+  },
+  "validator": {
+    "ok": true,
+    "room_id": "t_867a3a94-479",
+    "stop_reason": "mutual_close",
+    "turn_count": 8,
+    "message_count": 4,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "owner_reply_sources": [
+      "telegram_inbound"
+    ],
+    "mandate": {
+      "host_budget_ceiling_jpy": 65000,
+      "max_close_jpy": 75000,
+      "max_transcript_jpy": 75000,
+      "approved_excess": true
+    },
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "8 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "4 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": true,
+        "detail": "host and guest runtime heartbeats stopped"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "确认接受¥75,000，含3原创视频+3竖版切片+1小时B站直播，50%预付+50%交付后结清，45天商用权，素材需经我方最终剪辑审批。"
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "7 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": true,
+        "detail": "1 owner_reply events contain concrete owner text"
+      },
+      {
+        "name": "owner_reply_role_verified",
+        "ok": true,
+        "detail": "1 owner_reply roles match ask_owner roles"
+      },
+      {
+        "name": "owner_reply_source",
+        "ok": true,
+        "detail": "1 owner_reply events from telegram_inbound"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "detail": "close max ¥75000 within host ceiling ¥65000 or owner-approved"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": true,
+        "detail": "1 ask_owner and 1 owner_reply events"
+      }
+    ]
+  }
+}

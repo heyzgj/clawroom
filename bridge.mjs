@@ -29,6 +29,11 @@ import {
 } from "node:crypto";
 
 const VERSION = "v3.1.0";
+const FEATURES = [
+  "telegram-ask-owner-bindings",
+  "telegram-force-reply",
+  "openclaw-state-dir-fallback",
+];
 const DEFAULT_RELAY = "https://clawroom-v3-relay.heyzgj.workers.dev";
 const POLL_WAIT_SECONDS = 20;
 const HEARTBEAT_MS = 15_000;
@@ -122,6 +127,10 @@ function idempotencyKey(...parts) {
   return parts.map((part) => String(part).replace(/[^a-zA-Z0-9_.:-]/g, "_")).join(":").slice(0, 180);
 }
 
+async function delay(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function negotiationMessageCount(rows) {
   return rows.filter((row) => row?.kind === "message").length;
 }
@@ -184,6 +193,7 @@ function persistState() {
 function writeRuntimeState(status, extra = {}) {
   const payload = {
     bridge_version: VERSION,
+    bridge_features: FEATURES,
     status,
     room_id: threadId,
     role,
@@ -220,18 +230,35 @@ async function relayFetch(path, options = {}) {
     init.body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(url.toString(), init);
-  const text = await response.text();
-  let data;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { raw: text };
+  const attempts = Math.max(1, Number(options.retries || process.env.CLAWROOM_RELAY_RETRIES || 4) || 4);
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(url.toString(), init);
+      const text = await response.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { raw: text };
+      }
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        data._status = response.status;
+      }
+      if (response.status >= 500 && attempt < attempts) {
+        log(`relay ${response.status} for ${path}; retry ${attempt}/${attempts}`);
+        await delay(250 * attempt * attempt);
+        continue;
+      }
+      return data;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts) break;
+      log(`relay fetch failed for ${path}: ${error.message}; retry ${attempt}/${attempts}`);
+      await delay(250 * attempt * attempt);
+    }
   }
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    data._status = response.status;
-  }
-  return data;
+  throw lastError || new Error(`relay fetch failed for ${path}`);
 }
 
 async function getMessages(after = -1, wait = 0) {

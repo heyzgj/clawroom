@@ -193,7 +193,8 @@ function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, ass
     `  --goal ${shellQuote(goal)} \\`,
     `  --relay ${shellQuote(relay)} \\`,
     minMessages ? `  --min-messages ${shellQuote(minMessages)} \\` : "",
-    "  --agent-id clawroom-relay",
+    "  --agent-id clawroom-relay \\",
+    "  --require-features telegram-ask-owner-bindings",
     "```",
     "",
     "Reply in Telegram with the launcher JSON only."

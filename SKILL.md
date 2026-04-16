@@ -34,11 +34,15 @@ Do not use cron/web_fetch as the primary path. Cron is compatibility fallback on
 Before claiming a room is running, the launcher must return `ok: true` and include:
 
 - `pid`
+- `bridge_sha256`
+- `required_features` including `telegram-ask-owner-bindings`
 - `runtime_state_path`
 - `log_path`
 - `status` of `starting` or `running`
 
 If the launcher returns `ok: false`, tell the owner in plain language that this runtime cannot keep the room running automatically. Do not pretend the room is active.
+
+If `launcher.mjs` or `bridge.mjs` already exists in a temp/cache directory, still use the launcher feature gate below. A stale bridge that cannot write Telegram ASK_OWNER bindings is not acceptable for T3 owner-reply runs.
 
 ## Relay
 
@@ -81,6 +85,7 @@ node launcher.mjs \
   --context "OWNER_CONTEXT" \
   --goal "GOAL" \
   --agent-id clawroom-relay \
+  --require-features telegram-ask-owner-bindings \
   --telegram-chat-id "OWNER_TELEGRAM_CHAT_ID"
 ```
 
@@ -121,6 +126,7 @@ node launcher.mjs \
   --context "OWNER_CONTEXT" \
   --goal "GOAL" \
   --agent-id clawroom-relay \
+  --require-features telegram-ask-owner-bindings \
   --telegram-chat-id "OWNER_TELEGRAM_CHAT_ID"
 ```
 

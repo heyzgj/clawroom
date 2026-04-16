@@ -7,6 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -20,6 +21,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_REQUIRED_FEATURES = ["telegram-ask-owner-bindings"];
+const FEATURE_MARKERS = {
+  "telegram-ask-owner-bindings": "writeAskOwnerTelegramBinding",
+  "telegram-force-reply": "force_reply",
+  "openclaw-state-dir-fallback": "CLAWDBOT_STATE_DIR",
+};
 
 function parseArgs(argv) {
   const result = {};
@@ -55,6 +62,17 @@ function emit(payload, status = 0) {
   process.exit(status);
 }
 
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function csv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -67,12 +85,43 @@ const defaultStateDir = process.env.OPENCLAW_STATE_DIR ? join(openClawStateDir, 
 const stateDir = resolve(String(args["state-dir"] || process.env.CLAWROOM_STATE_DIR || defaultStateDir));
 const bridgePath = resolve(String(args.bridge || join(__dirname, "bridge.mjs")));
 const waitMs = Math.max(3_000, Math.min(60_000, Number(args["wait-ms"] || 20_000)));
+const expectedBridgeSha = String(args["expect-bridge-sha256"] || process.env.CLAWROOM_BRIDGE_SHA256 || "").trim();
+const requiredFeatures = csv(args["require-features"] || process.env.CLAWROOM_REQUIRED_BRIDGE_FEATURES);
+for (const feature of DEFAULT_REQUIRED_FEATURES) {
+  if (!requiredFeatures.includes(feature)) requiredFeatures.push(feature);
+}
 
 if (!threadId || !["host", "guest"].includes(role)) {
   emit({ ok: false, error: "usage", hint: "Required: --thread <id> --role host|guest plus bridge args." }, 2);
 }
 if (!existsSync(bridgePath)) {
   emit({ ok: false, error: "bridge_not_found", bridge_path: bridgePath }, 2);
+}
+
+const bridgeSource = readFileSync(bridgePath, "utf8");
+const bridgeSha256 = sha256(bridgeSource);
+if (expectedBridgeSha && bridgeSha256 !== expectedBridgeSha) {
+  emit({
+    ok: false,
+    error: "bridge_sha_mismatch",
+    bridge_path: bridgePath,
+    expected_bridge_sha256: expectedBridgeSha,
+    actual_bridge_sha256: bridgeSha256,
+  }, 2);
+}
+const missingFeatures = requiredFeatures.filter((feature) => {
+  const marker = FEATURE_MARKERS[feature];
+  return !marker || !bridgeSource.includes(marker);
+});
+if (missingFeatures.length > 0) {
+  emit({
+    ok: false,
+    error: "bridge_feature_missing",
+    bridge_path: bridgePath,
+    bridge_sha256: bridgeSha256,
+    missing_features: missingFeatures,
+    required_features: requiredFeatures,
+  }, 2);
 }
 
 mkdirSync(stateDir, { recursive: true });
@@ -101,6 +150,8 @@ closeSync(errFd);
 
 writeFileSync(launchPath, `${JSON.stringify({
   bridge_path: bridgePath,
+  bridge_sha256: bridgeSha256,
+  required_features: requiredFeatures,
   pid: child.pid,
   role,
   room_id: threadId,
@@ -120,6 +171,8 @@ while (Date.now() < deadline) {
         ok: true,
         pid: child.pid,
         status: lastState.status,
+        bridge_sha256: bridgeSha256,
+        required_features: requiredFeatures,
         runtime_state_path: runtimeStatePath,
         log_path: logPath,
         state_dir: stateDir,
