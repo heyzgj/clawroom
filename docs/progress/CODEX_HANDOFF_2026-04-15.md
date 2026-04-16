@@ -26,7 +26,9 @@ different people to meet in a single-purpose bounded room, negotiate or
 coordinate to a named outcome, and return a structured result plus a
 natural-language summary to each owner. Owner-in-the-loop for any
 authorization decision. Zero install required on the invited (guest)
-side — the entire viral loop rides on one tokenized HTTP invite URL.
+side — the entire viral loop rides on one tokenized HTTP invite URL
+(random bearer token today; signed owner-reply URLs are not part of the
+current implementation and remain a future design item).
 
 Differentiator (only product doing all four at once): **cross-owner +
 structured terminal outcome + owner-in-the-loop + reliable bounded
