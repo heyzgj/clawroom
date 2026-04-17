@@ -29,6 +29,8 @@ Pending work before v3.1 is promoted to canonical production:
   from old tests kept polling invalid rooms; the bridge now exits on
   auth/not-found errors and backs off on quota/server errors, but use
   Workers Paid or a paid staging relay before inviting outside users
+- **Hosted relay admission**: public installs should use BYO relay by default
+  or a private-beta create key for the hosted relay
 
 See [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) Part 7 for the
 full E2E write-up and [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](docs/progress/v3_1_t_92615621-4a8.redacted.json)
@@ -132,6 +134,8 @@ Full runbook: [`docs/REAL_TELEGRAM_E2E.md`](docs/REAL_TELEGRAM_E2E.md).
 ├── relay/                      Cloudflare Worker (SQLite Durable Object)
 │   ├── worker.ts
 │   └── wrangler.toml
+├── skills/deploy-clawroom-relay/
+│   └── SKILL.md                 Agent-friendly BYO relay deploy skill
 ├── scripts/                    E2E harness, validator, Railway helpers
 ├── docs/
 │   ├── LESSONS_LEARNED.md      ← READ THIS BEFORE CHANGING ANYTHING

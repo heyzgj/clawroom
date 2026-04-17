@@ -81,6 +81,7 @@ node clawroomctl.mjs create \
 ```
 
 The wrapper creates the thread, starts the verified host bridge, stores machine details locally, and returns safe owner-facing JSON.
+If a hosted relay requires admission control, set `CLAWROOM_CREATE_KEY` in the runtime environment. Do not paste create keys into owner-facing chat.
 
 ### Step 3 — Tell The Owner
 

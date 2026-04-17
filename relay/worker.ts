@@ -24,6 +24,17 @@
 
 interface Env {
   THREADS: DurableObjectNamespace;
+  CLAWROOM_CREATE_KEYS?: string;
+  CLAWROOM_REQUIRE_CREATE_KEY?: string;
+  CLAWROOM_CREATE_DISABLED?: string;
+  CLAWROOM_RELAY_DISABLED?: string;
+  CLAWROOM_MAX_THREAD_MS?: string;
+  CLAWROOM_MAX_MESSAGES?: string;
+  CLAWROOM_MAX_TEXT_CHARS?: string;
+  CLAWROOM_MIN_HEARTBEAT_MS?: string;
+  CREATE_RATE_LIMITER?: {
+    limit(input: { key: string }): Promise<{ success: boolean }>;
+  };
 }
 
 interface InitPayload {
@@ -54,6 +65,66 @@ interface MessageRow {
 
 const MAX_WAIT_SECONDS = 25;
 const OWNER_REPLY_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_THREAD_MS = 2 * 60 * 60 * 1000;
+const DEFAULT_MAX_MESSAGES = 120;
+const DEFAULT_MAX_TEXT_CHARS = 8000;
+const DEFAULT_MIN_HEARTBEAT_MS = 10_000;
+
+function boolEnv(value: unknown): boolean {
+  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+}
+
+function numberEnv(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function createKeys(env: Env): string[] {
+  return String(env.CLAWROOM_CREATE_KEYS || "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
+
+function createKeyFrom(request: Request, url: URL, bodyKey?: unknown): string {
+  const header = request.headers.get("X-Clawroom-Create-Key") || "";
+  const bearer = (request.headers.get("Authorization") || "").startsWith("Bearer ")
+    ? (request.headers.get("Authorization") || "").slice(7)
+    : "";
+  return String(bodyKey || header || bearer || url.searchParams.get("create_key") || "").trim();
+}
+
+async function guardCreate(request: Request, env: Env, bodyKey?: unknown): Promise<Response | null> {
+  if (boolEnv(env.CLAWROOM_RELAY_DISABLED) || boolEnv(env.CLAWROOM_CREATE_DISABLED)) {
+    return json({ error: "create_disabled", hint: "This relay is not accepting new rooms right now." }, 503);
+  }
+
+  const url = new URL(request.url);
+  const keys = createKeys(env);
+  const requireKey = boolEnv(env.CLAWROOM_REQUIRE_CREATE_KEY) || keys.length > 0;
+  const supplied = createKeyFrom(request, url, bodyKey);
+
+  if (requireKey) {
+    if (!keys.length) {
+      return json({ error: "create_keys_not_configured" }, 503);
+    }
+    if (!supplied) {
+      return json({ error: "create_key_required", hint: "This hosted relay is private beta. Provide X-Clawroom-Create-Key." }, 401);
+    }
+    if (!keys.includes(supplied)) {
+      return json({ error: "invalid_create_key" }, 401);
+    }
+  }
+
+  if (env.CREATE_RATE_LIMITER) {
+    const key = supplied ? `create-key:${supplied}` : `ip:${request.headers.get("CF-Connecting-IP") || "unknown"}`;
+    const { success } = await env.CREATE_RATE_LIMITER.limit({ key });
+    if (!success) return json({ error: "create_rate_limited" }, 429);
+  }
+
+  return null;
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -70,7 +141,7 @@ function cors(): Response {
     headers: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Idempotency-Key",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Idempotency-Key, X-Clawroom-Create-Key",
     },
   });
 }
@@ -152,6 +223,8 @@ export default {
       const path = url.pathname;
 
       if (request.method === "GET" && path === "/threads/new") {
+        const createGuard = await guardCreate(request, env);
+        if (createGuard) return createGuard;
         return await createThread(
           request,
           env,
@@ -161,7 +234,9 @@ export default {
       }
 
       if (request.method === "POST" && path === "/threads") {
-        const body = await readJson<{ topic?: string; goal?: string }>(request);
+        const body = await readJson<{ topic?: string; goal?: string; create_key?: string }>(request);
+        const createGuard = await guardCreate(request, env, body.create_key);
+        if (createGuard) return createGuard;
         return await createThread(request, env, body.topic || "untitled", body.goal || "");
       }
 
@@ -190,10 +265,12 @@ export default {
 
 export class ThreadDurableObject {
   private state: DurableObjectState;
+  private env: Env;
   private waiters = new Set<() => void>();
 
-  constructor(state: DurableObjectState) {
+  constructor(state: DurableObjectState, env: Env) {
     this.state = state;
+    this.env = env;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -212,6 +289,11 @@ export class ThreadDurableObject {
 
       const [, id, action] = match;
       if (!this.threadExists(id)) return json({ error: "thread not found" }, 404);
+      if (boolEnv(this.env.CLAWROOM_RELAY_DISABLED)) {
+        return json({ error: "relay_disabled", hint: "This relay is temporarily disabled." }, 503);
+      }
+      const expiry = this.expiredResponse();
+      if (expiry) return expiry;
 
       if (request.method === "GET" && action === "invite") {
         return this.handlePublicInvite(url);
@@ -451,6 +533,59 @@ export class ThreadDurableObject {
     ).trim().slice(0, 200);
   }
 
+  private maxThreadMs(): number {
+    return numberEnv(this.env.CLAWROOM_MAX_THREAD_MS, DEFAULT_MAX_THREAD_MS, 10 * 60 * 1000, 24 * 60 * 60 * 1000);
+  }
+
+  private maxMessages(): number {
+    return numberEnv(this.env.CLAWROOM_MAX_MESSAGES, DEFAULT_MAX_MESSAGES, 10, 1000);
+  }
+
+  private maxTextChars(): number {
+    return numberEnv(this.env.CLAWROOM_MAX_TEXT_CHARS, DEFAULT_MAX_TEXT_CHARS, 500, 50_000);
+  }
+
+  private minHeartbeatMs(): number {
+    return numberEnv(this.env.CLAWROOM_MIN_HEARTBEAT_MS, DEFAULT_MIN_HEARTBEAT_MS, 0, 60_000);
+  }
+
+  private expiredResponse(): Response | null {
+    const row = this.threadRow();
+    if (!row || Boolean(Number(row.closed || 0))) return null;
+    const created = Number(row.created || 0);
+    const maxAge = this.maxThreadMs();
+    if (!created || Date.now() - created <= maxAge) return null;
+    return json({
+      error: "thread_expired",
+      max_thread_ms: maxAge,
+      hint: "This room expired. Create a new room if coordination still needs to continue.",
+    }, 410);
+  }
+
+  private textOrError(rawText: string, emptyError = "text_required"): { text: string } | Response {
+    const text = String(rawText || "").trim();
+    if (!text) return json({ error: emptyError }, 400);
+    const max = this.maxTextChars();
+    if (text.length > max) {
+      return json({ error: "text_too_long", max_text_chars: max }, 413);
+    }
+    return { text };
+  }
+
+  private messageBudgetError(): Response | null {
+    const countRow = this.state.storage.sql
+      .exec("SELECT COUNT(*) AS count FROM messages")
+      .toArray()[0] as Record<string, unknown> | undefined;
+    const count = Number(countRow?.count || 0);
+    const max = this.maxMessages();
+    if (count < max) return null;
+    return json({
+      error: "room_message_limit_exceeded",
+      max_messages: max,
+      hint: "This room reached its relay safety limit. Create a new room if more work is needed.",
+    }, 429);
+  }
+
   private async handleMessages(url: URL): Promise<Response> {
     const after = parseInt(url.searchParams.get("after") || "-1", 10);
     const waitSeconds = Math.max(0, Math.min(MAX_WAIT_SECONDS, parseInt(url.searchParams.get("wait") || "0", 10) || 0));
@@ -524,11 +659,16 @@ export class ThreadDurableObject {
     idempotencyKey: string,
     kind: "message" | "close",
   ): Response {
-    const text = String(rawText || "").trim();
-    if (!text) return json({ error: kind === "close" ? "summary_required" : "text_required" }, 400);
+    const parsedText = this.textOrError(rawText, kind === "close" ? "summary_required" : "text_required");
+    if (parsedText instanceof Response) return parsedText;
+    const { text } = parsedText;
 
     const existing = this.idempotencyHit(auth.role, idempotencyKey);
     if (existing) return json(existing.body, existing.status);
+    if (kind !== "close") {
+      const budget = this.messageBudgetError();
+      if (budget) return budget;
+    }
 
     const row = this.threadRow();
     if (Boolean(Number(row?.closed || 0))) {
@@ -592,11 +732,14 @@ export class ThreadDurableObject {
     idempotencyKey: string,
     ttlSeconds?: number,
   ): Response {
-    const text = String(rawText || "").trim().slice(0, 4000);
-    if (!text) return json({ error: "text_required" }, 400);
+    const parsedText = this.textOrError(rawText);
+    if (parsedText instanceof Response) return parsedText;
+    const { text } = parsedText;
 
     const existing = this.idempotencyHit(auth.role, idempotencyKey);
     if (existing) return json(existing.body, existing.status);
+    const budget = this.messageBudgetError();
+    if (budget) return budget;
 
     const row = this.threadRow();
     if (Boolean(Number(row?.closed || 0))) {
@@ -653,12 +796,13 @@ export class ThreadDurableObject {
     const token = String(body.token || url.searchParams.get("token") || "").trim();
     const questionId = String(body.question_id || url.searchParams.get("question_id") || "").trim();
     const role = String(body.role || url.searchParams.get("role") || "").trim();
-    const text = String(body.text || url.searchParams.get("text") || "").trim().slice(0, 4000);
+    const parsedText = this.textOrError(String(body.text || url.searchParams.get("text") || ""));
+    if (parsedText instanceof Response) return parsedText;
+    const { text } = parsedText;
     const source = this.sanitizeMetadataText(body.source || url.searchParams.get("source") || "", 64);
 
     if (!token || !questionId || !role) return json({ error: "invalid_owner_reply" }, 400);
     if (!["host", "guest"].includes(role)) return json({ error: "invalid_owner_reply" }, 400);
-    if (!text) return json({ error: "text_required" }, 400);
 
     const question = this.state.storage.sql
       .exec("SELECT * FROM owner_questions WHERE question_id=? LIMIT 1", questionId)
@@ -681,6 +825,8 @@ export class ThreadDurableObject {
     const now = Date.now();
     const expiresAt = Number(question.expires_at || 0);
     if (expiresAt && now > expiresAt) return json({ error: "owner_reply_expired" }, 410);
+    const budget = this.messageBudgetError();
+    if (budget) return budget;
 
     const nextId = this.nextMessageId();
     this.state.storage.sql.exec(
@@ -780,6 +926,18 @@ export class ThreadDurableObject {
     const cursor = Number.isFinite(Number(body.cursor)) ? Number(body.cursor) : -1;
     const pid = String(body.pid || "").slice(0, 80);
     const bridgeVersion = String(body.bridge_version || "").slice(0, 80);
+    const previous = this.state.storage.sql
+      .exec("SELECT updated FROM runtime_heartbeats WHERE role=? LIMIT 1", auth.role)
+      .toArray()[0] as Record<string, unknown> | undefined;
+    const minHeartbeatMs = this.minHeartbeatMs();
+    const elapsed = previous ? now - Number(previous.updated || 0) : Number.POSITIVE_INFINITY;
+    if (!["stopped", "failed"].includes(status) && elapsed < minHeartbeatMs) {
+      return json({
+        ok: false,
+        error: "heartbeat_too_soon",
+        retry_after_ms: minHeartbeatMs - elapsed,
+      }, 429);
+    }
     this.state.storage.sql.exec(
       `INSERT INTO runtime_heartbeats (role, status, cursor, pid, bridge_version, updated, payload_json)
        VALUES (?, ?, ?, ?, ?, ?, ?)

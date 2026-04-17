@@ -806,6 +806,20 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Lesson:** Long-poll clients must distinguish "empty poll" from "relay error". Empty is a normal state; unauthorized/not-found is a shutdown condition; quota/server errors need explicit backoff. Otherwise a background daemon turns a harmless stale test into a quota burner.
 
+### AR. Hosted Relay Needs Admission Control; Public Install Should Prefer BYO
+
+**What:** Once ClawRoom can be installed by outside agents, the relay billing owner becomes part of the product boundary. If the public skill defaults to George's hosted relay, any install can create rooms and consume George's Cloudflare Worker/Durable Object quota.
+
+**Risk:** The per-room tokens protect room contents, but they do not protect `/threads/new` itself. A random external user, stale agent, or script can create many rooms or keep bridge loops alive. On Free this exhausts quota; on Paid it becomes a billable abuse path.
+
+**Fix applied:** The relay now supports private-beta create admission: `CLAWROOM_CREATE_KEYS`, `CLAWROOM_REQUIRE_CREATE_KEY`, `CLAWROOM_CREATE_DISABLED`, and optional `CREATE_RATE_LIMITER`. BYO relays remain agent-friendly because a fresh deployment with no create keys configured still works by default. `clawroomctl.mjs` and the E2E harness now create rooms via `POST /threads` and send the create key in `X-Clawroom-Create-Key` instead of putting it in the URL.
+
+**Hard caps added:** Each room has configurable TTL, message count, text length, and heartbeat minimum interval. Defaults are 2 hours, 120 messages, 8,000 text chars, and 10 seconds between heartbeats per role.
+
+**BYO path:** Added `skills/deploy-clawroom-relay/SKILL.md` so an owner can hand the repo to an agent and have that agent deploy a user-owned Cloudflare Worker + Durable Object relay with a create key, smoke test, and owner-safe handoff.
+
+**Lesson:** Public runtime distribution and hosted infrastructure are separate products. The runtime can be viral; the hosted relay must be gated. For this stage, hosted relay means private beta, while public install should make BYO relay easy.
+
 ---
 
 ## Updates Log
@@ -821,3 +835,4 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-16** Strict T3 v1 average-user E2E passed. Room `t_2fbfc1f7-f66` used real Telegram Desktop ForceReply input; owner reply landed as `source: telegram_inbound`; room closed with 8 events, 4 negotiation messages, 2 close events, and both runtimes stopped. Added redacted artifact and cropped Telegram screenshot evidence.
 - **2026-04-16** Average-user product-path E2E hardening. Room `t_fc9adb58-da7` passed Telegram bootstrap smoke but did not trigger ASK_OWNER. Room `t_93dc5ede-d2d` exposed stale local `/tmp` bridge assets. Added launcher feature gates, bridge feature telemetry, relay fetch retries, updated the downloadable gist bundle, and fixed validator Chinese approval detection. Room `t_cf09a77b-543` is a recovered pass after retry patch/restart. Room `t_867a3a94-479` is the clean product-path T3 pass with `source: telegram_inbound`, above-ceiling approval, mutual close, and both runtimes stopped. Added Lessons AM-AN.
 - **2026-04-17** Final stability matrix and launch-boundary hardening. Added `clawroomctl.mjs`, public `/i/:thread/:code` guest invites, owner-safe skill instructions, E2E/validator fetch retries, and refreshed the self-download gist bundle. Cross-machine stability passed for `t_dba18332-f9f` (average calendar, 2 messages), `t_0babf6d2-297` (product launch comms, 4 messages), and `t_10f2b0e8-b00` (term-sheet negotiation, real Telegram `owner_reply` from Link side, `source: telegram_inbound`). Wrapper smoke then hit Cloudflare Durable Objects free-tier quota; follow-up found stale local bridges converting relay errors into empty polls, so `bridge.mjs` now exits on auth/not-found and backs off on quota/server errors. Added Lessons AO-AQ and redacted artifacts.
+- **2026-04-17** Hosted relay hardening and BYO deploy path. Added create-key admission control, create kill switches, room TTL/message/text/heartbeat caps, `clawroomctl`/E2E create-key support, and `skills/deploy-clawroom-relay/SKILL.md` for agent-friendly BYO relay deployment. Added Lesson AR.

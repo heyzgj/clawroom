@@ -246,7 +246,11 @@ function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, ass
   return lines.join("\n");
 }
 
-async function createThread({ relay, topic, goal, noCreate }) {
+function createKey(args = {}) {
+  return String(args["create-key"] || process.env.CLAWROOM_CREATE_KEY || "").trim();
+}
+
+async function createThread({ relay, topic, goal, noCreate, createKey }) {
   if (noCreate) {
     return {
       thread_id: "THREAD_ID",
@@ -255,8 +259,13 @@ async function createThread({ relay, topic, goal, noCreate }) {
       invite_url: `${relay}/threads/THREAD_ID/join?token=GUEST_TOKEN`,
     };
   }
-  const url = `${relay}/threads/new?topic=${encodeURIComponent(topic)}&goal=${encodeURIComponent(goal)}`;
-  return fetchJson(url);
+  const headers = { "content-type": "application/json" };
+  if (createKey) headers["x-clawroom-create-key"] = createKey;
+  return fetchJson(`${relay}/threads`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ topic, goal }),
+  });
 }
 
 async function maybeAutoOwnerReply({ relay, threadId, role, text, stateDir, respondedQuestions }) {
@@ -334,6 +343,7 @@ async function monitorThread({
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const relay = String(args.relay || process.env.CLAWROOM_RELAY || DEFAULT_RELAY).replace(/\/$/, "");
+  const createKeyValue = createKey(args);
   const hostBot = String(args["host-bot"] || DEFAULT_HOST_BOT);
   const guestBot = String(args["guest-bot"] || DEFAULT_GUEST_BOT);
   const topic = String(args.topic || "ClawRoom v3.1 Telegram E2E");
@@ -356,7 +366,7 @@ async function main() {
   const autoOwnerStateDir = resolve(String(args["auto-owner-state-dir"] || process.env.CLAWROOM_STATE_DIR || join(homedir(), ".clawroom-v3")));
   mkdirSync(artifactDir, { recursive: true });
 
-  const thread = await createThread({ relay, topic, goal, noCreate });
+  const thread = await createThread({ relay, topic, goal, noCreate, createKey: createKeyValue });
   const threadId = thread.thread_id || thread.id;
   const hostToken = thread.host_token;
   const guestToken = thread.guest_token;

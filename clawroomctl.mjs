@@ -38,7 +38,7 @@ function emit(payload, status = 0) {
 function usage(status = 2) {
   process.stderr.write([
     "Usage:",
-    "  node clawroomctl.mjs create --topic TOPIC --goal GOAL --context OWNER_CONTEXT [--telegram-chat-id CHAT_ID]",
+    "  node clawroomctl.mjs create --topic TOPIC --goal GOAL --context OWNER_CONTEXT [--create-key KEY] [--telegram-chat-id CHAT_ID]",
     "  node clawroomctl.mjs join --invite PUBLIC_INVITE_URL --context OWNER_CONTEXT [--telegram-chat-id CHAT_ID]",
     "",
     "Add --debug to include local machine-state path and launcher result.",
@@ -61,10 +61,15 @@ function parseJson(text) {
 async function fetchJson(url, options = {}) {
   let lastError = null;
   const attempts = Number(options.attempts || 4);
+  const headers = { ...(options.headers || {}) };
+  const init = { ...options, headers };
+  delete init.attempts;
+  delete init.timeoutMs;
+  if (init.body !== undefined && !headers["content-type"]) headers["content-type"] = "application/json";
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const response = await fetch(url, {
-        ...options,
+        ...init,
         signal: AbortSignal.timeout(Number(options.timeoutMs || 20_000)),
       });
       const text = await response.text();
@@ -109,6 +114,10 @@ function debug(args, payload) {
 
 function relay(args) {
   return String(args.relay || DEFAULT_RELAY).replace(/\/$/, "");
+}
+
+function createKey(args) {
+  return String(args["create-key"] || process.env.CLAWROOM_CREATE_KEY || "").trim();
 }
 
 function goal(args, fallback = "") {
@@ -162,7 +171,16 @@ function launch(args, { threadId, token, role, goalText, contextText }) {
 }
 
 async function createThread(args) {
-  return fetchJson(`${relay(args)}/threads/new?topic=${encodeURIComponent(String(args.topic || "ClawRoom coordination"))}&goal=${encodeURIComponent(goal(args))}`);
+  const key = createKey(args);
+  const headers = key ? { "x-clawroom-create-key": key } : {};
+  return fetchJson(`${relay(args)}/threads`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      topic: String(args.topic || "ClawRoom coordination"),
+      goal: goal(args),
+    }),
+  });
 }
 
 async function resolveInvite(args) {
@@ -256,5 +274,17 @@ async function main() {
 
 main().catch((error) => {
   const code = error?.body?.error || "unexpected_error";
+  if (code === "create_key_required" || code === "invalid_create_key") {
+    fail(code, "This hosted ClawRoom relay is private beta. Ask the relay owner for a create key or use your own relay.", 1);
+  }
+  if (code === "create_disabled" || code === "relay_disabled") {
+    fail(code, "This ClawRoom relay is temporarily not accepting new rooms. Try another relay or wait for the owner to reopen it.", 1);
+  }
+  if (code === "create_keys_not_configured") {
+    fail(code, "This ClawRoom relay requires a create key but has not been configured correctly. Ask the relay owner to fix the relay settings.", 1);
+  }
+  if (code === "create_rate_limited") {
+    fail(code, "This ClawRoom relay is busy right now. Please try again later or use your own relay.", 1);
+  }
   fail(code, "I could not start ClawRoom from this runtime right now. Please try again or ask for debug details.", 1);
 });

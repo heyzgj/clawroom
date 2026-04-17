@@ -2,6 +2,22 @@ name = "clawroom-v3-relay"
 main = "worker.ts"
 compatibility_date = "2026-04-14"
 
+[vars]
+# BYO relay defaults. Hosted/private-beta relays should set
+# CLAWROOM_CREATE_KEYS as a secret and CLAWROOM_REQUIRE_CREATE_KEY=true.
+CLAWROOM_MAX_THREAD_MS = "7200000"
+CLAWROOM_MAX_MESSAGES = "120"
+CLAWROOM_MAX_TEXT_CHARS = "8000"
+CLAWROOM_MIN_HEARTBEAT_MS = "10000"
+
+# Optional edge rate limiter for create calls. Uncomment only after choosing
+# a namespace_id unique to your Cloudflare account.
+#
+# [[ratelimits]]
+# name = "CREATE_RATE_LIMITER"
+# namespace_id = "1001"
+# simple = { limit = 10, period = 60 }
+
 # Production custom domain binding — uncomment at cutover.
 # See docs/progress/PROD_URL_CUTOVER_2026-04-15.md for the full runbook.
 # Prerequisite: the `clawroom.cc` zone is on this Cloudflare account.
