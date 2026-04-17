@@ -12,13 +12,21 @@ on 2026-04-14 (local clawd × Railway-hosted Link Telegram bots, mutual
 close, both owner notifications delivered). T2-full multi-turn transport
 E2E passed on 2026-04-15 with 8 negotiation messages. T3 v0 mandate
 guard E2E passed on 2026-04-15 with ASK_OWNER, owner_reply, resume, and
-close at the authorized ceiling.
+close at the authorized ceiling. The 2026-04-17 stability matrix passed
+three more cross-machine rooms: calendar coordination, product launch
+communication, and term-sheet negotiation with real Telegram inbound
+owner reply on the Railway Link side.
 
-Pending validation before v3.1 is promoted to canonical production:
+Pending work before v3.1 is promoted to canonical production:
 
-- **Telegram reply routing**: owner replies directly to the ASK_OWNER
-  Telegram notification and OpenClaw inbound routes it to owner-reply
-- **T3 variance**: repeat the mandate scenario across more runs and roles
+- **Install path**: make first-time skill install pull only the product
+  runtime files (`SKILL.md`, `clawroomctl.mjs`, `launcher.mjs`,
+  `bridge.mjs`)
+- **Product-path variance**: repeat natural Telegram create/join flows
+  after the install path and relay capacity are fixed
+- **Relay capacity**: the current public relay hit Cloudflare Durable
+  Objects free-tier quota during wrapper smoke; use Workers Paid or a
+  paid staging relay before inviting outside users
 
 See [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) Part 7 for the
 full E2E write-up and [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](docs/progress/v3_1_t_92615621-4a8.redacted.json)
@@ -26,6 +34,10 @@ for the first smoke evidence artifact. The T2-full passing artifact is
 [`docs/progress/v3_1_t_0b3602a9-e3b.redacted.json`](docs/progress/v3_1_t_0b3602a9-e3b.redacted.json).
 The T3 v0 passing artifact is
 [`docs/progress/v3_1_t_fb3fda2d-563.redacted.json`](docs/progress/v3_1_t_fb3fda2d-563.redacted.json).
+The 2026-04-17 stability matrix artifacts are
+[`docs/progress/v3_1_t_dba18332-f9f.avg-calendar.redacted.json`](docs/progress/v3_1_t_dba18332-f9f.avg-calendar.redacted.json),
+[`docs/progress/v3_1_t_0babf6d2-297.product-launch.redacted.json`](docs/progress/v3_1_t_0babf6d2-297.product-launch.redacted.json),
+and [`docs/progress/v3_1_t_10f2b0e8-b00.term-sheet-telegram-owner-reply.redacted.json`](docs/progress/v3_1_t_10f2b0e8-b00.term-sheet-telegram-owner-reply.redacted.json).
 
 ## Architecture
 
@@ -41,7 +53,8 @@ The T3 v0 passing artifact is
 │ OpenClaw host (e.g. clawd)    │      │ OpenClaw guest (e.g. Link)   │
 │ + clawroom skill              │      │ + clawroom skill              │
 │                              │      │                              │
-│  launcher.mjs ─────────────▶ │      │  launcher.mjs ─────────────▶ │
+│  clawroomctl.mjs ──────────▶ │      │  clawroomctl.mjs ──────────▶ │
+│   launcher.mjs ────────────▶ │      │   launcher.mjs ────────────▶ │
 │   bridge.mjs (host role)     │      │   bridge.mjs (guest role)    │
 │    - long-polls relay        │      │    - long-polls relay        │
 │    - calls OpenClaw via WS   │      │    - calls OpenClaw via WS   │
@@ -71,6 +84,10 @@ The T3 v0 passing artifact is
 Everything smart lives in `bridge.mjs` — goal tracking, mandate checking
 (what the owner authorized), summary extraction, marker-scan parsing of
 OpenClaw output. The relay is deliberately semantic-free.
+
+Everything owner-facing about launch lives in `clawroomctl.mjs`: it starts
+the verified runtime but prints only a safe public message, while tokens,
+PIDs, and log paths stay in local state.
 
 ## Try it (reproduce the passing E2E)
 
@@ -107,6 +124,7 @@ Full runbook: [`docs/REAL_TELEGRAM_E2E.md`](docs/REAL_TELEGRAM_E2E.md).
 ```
 .
 ├── SKILL.md                    OpenClaw-facing launch instructions
+├── clawroomctl.mjs             Product-safe create/join wrapper
 ├── bridge.mjs                  Zero-npm Node bridge runtime
 ├── launcher.mjs                Detached launcher with verification
 ├── relay/                      Cloudflare Worker (SQLite Durable Object)

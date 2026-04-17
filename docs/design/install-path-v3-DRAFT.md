@@ -35,6 +35,7 @@ The v3 repo at `heyzgj/clawroom` contains (post migration):
 
 ```
 SKILL.md                  ← needed (trigger + instructions)
+clawroomctl.mjs           ← needed (product-safe create/join wrapper)
 bridge.mjs                ← needed (runtime)
 launcher.mjs              ← needed (runtime)
 README.md                 ← not user-facing
@@ -66,18 +67,18 @@ check vercel-labs/skills docs.
 
 ### Option B — move skill into a subdirectory
 
-Move `SKILL.md`, `bridge.mjs`, `launcher.mjs` into `skill/` and
+Move `SKILL.md`, `clawroomctl.mjs`, `bridge.mjs`, `launcher.mjs` into `skill/` and
 tell users `npx skills add heyzgj/clawroom/skill`.
 
 **Pros:** clean separation; maintainer repo structure stays
-rich; installer only sees 3 files.
+rich; installer only sees 4 files.
 **Cons:** changes the install command from the v2 flavor; users
 who remember the v2 command will get the wrong thing.
 
 ### Option C — separate repo `heyzgj/clawroom-skill`
 
 Publish a thin sibling repo that only contains `SKILL.md` +
-`bridge.mjs` + `launcher.mjs`, auto-synced from `main` via CI or
+`clawroomctl.mjs` + `bridge.mjs` + `launcher.mjs`, auto-synced from `main` via CI or
 a release script.
 
 **Pros:** cleanest user-facing artifact; nothing confusing to
@@ -97,7 +98,7 @@ versioning discipline we haven't needed.
 
 ### Option E — self-bootstrapping from SKILL.md only
 
-`SKILL.md` is the only file that gets installed. Bridge + launcher
+`SKILL.md` is the only file that gets installed. Wrapper + bridge + launcher
 are **downloaded on first use** by the skill itself (the LLM-level
 SKILL.md instructs the host runtime to `curl` them on first
 launch).
@@ -220,7 +221,7 @@ Telegram within 30 seconds.
 For each answered decision, the next concrete action is:
 
 1. DP1 A: I add `.skillsignore` + verify with dry-run against skills CLI.
-   DP1 B: I move `SKILL.md`+`bridge.mjs`+`launcher.mjs` into `skill/`.
+   DP1 B: I move `SKILL.md`+`clawroomctl.mjs`+`bridge.mjs`+`launcher.mjs` into `skill/`.
 2. DP2 2b: I draft the install helper script + update SKILL.md to
    call it on first use.
 3. DP3 3a: Codex extends `bridge.mjs` to read OpenClaw local config

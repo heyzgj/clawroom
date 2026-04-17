@@ -72,6 +72,7 @@ This is the discipline that produced the current Part 7; keep it.
 | Layer | Tech | Key files |
 |---|---|---|
 | Relay | Cloudflare Worker + SQLite Durable Object (TypeScript) | `relay/worker.ts` |
+| Wrapper | Product-safe create/join launcher boundary | `clawroomctl.mjs` |
 | Bridge | Zero-npm Node.js (ESM), WS client to OpenClaw Gateway | `bridge.mjs` |
 | Launcher | Detached process starter with PID + heartbeat verification | `launcher.mjs` |
 | Skill | OpenClaw-facing launch instructions | `SKILL.md` |
@@ -169,7 +170,8 @@ Not because they're bad ideas, but because they're premature or misaligned:
 
 ```
 clawroom/
-├── SKILL.md                        # OpenClaw-facing launch instructions (v0.2.0)
+├── SKILL.md                        # OpenClaw-facing launch instructions
+├── clawroomctl.mjs                 # Product-safe create/join wrapper
 ├── bridge.mjs                      # Zero-npm bridge runtime, marker-scan + Telegram notify
 ├── launcher.mjs                    # Detached launcher with PID/heartbeat verification
 ├── relay/

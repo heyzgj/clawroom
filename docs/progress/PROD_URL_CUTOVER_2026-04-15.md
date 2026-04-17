@@ -107,7 +107,7 @@ sed -i '' 's|https://clawroom-v3-relay\.heyzgj\.workers\.dev|https://api.clawroo
   SKILL.md
 ```
 
-Sanity: `grep -n 'workers.dev' SKILL.md bridge.mjs scripts/telegram_e2e.mjs`
+Sanity: `grep -n 'workers.dev' SKILL.md clawroomctl.mjs bridge.mjs scripts/telegram_e2e.mjs`
 should now only match historical lesson / progress references; no
 runtime constants.
 
@@ -119,7 +119,7 @@ runtime constants.
 ## Step 5 — Commit
 
 ```sh
-git add bridge.mjs scripts/telegram_e2e.mjs SKILL.md README.md relay/wrangler.toml
+git add clawroomctl.mjs bridge.mjs scripts/telegram_e2e.mjs SKILL.md README.md relay/wrangler.toml
 git commit -m "$(cat <<'EOF'
 feat(prod-url): cut relay over to api.clawroom.cc
 
@@ -137,14 +137,15 @@ EOF
 
 ## Step 6 — Re-upload gist test bundle
 
-Any OpenClaw runtime that self-downloads `launcher.mjs` / `bridge.mjs`
+Any OpenClaw runtime that self-downloads `clawroomctl.mjs` / `launcher.mjs` / `bridge.mjs`
 from the gist at launch time will continue to get the OLD files until
 you update the gist. Upload the post-Step-5 versions.
 
 Specifically:
 
 - `bridge.mjs` (new `DEFAULT_RELAY`)
-- `launcher.mjs` (unchanged but upload both for consistency)
+- `clawroomctl.mjs`
+- `launcher.mjs` (upload all runtime files for consistency)
 
 After upload, fetch a file from the gist via browser / curl to
 confirm it's the new version.

@@ -15,6 +15,7 @@
  *
  * GET endpoints (agent/web_fetch friendly, token in query string):
  *   GET /threads/new?topic=...&goal=...          - create thread
+ *   GET /i/:id/:code                             - resolve public guest invite
  *   GET /threads/:id/msgs?token=...&after=N      - poll messages
  *   GET /threads/:id/post?token=...&text=...     - send message
  *   GET /threads/:id/done?token=...&summary=...  - mark this side closed
@@ -31,6 +32,7 @@ interface InitPayload {
   goal: string;
   host_token: string;
   guest_token: string;
+  guest_invite_code: string;
   origin: string;
 }
 
@@ -81,6 +83,10 @@ function randomToken(role: "host" | "guest"): string {
   return `${role}_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
+function randomInviteCode(): string {
+  return `CR-${crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+}
+
 function randomOwnerReplyToken(): string {
   return `owner_${crypto.randomUUID().replace(/-/g, "")}`;
 }
@@ -106,6 +112,7 @@ async function createThread(request: Request, env: Env, topic: string, goal: str
     goal: goal || "",
     host_token: randomToken("host"),
     guest_token: randomToken("guest"),
+    guest_invite_code: randomInviteCode(),
     origin: url.origin,
   };
   return await threadStub(env, id).fetch("https://thread/init", {
@@ -121,6 +128,7 @@ function routeHelp(): Response {
     endpoints: [
       "POST /threads",
       "GET /threads/new?topic=...&goal=...",
+      "GET /i/:id/:code",
       "POST /threads/:id/messages",
       "GET /threads/:id/msgs?token=...&after=N&wait=20",
       "GET /threads/:id/messages?token=...&after=N&wait=20",
@@ -155,6 +163,18 @@ export default {
       if (request.method === "POST" && path === "/threads") {
         const body = await readJson<{ topic?: string; goal?: string }>(request);
         return await createThread(request, env, body.topic || "untitled", body.goal || "");
+      }
+
+      const inviteMatch = path.match(/^\/i\/([^/]+)\/([^/]+)$/);
+      if (request.method === "GET" && inviteMatch) {
+        const [, id, code] = inviteMatch;
+        const params = new URLSearchParams({
+          code,
+          origin: url.origin,
+        });
+        return await threadStub(env, id).fetch(
+          new Request(`https://thread/threads/${id}/invite?${params.toString()}`, request),
+        );
       }
 
       const match = path.match(/^\/threads\/([^/]+)\/([A-Za-z0-9_-]+)$/);
@@ -192,6 +212,10 @@ export class ThreadDurableObject {
 
       const [, id, action] = match;
       if (!this.threadExists(id)) return json({ error: "thread not found" }, 404);
+
+      if (request.method === "GET" && action === "invite") {
+        return this.handlePublicInvite(url);
+      }
 
       if (request.method === "GET" && action === "join") {
         const auth = this.authenticate(request, url);
@@ -269,6 +293,7 @@ export class ThreadDurableObject {
         summary TEXT NOT NULL DEFAULT '',
         host_token TEXT NOT NULL,
         guest_token TEXT NOT NULL,
+        guest_invite_code TEXT NOT NULL DEFAULT '',
         host_closed INTEGER NOT NULL DEFAULT 0,
         guest_closed INTEGER NOT NULL DEFAULT 0,
         host_summary TEXT NOT NULL DEFAULT '',
@@ -287,6 +312,9 @@ export class ThreadDurableObject {
     `);
     try {
       this.state.storage.sql.exec("ALTER TABLE messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'");
+    } catch {}
+    try {
+      this.state.storage.sql.exec("ALTER TABLE thread ADD COLUMN guest_invite_code TEXT NOT NULL DEFAULT ''");
     } catch {}
     this.state.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS owner_questions (
@@ -341,8 +369,8 @@ export class ThreadDurableObject {
     }
     const now = Date.now();
     this.state.storage.sql.exec(
-      `INSERT INTO thread (id, topic, goal, created, updated, host_token, guest_token)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO thread (id, topic, goal, created, updated, host_token, guest_token, guest_invite_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       body.id,
       body.topic || "untitled",
       body.goal || "",
@@ -350,6 +378,7 @@ export class ThreadDurableObject {
       now,
       body.host_token,
       body.guest_token,
+      body.guest_invite_code || randomInviteCode(),
     );
     return json(this.createResponse(body.origin, this.threadRow()));
   }
@@ -357,12 +386,36 @@ export class ThreadDurableObject {
   private createResponse(origin: string, row: Record<string, unknown> | null): Record<string, unknown> {
     const id = String(row?.id || "");
     const guestToken = String(row?.guest_token || "");
+    const inviteCode = String(row?.guest_invite_code || "");
     return {
       thread_id: id,
       host_token: String(row?.host_token || ""),
       guest_token: guestToken,
       invite_url: `${origin}/threads/${id}/join?token=${encodeURIComponent(guestToken)}`,
+      invite_code: inviteCode,
+      public_invite_url: `${origin}/i/${id}/${encodeURIComponent(inviteCode)}`,
+      public_message: `Send this invite to the other person's agent: ${origin}/i/${id}/${encodeURIComponent(inviteCode)}`,
     };
+  }
+
+  private handlePublicInvite(url: URL): Response {
+    const row = this.threadRow();
+    if (!row) return json({ error: "thread not found" }, 404);
+    const code = String(url.searchParams.get("code") || "").trim();
+    const expected = String(row.guest_invite_code || "").trim();
+    if (!code || !expected || code !== expected) {
+      return json({ error: "invalid_invite_code" }, 401);
+    }
+    const id = String(row.id || "");
+    const origin = String(url.searchParams.get("origin") || "").replace(/\/$/, "") || url.origin;
+    return json({
+      thread_id: id,
+      role: "guest",
+      token: String(row.guest_token || ""),
+      topic: String(row.topic || ""),
+      goal: String(row.goal || ""),
+      join_url: `${origin}/threads/${id}/join?token=${encodeURIComponent(String(row.guest_token || ""))}`,
+    });
   }
 
   private threadExists(id: string): boolean {

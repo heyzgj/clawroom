@@ -770,6 +770,28 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Lesson:** Idempotency without retry is a half-built safety net. Once writes are idempotent, retry transient relay/network failures by default and make the validator bilingual for owner approvals.
 
+### AO. Product Launch Output Needs a Code Boundary, Not a Prompt Boundary
+
+**What:** The v3.1 average-user tests showed that launch commands naturally produce raw machine data: bearer-token invite URLs, launcher JSON, PIDs, runtime-state paths, log paths, and bridge hashes. Telling the LLM "do not show this" helps, but it is still a prompt-dependent seam.
+
+**Fix:** Added `clawroomctl.mjs` as the product-facing wrapper. It creates or joins rooms, starts `launcher.mjs`, writes full machine details to local state, and prints only safe owner-facing JSON by default. `--debug` is opt-in. The relay now emits a public guest invite shape `/i/:thread_id/:code`, so owners forward a tokenless public URL instead of `/join?token=...`.
+
+**Skill change:** `SKILL.md` now instructs OpenClaw to use `node clawroomctl.mjs create` and `node clawroomctl.mjs join` first. Raw `web_fetch` and direct `launcher.mjs` usage are compatibility/debug paths, not the product path.
+
+**Lesson:** If a runtime command can print secrets or implementation details, do not rely on the agent to summarize it safely. Put a small code boundary in front of it and make the default stdout owner-safe.
+
+### AP. Free-Tier Relay Quota Is Now a Launch Blocker, Not a Research Detail
+
+**What:** The 2026-04-17 stability matrix passed three real cross-machine rooms, then a wrapper smoke hit Cloudflare's Durable Objects free-tier error: `Exceeded allowed volume of requests in Durable Objects free tier.`
+
+**Why it matters:** The architecture is not fundamentally wrong. The same relay handled three consecutive cross-machine runs: average calendar scheduling, product launch communication, and a term-sheet negotiation with real Telegram `owner_reply` on the Railway Link side. But a user-facing beta cannot depend on an exhausted free-tier relay. Cloudflare's current docs state that Workers Free Durable Objects include 100,000 requests/day and further operations fail after a free-tier limit is exceeded; daily free limits reset at 00:00 UTC.
+
+**Fixes applied:** The E2E harness and validator now retry transient relay fetches, so one network blip does not create a false failed artifact. This does not solve quota exhaustion. Quota requires either Workers Paid, a lower-request protocol, or both.
+
+**Next decision:** Before inviting outside users, move the relay to Workers Paid or deploy a paid/staging relay for E2E. Then re-run wrapper smoke and at least one product-path average-user flow on the non-exhausted relay.
+
+**Lesson:** Passing E2E on free infrastructure is not the same as production readiness. Once the system uses long-polling Durable Objects, quota/billing is part of the product surface.
+
 ---
 
 ## Updates Log
@@ -784,3 +806,4 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-15** Strict T3 v1 average-user E2E attempt. Room `t_e5f0c995-23e` reached ASK_OWNER on real local + Railway bridges and wrote the Telegram binding, but no human Telegram reply entered OpenClaw inbound before timeout. Committed a failed redacted artifact and hardened bridge owner UX with ForceReply plus `owner_reply_timeout`. Added Lesson AL.
 - **2026-04-16** Strict T3 v1 average-user E2E passed. Room `t_2fbfc1f7-f66` used real Telegram Desktop ForceReply input; owner reply landed as `source: telegram_inbound`; room closed with 8 events, 4 negotiation messages, 2 close events, and both runtimes stopped. Added redacted artifact and cropped Telegram screenshot evidence.
 - **2026-04-16** Average-user product-path E2E hardening. Room `t_fc9adb58-da7` passed Telegram bootstrap smoke but did not trigger ASK_OWNER. Room `t_93dc5ede-d2d` exposed stale local `/tmp` bridge assets. Added launcher feature gates, bridge feature telemetry, relay fetch retries, updated the downloadable gist bundle, and fixed validator Chinese approval detection. Room `t_cf09a77b-543` is a recovered pass after retry patch/restart. Room `t_867a3a94-479` is the clean product-path T3 pass with `source: telegram_inbound`, above-ceiling approval, mutual close, and both runtimes stopped. Added Lessons AM-AN.
+- **2026-04-17** Final stability matrix and launch-boundary hardening. Added `clawroomctl.mjs`, public `/i/:thread/:code` guest invites, owner-safe skill instructions, E2E/validator fetch retries, and refreshed the self-download gist bundle. Cross-machine stability passed for `t_dba18332-f9f` (average calendar, 2 messages), `t_0babf6d2-297` (product launch comms, 4 messages), and `t_10f2b0e8-b00` (term-sheet negotiation, real Telegram `owner_reply` from Link side, `source: telegram_inbound`). Wrapper smoke then hit Cloudflare Durable Objects free-tier quota, making paid/staging relay capacity the next pre-launch blocker. Added Lessons AO-AP and redacted artifacts.

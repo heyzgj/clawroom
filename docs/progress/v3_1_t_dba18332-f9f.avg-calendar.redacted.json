@@ -1,0 +1,244 @@
+{
+  "phase": "closed",
+  "scenario": "avg_calendar",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_dba18332-f9f",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/threads/t_dba18332-f9f/join?token=REDACTED",
+    "invite_code": "CR-REDACTED",
+    "public_invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/i/t_dba18332-f9f/CR-REDACTED",
+    "public_message": "Send this invite to the other person's agent: https://clawroom-v3-relay.heyzgj.workers.dev/i/t_dba18332-f9f/CR-REDACTED"
+  },
+  "hostBot": "@singularitygz_bot",
+  "guestBot": "@link_clawd_bot",
+  "owner_contexts": {
+    "host": {
+      "raw": "George can do Tuesday 10:00 or Thursday 16:00 Shanghai time. Prefer a Chinese owner summary.",
+      "mandates": {}
+    },
+    "guest": {
+      "raw": "Tom cannot do Tuesday. Tom can do Thursday 16:00 Shanghai time and wants the final summary in English.",
+      "mandates": {}
+    }
+  },
+  "hostPromptPath": "local-only: ~/.clawroom-v3/stability-2026-04-17/t_dba18332-f9f-host-prompt.txt",
+  "guestPromptPath": "local-only: ~/.clawroom-v3/stability-2026-04-17/t_dba18332-f9f-guest-prompt.txt",
+  "snapshot": {
+    "thread_id": "t_dba18332-f9f",
+    "role": "host",
+    "topic": "Average user calendar coordination",
+    "goal": "Agree on one 25 minute call time and close with a concise summary for both owners.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。"
+    },
+    "last_message": {
+      "id": 3,
+      "from": "guest",
+      "text": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。",
+      "ts": 1776399490626,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "21918",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399490868
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "76920",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399490909
+      }
+    ]
+  },
+  "ownerReplies": [],
+  "finalSnapshot": {
+    "thread_id": "t_dba18332-f9f",
+    "role": "host",
+    "topic": "Average user calendar coordination",
+    "goal": "Agree on one 25 minute call time and close with a concise summary for both owners.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。"
+    },
+    "last_message": {
+      "id": 3,
+      "from": "guest",
+      "text": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。",
+      "ts": 1776399490626,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "21918",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399490868
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "76920",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399490909
+      }
+    ]
+  },
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "text": "建议周二上午10:00（上海时间）通话25分钟，请问贵方方便吗？",
+      "ts": 1776399440217,
+      "kind": "message"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "text": "抱歉，我方周二无法安排。贵方能否接受周四16:00（上海时间）通话25分钟？",
+      "ts": 1776399454733,
+      "kind": "message"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "text": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。",
+      "ts": 1776399489753,
+      "kind": "close"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "text": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。",
+      "ts": 1776399490626,
+      "kind": "close"
+    }
+  ],
+  "_redaction_notice": {
+    "source": "local-only: ~/.clawroom-v3/stability-2026-04-17/t_dba18332-f9f.json",
+    "redacted_on": "2026-04-17",
+    "redacted_fields": [
+      "thread.host_token",
+      "thread.guest_token",
+      "thread.invite_url",
+      "thread.public_invite_url",
+      "snapshot.token",
+      "finalSnapshot.token",
+      "join_url values",
+      "prompt paths",
+      "thread.invite_code",
+      "thread.public_message invite code"
+    ],
+    "rationale": "Retain transcript, runtime heartbeats, owner_reply source, and validator evidence while removing bearer credentials and local-only prompt paths."
+  },
+  "validator": {
+    "ok": true,
+    "room_id": "t_dba18332-f9f",
+    "stop_reason": "mutual_close",
+    "turn_count": 4,
+    "message_count": 2,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "owner_reply_sources": [],
+    "mandate": null,
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "4 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "2 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": true,
+        "detail": "host and guest runtime heartbeats stopped"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "双方确认于周四（4月23日）16:00（上海时间）通话25分钟。"
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "3 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_role_verified",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_source",
+        "ok": true,
+        "skipped": true,
+        "detail": "no source requirement"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "skipped": true,
+        "detail": "no host budget_ceiling_jpy mandate in artifact"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": true,
+        "skipped": true,
+        "detail": "no binding mandate requires owner evidence"
+      }
+    ]
+  }
+}

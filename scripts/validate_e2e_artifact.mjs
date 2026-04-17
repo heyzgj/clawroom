@@ -37,13 +37,24 @@ function boolArg(args, key) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-  const text = await response.text();
-  const body = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${JSON.stringify(body).slice(0, 400)}`);
+  let lastError = null;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+      const text = await response.text();
+      const body = text ? JSON.parse(text) : null;
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${JSON.stringify(body).slice(0, 400)}`);
+      }
+      return body;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+      }
+    }
   }
-  return body;
+  throw lastError;
 }
 
 function getRuntimeHeartbeats(snapshot) {

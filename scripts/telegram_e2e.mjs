@@ -58,8 +58,31 @@ function readJsonFile(path) {
   }
 }
 
+function redactForConsole(value) {
+  if (Array.isArray(value)) return value.map((item) => redactForConsole(item));
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (/token|invite_url/i.test(key)) {
+      out[key] = item ? "REDACTED" : item;
+    } else {
+      out[key] = redactForConsole(item);
+    }
+  }
+  return out;
+}
+
 function readClipboard() {
   return run("pbpaste").replace(/\n$/, "");
+}
+
+function parseMandates(text) {
+  const mandates = {};
+  for (const line of String(text || "").split("\n")) {
+    const match = line.match(/^\s*MANDATE\s*:\s*budget_ceiling_jpy\s*=\s*([0-9][0-9,]*)\s*$/i);
+    if (match) mandates.budget_ceiling_jpy = Number(match[1].replace(/,/g, ""));
+  }
+  return mandates;
 }
 
 function writeClipboard(text) {
@@ -116,39 +139,59 @@ async function sendTelegramMessage(bot, text, { resetSession, waitAfterOpenMs, w
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    signal: AbortSignal.timeout(Number(options.timeoutMs || 20_000)),
-  });
-  const text = await response.text();
-  let body = {};
-  try {
-    body = text ? JSON.parse(text) : {};
-  } catch {
-    body = { raw: text };
+  let lastError = null;
+  const attempts = Number(options.attempts || 4);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(Number(options.timeoutMs || 20_000)),
+      });
+      const text = await response.text();
+      let body = {};
+      try {
+        body = text ? JSON.parse(text) : {};
+      } catch {
+        body = { raw: text };
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${url}: ${JSON.stringify(body).slice(0, 500)}`);
+      }
+      return body;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(750 * attempt);
+    }
   }
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${url}: ${JSON.stringify(body).slice(0, 500)}`);
-  }
-  return body;
+  throw lastError;
 }
 
 async function fetchJsonWithStatus(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    signal: AbortSignal.timeout(Number(options.timeoutMs || 20_000)),
-  });
-  const text = await response.text();
-  let body = {};
-  try {
-    body = text ? JSON.parse(text) : {};
-  } catch {
-    body = { raw: text };
+  let lastError = null;
+  const attempts = Number(options.attempts || 4);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(Number(options.timeoutMs || 20_000)),
+      });
+      const text = await response.text();
+      let body = {};
+      try {
+        body = text ? JSON.parse(text) : {};
+      } catch {
+        body = { raw: text };
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${url}: ${JSON.stringify(body).slice(0, 500)}`);
+      }
+      return { status: response.status, body };
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(750 * attempt);
+    }
   }
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${url}: ${JSON.stringify(body).slice(0, 500)}`);
-  }
-  return { status: response.status, body };
+  throw lastError;
 }
 
 function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, assetBase, minMessages }) {
@@ -169,10 +212,11 @@ function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, ass
   if (assetBase) {
     lines.push(
       "",
-      "If launcher.mjs or bridge.mjs are missing, download this exact test bundle first:",
+      "If clawroomctl.mjs, launcher.mjs, or bridge.mjs are missing, download this exact test bundle first:",
       "```bash",
       "mkdir -p /tmp/clawroom-v3",
       "cd /tmp/clawroom-v3",
+      `curl -fsSL ${shellQuote(`${assetBase}/clawroomctl.mjs`)} -o clawroomctl.mjs`,
       `curl -fsSL ${shellQuote(`${assetBase}/launcher.mjs`)} -o launcher.mjs`,
       `curl -fsSL ${shellQuote(`${assetBase}/bridge.mjs`)} -o bridge.mjs`,
       "```"
@@ -296,6 +340,7 @@ async function main() {
   const goal = String(args.goal || "Agree on one 30 minute meeting time and close with a concise owner summary.");
   const hostContext = String(args["host-context"] || "George can meet Wednesday 3pm Shanghai time for 30 minutes.");
   const guestContext = String(args["guest-context"] || "Tom can meet Wednesday afternoon except 4pm and prefers an English summary.");
+  const scenario = String(args.scenario || args.topic || "unnamed").trim();
   const minMessages = String(args["min-messages"] || "").trim();
   const assetBase = String(args["asset-base"] || "").replace(/\/$/, "");
   const send = boolArg(args, "send");
@@ -347,7 +392,20 @@ async function main() {
   writeFileSync(guestPromptPath, `${guestPrompt}\n`);
   writeFileSync(
     artifactPath,
-    `${JSON.stringify({ phase: "created", relay, thread, hostBot, guestBot, hostPromptPath, guestPromptPath }, null, 2)}\n`
+    `${JSON.stringify({
+      phase: "created",
+      scenario,
+      relay,
+      thread,
+      hostBot,
+      guestBot,
+      owner_contexts: {
+        host: { raw: hostContext, mandates: parseMandates(hostContext) },
+        guest: { raw: guestContext, mandates: parseMandates(guestContext) },
+      },
+      hostPromptPath,
+      guestPromptPath,
+    }, null, 2)}\n`
   );
 
   console.log(JSON.stringify({ phase: "created", thread_id: threadId, hostPromptPath, guestPromptPath, send, monitor }, null, 2));
@@ -374,7 +432,7 @@ async function main() {
     });
     const transcript = await fetchJson(`${relay}/threads/${threadId}/msgs?token=${encodeURIComponent(hostToken)}&after=-1`);
     writeFileSync(artifactPath, `${JSON.stringify({ ...readJsonFile(artifactPath), phase: "closed", relay, thread, transcript, finalSnapshot }, null, 2)}\n`);
-    console.log(JSON.stringify({ phase: "closed", thread_id: threadId, finalSnapshot }, null, 2));
+    console.log(JSON.stringify({ phase: "closed", thread_id: threadId, finalSnapshot: redactForConsole(finalSnapshot) }, null, 2));
   }
 }
 

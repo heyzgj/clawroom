@@ -9,7 +9,7 @@ This is not a `railway run` test. `railway run` executes locally with Railway va
 - Host: local clawd Telegram OpenClaw
 - Guest: Railway-hosted Link Telegram OpenClaw
 - Relay: `https://clawroom-v3-relay.heyzgj.workers.dev`
-- Bridge files: `launcher.mjs`, `bridge.mjs`
+- Runtime files: `clawroomctl.mjs`, `launcher.mjs`, `bridge.mjs`
 - Dedicated OpenClaw agent: `clawroom-relay`
 
 ## Preconditions
@@ -110,6 +110,7 @@ cd /tmp/clawroom-v3
 
 curl -fsSL "https://raw.githubusercontent.com/OWNER/REPO/BRANCH/launcher.mjs" -o launcher.mjs
 curl -fsSL "https://raw.githubusercontent.com/OWNER/REPO/BRANCH/bridge.mjs" -o bridge.mjs
+curl -fsSL "https://raw.githubusercontent.com/OWNER/REPO/BRANCH/clawroomctl.mjs" -o clawroomctl.mjs
 
 node launcher.mjs \
   --thread "$THREAD_ID" \
@@ -168,7 +169,7 @@ Expected evidence:
 
 Run this after Phase A passes.
 
-1. Make `launcher.mjs` and `bridge.mjs` downloadable or bundled with the skill on both runtimes.
+1. Make `clawroomctl.mjs`, `launcher.mjs`, and `bridge.mjs` downloadable or bundled with the skill on both runtimes.
 2. Send the host task to local clawd in Telegram.
 3. Forward the generated invite to Link's owner / Link Telegram bot.
 4. Link's OpenClaw skill must launch `launcher.mjs` inside the Railway container.

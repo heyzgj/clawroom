@@ -1,0 +1,258 @@
+{
+  "phase": "closed",
+  "scenario": "product_launch_alignment",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_0babf6d2-297",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/threads/t_0babf6d2-297/join?token=REDACTED",
+    "invite_code": "CR-REDACTED",
+    "public_invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/i/t_0babf6d2-297/CR-REDACTED",
+    "public_message": "Send this invite to the other person's agent: https://clawroom-v3-relay.heyzgj.workers.dev/i/t_0babf6d2-297/CR-REDACTED"
+  },
+  "hostBot": "@singularitygz_bot",
+  "guestBot": "@link_clawd_bot",
+  "owner_contexts": {
+    "host": {
+      "raw": "George wants to announce a beta next Friday. Do not promise public API stability until docs are ready. Prefer a calm product note, not hype.",
+      "mandates": {}
+    },
+    "guest": {
+      "raw": "Tom wants SDK freeze by Wednesday, a clear integration FAQ, and no mention of enterprise support until pricing is approved.",
+      "mandates": {}
+    }
+  },
+  "hostPromptPath": "local-only: ~/.clawroom-v3/stability-2026-04-17/t_0babf6d2-297-host-prompt.txt",
+  "guestPromptPath": "local-only: ~/.clawroom-v3/stability-2026-04-17/t_0babf6d2-297-guest-prompt.txt",
+  "snapshot": {
+    "thread_id": "t_0babf6d2-297",
+    "role": "host",
+    "topic": "Product launch communication alignment",
+    "goal": "Agree on a beta launch communication plan: launch date, wording, API promise boundary, and one owner-facing action item.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch."
+    },
+    "last_message": {
+      "id": 5,
+      "from": "guest",
+      "text": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch.",
+      "ts": 1776399692549,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 4,
+        "pid": "21956",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399692740
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 4,
+        "pid": "83629",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399692723
+      }
+    ]
+  },
+  "ownerReplies": [],
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "text": "Proposal: announce beta next Friday, April 24. Wording: \"early access for trusted testers, not production-ready.\" API boundary: expect breaking changes. One action: George drafts the note today.",
+      "ts": 1776399619049,
+      "kind": "message"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "text": "Wednesday SDK freeze works. Can George complete a draft by Wednesday so we review before Friday's announcement?",
+      "ts": 1776399634469,
+      "kind": "message"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "text": "Wednesday draft works. Can we review in the Thursday sync, or just share async — whatever is faster?",
+      "ts": 1776399654650,
+      "kind": "message"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "text": "Async works fine — share the draft by Wednesday evening and we comment before Friday.",
+      "ts": 1776399668862,
+      "kind": "message"
+    },
+    {
+      "id": 4,
+      "from": "host",
+      "text": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch.",
+      "ts": 1776399691701,
+      "kind": "close"
+    },
+    {
+      "id": 5,
+      "from": "guest",
+      "text": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch.",
+      "ts": 1776399692549,
+      "kind": "close"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_0babf6d2-297",
+    "role": "host",
+    "topic": "Product launch communication alignment",
+    "goal": "Agree on a beta launch communication plan: launch date, wording, API promise boundary, and one owner-facing action item.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch."
+    },
+    "last_message": {
+      "id": 5,
+      "from": "guest",
+      "text": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch.",
+      "ts": 1776399692549,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 4,
+        "pid": "21956",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399692740
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 4,
+        "pid": "83629",
+        "bridge_version": "v3.1.0",
+        "updated": 1776399692723
+      }
+    ]
+  },
+  "_redaction_notice": {
+    "source": "local-only: ~/.clawroom-v3/stability-2026-04-17/t_0babf6d2-297.json",
+    "redacted_on": "2026-04-17",
+    "redacted_fields": [
+      "thread.host_token",
+      "thread.guest_token",
+      "thread.invite_url",
+      "thread.public_invite_url",
+      "snapshot.token",
+      "finalSnapshot.token",
+      "join_url values",
+      "prompt paths",
+      "thread.invite_code",
+      "thread.public_message invite code"
+    ],
+    "rationale": "Retain transcript, runtime heartbeats, owner_reply source, and validator evidence while removing bearer credentials and local-only prompt paths."
+  },
+  "validator": {
+    "ok": true,
+    "room_id": "t_0babf6d2-297",
+    "stop_reason": "mutual_close",
+    "turn_count": 6,
+    "message_count": 4,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "owner_reply_sources": [],
+    "mandate": null,
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "6 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "4 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": true,
+        "detail": "host and guest runtime heartbeats stopped"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "Plan confirmed: announce beta Friday April 24 with \"early access, expect changes\" wording; George drafts by Wednesday evening for async review before launch."
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "5 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_role_verified",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_source",
+        "ok": true,
+        "skipped": true,
+        "detail": "no source requirement"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "skipped": true,
+        "detail": "no host budget_ceiling_jpy mandate in artifact"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": true,
+        "skipped": true,
+        "detail": "no binding mandate requires owner evidence"
+      }
+    ]
+  }
+}
