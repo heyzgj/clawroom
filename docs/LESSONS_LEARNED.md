@@ -820,6 +820,18 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Lesson:** Public runtime distribution and hosted infrastructure are separate products. The runtime can be viral; the hosted relay must be gated. For this stage, hosted relay means private beta, while public install should make BYO relay easy.
 
+### AS. BYO Relay Needs an Agent-Friendly Deploy Path and a Tunnel E2E Escape Hatch
+
+**What:** After the hosted relay hit the Durable Objects free-tier volume limit, room `t_1f97d969-595` ran against a local `wrangler dev` relay exposed through an ngrok HTTPS tunnel. The guest was still Railway Link, so this was a real cross-machine Telegram self-launch test without consuming the hosted DO.
+
+**Result:** Both OpenClaw runtimes launched bridges from Telegram, both wrote heartbeats, the relay transcript reached host -> guest -> host close -> guest close, and both runtime heartbeats ended with `status: stopped`. Redacted artifact: [`docs/progress/v3_1_t_1f97d969-595.byo-local-tunnel.redacted.json`](progress/v3_1_t_1f97d969-595.byo-local-tunnel.redacted.json).
+
+**Operational note:** Cloudflare Quick Tunnel failed on this machine with repeated edge TLS EOFs, likely from the local network/VPN path to 198.18.*. ngrok worked and produced clean JSON API responses, though it had reconnect/heartbeat noise and the host bridge recovered from early relay `503` / fetch failures via retry. Tunnel E2E is useful as a quota-saving validation path, but it should not be sold as the normal install path.
+
+**Coverage limit:** This was a 2-message smoke run. It proves BYO relay transport and cross-machine self-launch, not T3 ASK_OWNER or product-safe average-user wrapper copy.
+
+**Lesson:** A public-ready BYO story needs two layers: an agent-friendly deployment skill for durable user-owned Cloudflare Workers, plus a temporary tunnel path for cheap E2E during development. Treat tunnels as test infrastructure, not production infrastructure.
+
 ---
 
 ## Updates Log
@@ -836,3 +848,4 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-16** Average-user product-path E2E hardening. Room `t_fc9adb58-da7` passed Telegram bootstrap smoke but did not trigger ASK_OWNER. Room `t_93dc5ede-d2d` exposed stale local `/tmp` bridge assets. Added launcher feature gates, bridge feature telemetry, relay fetch retries, updated the downloadable gist bundle, and fixed validator Chinese approval detection. Room `t_cf09a77b-543` is a recovered pass after retry patch/restart. Room `t_867a3a94-479` is the clean product-path T3 pass with `source: telegram_inbound`, above-ceiling approval, mutual close, and both runtimes stopped. Added Lessons AM-AN.
 - **2026-04-17** Final stability matrix and launch-boundary hardening. Added `clawroomctl.mjs`, public `/i/:thread/:code` guest invites, owner-safe skill instructions, E2E/validator fetch retries, and refreshed the self-download gist bundle. Cross-machine stability passed for `t_dba18332-f9f` (average calendar, 2 messages), `t_0babf6d2-297` (product launch comms, 4 messages), and `t_10f2b0e8-b00` (term-sheet negotiation, real Telegram `owner_reply` from Link side, `source: telegram_inbound`). Wrapper smoke then hit Cloudflare Durable Objects free-tier quota; follow-up found stale local bridges converting relay errors into empty polls, so `bridge.mjs` now exits on auth/not-found and backs off on quota/server errors. Added Lessons AO-AQ and redacted artifacts.
 - **2026-04-17** Hosted relay hardening and BYO deploy path. Added create-key admission control, create kill switches, room TTL/message/text/heartbeat caps, `clawroomctl`/E2E create-key support, and `skills/deploy-clawroom-relay/SKILL.md` for agent-friendly BYO relay deployment. Added Lesson AR.
+- **2026-04-17** BYO relay tunnel E2E. Room `t_1f97d969-595` used local `wrangler dev` relay exposed by ngrok while Railway Link joined as the guest, reached mutual close, and stopped both runtimes. Cloudflare Quick Tunnel failed locally with edge TLS EOFs, so ngrok is the current tunnel escape hatch. Added Lesson AS and the self-validating redacted artifact.

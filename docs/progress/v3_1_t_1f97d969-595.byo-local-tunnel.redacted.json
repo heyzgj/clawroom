@@ -1,0 +1,234 @@
+{
+  "phase": "closed",
+  "scenario": "local-tunnel-byo-relay-smoke",
+  "relay": "https://33d7-103-151-172-86.ngrok-free.app",
+  "thread": {
+    "thread_id": "t_1f97d969-595",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_url": "http://33d7-103-151-172-86.ngrok-free.app/threads/t_1f97d969-595/join?token=REDACTED",
+    "invite_code": "CR-05C7E45A",
+    "public_invite_url": "http://33d7-103-151-172-86.ngrok-free.app/i/t_1f97d969-595/CR-05C7E45A",
+    "public_message": "Send this invite to the other person's agent: http://33d7-103-151-172-86.ngrok-free.app/i/t_1f97d969-595/CR-05C7E45A"
+  },
+  "hostBot": "@singularitygz_bot",
+  "guestBot": "@link_clawd_bot",
+  "owner_contexts": {
+    "host": {
+      "raw": "George wants to confirm the hosted relay is gated and BYO relay is available. Keep the summary concise.",
+      "mandates": {}
+    },
+    "guest": {
+      "raw": "Tom wants to confirm the remote Link agent can use a temporary tunnel relay. Keep the summary concise.",
+      "mandates": {}
+    }
+  },
+  "hostPromptPath": "/Users/supergeorge/.clawroom-v3/e2e/t_1f97d969-595-host-prompt.txt",
+  "guestPromptPath": "/Users/supergeorge/.clawroom-v3/e2e/t_1f97d969-595-guest-prompt.txt",
+  "snapshot": {
+    "thread_id": "t_1f97d969-595",
+    "role": "host",
+    "topic": "Local tunnel ClawRoom E2E",
+    "goal": "Coordinate one concise implementation status update, exchange at least two messages, and close with a useful owner summary.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option."
+    },
+    "last_message": {
+      "id": 3,
+      "from": "guest",
+      "text": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option.",
+      "ts": 1776411256094,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "22797",
+        "bridge_version": "v3.1.0",
+        "updated": 1776411256523
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "90518",
+        "bridge_version": "v3.1.0",
+        "updated": 1776411256107
+      }
+    ]
+  },
+  "ownerReplies": [],
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "text": "Checking relay config — sent proposal to host. Will update once confirmed.",
+      "ts": 1776411222427,
+      "kind": "message"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "text": "Got it — standing by for host confirmation. I'll flag you as soon as the relay proposal clears.",
+      "ts": 1776411238467,
+      "kind": "message"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "text": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option.",
+      "ts": 1776411254963,
+      "kind": "close"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "text": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option.",
+      "ts": 1776411256094,
+      "kind": "close"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_1f97d969-595",
+    "role": "host",
+    "topic": "Local tunnel ClawRoom E2E",
+    "goal": "Coordinate one concise implementation status update, exchange at least two messages, and close with a useful owner summary.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option."
+    },
+    "last_message": {
+      "id": 3,
+      "from": "guest",
+      "text": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option.",
+      "ts": 1776411256094,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "22797",
+        "bridge_version": "v3.1.0",
+        "updated": 1776411256523
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "90518",
+        "bridge_version": "v3.1.0",
+        "updated": 1776411256107
+      }
+    ]
+  },
+  "_redaction_notice": "Tokens and chat identifiers are redacted. The ngrok relay URL is ephemeral and kept as run evidence. Embedded transcript is kept so the artifact validates without live relay credentials.",
+  "coverage_note": "Covers BYO relay transport through a local wrangler dev Worker exposed by ngrok, Telegram self-launch on local clawd plus Railway Link, turn-taking, mutual close, and stopped runtimes. It is a 2-message smoke run and does not cover ASK_OWNER/T3 or product-safe average-user wrapper copy.",
+  "validator": {
+    "ok": true,
+    "room_id": "t_1f97d969-595",
+    "stop_reason": "mutual_close",
+    "turn_count": 4,
+    "message_count": 2,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "owner_reply_sources": [],
+    "mandate": null,
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "4 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "2 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": true,
+        "detail": "host and guest runtime heartbeats stopped"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "Hosted relay is gated (auth required), BYO relay is available — George can proceed with either option."
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "3 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_role_verified",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_source",
+        "ok": true,
+        "skipped": true,
+        "detail": "no source requirement"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "skipped": true,
+        "detail": "no host budget_ceiling_jpy mandate in artifact"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": true,
+        "skipped": true,
+        "detail": "no binding mandate requires owner evidence"
+      }
+    ]
+  },
+  "observed_issues": [
+    "Cloudflare Quick Tunnel did not establish locally: repeated edge TLS EOFs against 198.18.* routes.",
+    "ngrok tunnel had heartbeat/reconnect noise during the run; the bridge saw early relay 503/fetch failures but retry recovered before negotiation.",
+    "The harness still sends developer-shaped launcher prompts; this run validates BYO relay transport, not the final owner-safe product wrapper UX."
+  ]
+}
