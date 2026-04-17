@@ -25,8 +25,10 @@ Pending work before v3.1 is promoted to canonical production:
 - **Product-path variance**: repeat natural Telegram create/join flows
   after the install path and relay capacity are fixed
 - **Relay capacity**: the current public relay hit Cloudflare Durable
-  Objects free-tier quota during wrapper smoke; use Workers Paid or a
-  paid staging relay before inviting outside users
+  Objects free-tier quota during wrapper smoke after stale local bridges
+  from old tests kept polling invalid rooms; the bridge now exits on
+  auth/not-found errors and backs off on quota/server errors, but use
+  Workers Paid or a paid staging relay before inviting outside users
 
 See [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) Part 7 for the
 full E2E write-up and [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](docs/progress/v3_1_t_92615621-4a8.redacted.json)

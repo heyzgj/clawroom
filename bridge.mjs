@@ -40,6 +40,9 @@ const HEARTBEAT_MS = 15_000;
 const AGENT_TIMEOUT = 90_000;
 const CHALLENGE_WAIT = 5_000;
 const OWNER_REPLY_TTL_SECONDS = 30 * 60;
+const FATAL_RELAY_STATUSES = new Set([401, 403, 404]);
+const QUOTA_BACKOFF_MS = 60_000;
+const RELAY_ERROR_BACKOFF_MS = 10_000;
 
 function parseArgs(argv) {
   const result = {};
@@ -129,6 +132,18 @@ function idempotencyKey(...parts) {
 
 async function delay(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isFatalRelayError(error) {
+  return FATAL_RELAY_STATUSES.has(Number(error?.status));
+}
+
+function relayBackoffMs(error) {
+  const status = Number(error?.status);
+  const message = String(error?.message || "");
+  if (status === 429 || message.includes("Exceeded allowed volume")) return QUOTA_BACKOFF_MS;
+  if (status >= 500) return RELAY_ERROR_BACKOFF_MS;
+  return 5_000;
 }
 
 function negotiationMessageCount(rows) {
@@ -231,6 +246,7 @@ async function relayFetch(path, options = {}) {
   }
 
   const attempts = Math.max(1, Number(options.retries || process.env.CLAWROOM_RELAY_RETRIES || 4) || 4);
+  const allowStatuses = new Set((options.allowStatuses || []).map((status) => Number(status)));
   let lastError = null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
@@ -245,6 +261,18 @@ async function relayFetch(path, options = {}) {
       if (data && typeof data === "object" && !Array.isArray(data)) {
         data._status = response.status;
       }
+      if (!response.ok && !allowStatuses.has(response.status)) {
+        const error = new Error(`relay ${response.status} for ${path}: ${JSON.stringify(data).slice(0, 300)}`);
+        error.status = response.status;
+        error.data = data;
+        error.retriable = response.status >= 500 || response.status === 429;
+        if (attempt < attempts && error.retriable) {
+          log(`relay ${response.status} for ${path}; retry ${attempt}/${attempts}`);
+          await delay(250 * attempt * attempt);
+          continue;
+        }
+        throw error;
+      }
       if (response.status >= 500 && attempt < attempts) {
         log(`relay ${response.status} for ${path}; retry ${attempt}/${attempts}`);
         await delay(250 * attempt * attempt);
@@ -253,6 +281,7 @@ async function relayFetch(path, options = {}) {
       return data;
     } catch (error) {
       lastError = error;
+      if (error.status && !error.retriable) throw error;
       if (attempt >= attempts) break;
       log(`relay fetch failed for ${path}: ${error.message}; retry ${attempt}/${attempts}`);
       await delay(250 * attempt * attempt);
@@ -265,8 +294,11 @@ async function getMessages(after = -1, wait = 0) {
   const data = await relayFetch(`/threads/${threadId}/messages`, {
     query: { after, wait },
     timeoutMs: (wait + 10) * 1000,
-  }).catch((error) => {
-    log(`relay poll failed: ${error.message}`);
+  }).catch(async (error) => {
+    if (isFatalRelayError(error)) throw error;
+    const backoffMs = relayBackoffMs(error);
+    log(`relay poll failed: ${error.message}; backoff_ms=${backoffMs}`);
+    await delay(backoffMs);
     return [];
   });
   return Array.isArray(data) ? data : [];
@@ -277,6 +309,7 @@ async function postMessage(text, key) {
     method: "POST",
     body: { text },
     idempotencyKey: key,
+    allowStatuses: [400, 409],
   });
 }
 
@@ -285,6 +318,7 @@ async function postAskOwner(text, key) {
     method: "POST",
     body: { text, ttl_seconds: OWNER_REPLY_TTL_SECONDS },
     idempotencyKey: key,
+    allowStatuses: [400, 409],
   });
 }
 
@@ -293,6 +327,7 @@ async function closeThread(summary, key) {
     method: "POST",
     body: { summary },
     idempotencyKey: key,
+    allowStatuses: [400, 409],
   });
 }
 
@@ -1115,10 +1150,14 @@ async function run() {
       waiting_owner: publicWaitingOwner(),
     });
 
-    const threadState = await getThreadState().catch((error) => {
-      log(`state fetch failed: ${error.message}`);
+    const threadState = await getThreadState().catch(async (error) => {
+      if (isFatalRelayError(error)) throw error;
+      const backoffMs = relayBackoffMs(error);
+      log(`state fetch failed: ${error.message}; backoff_ms=${backoffMs}`);
+      await delay(backoffMs);
       return null;
     });
+    if (!threadState) continue;
     if (threadState?.closed) {
       const summary = threadState.summary || "The room closed.";
       log(`Thread closed. Summary: ${summary}`);

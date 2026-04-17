@@ -786,11 +786,25 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Why it matters:** The architecture is not fundamentally wrong. The same relay handled three consecutive cross-machine runs: average calendar scheduling, product launch communication, and a term-sheet negotiation with real Telegram `owner_reply` on the Railway Link side. But a user-facing beta cannot depend on an exhausted free-tier relay. Cloudflare's current docs state that Workers Free Durable Objects include 100,000 requests/day and further operations fail after a free-tier limit is exceeded; daily free limits reset at 00:00 UTC.
 
-**Fixes applied:** The E2E harness and validator now retry transient relay fetches, so one network blip does not create a false failed artifact. This does not solve quota exhaustion. Quota requires either Workers Paid, a lower-request protocol, or both.
+**Follow-up finding:** The three normal E2E rooms should not be anywhere near 100,000 Durable Object requests. The quota hit was followed by a local process sweep that found stale `bridge.mjs` processes from old/manual tests, some with fake or expired room ids/tokens. Those processes exposed Lesson AQ.
+
+**Fixes applied:** The E2E harness and validator now retry transient relay fetches, so one network blip does not create a false failed artifact. `bridge.mjs` now treats stale auth/room errors as terminal and backs off on relay quota/server errors. This lowers accidental burn, but does not remove the product requirement for Workers Paid or a paid/staging relay before outside users.
 
 **Next decision:** Before inviting outside users, move the relay to Workers Paid or deploy a paid/staging relay for E2E. Then re-run wrapper smoke and at least one product-path average-user flow on the non-exhausted relay.
 
 **Lesson:** Passing E2E on free infrastructure is not the same as production readiness. Once the system uses long-polling Durable Objects, quota/billing is part of the product surface.
+
+### AQ. Stale Bridges Must Not Convert Relay Errors Into Empty Polls
+
+**What:** After the 2026-04-17 quota error, the local machine had leftover `bridge.mjs` processes from earlier experiments, including fake/stale thread ids and tokens. Some had been alive for roughly 15 hours.
+
+**Root cause:** `bridge.mjs` previously accepted non-2xx relay responses as JSON. Then `getMessages()` coerced non-array responses into `[]`. For a stale room/token, `/messages` returned immediately with an error shape, the bridge interpreted that as "no messages", and the main loop continued instead of waiting for a real long-poll. Multiple stale bridges can therefore burn Durable Object requests much faster than a real room.
+
+**Fix:** `relayFetch()` now throws on non-2xx responses unless that status is explicitly allowed by the caller. `401`, `403`, and `404` are fatal because they mean the bridge is unauthorized or the room is gone. `429` and Cloudflare quota errors back off for 60 seconds; 5xx errors back off before retrying the loop. State fetch failures no longer fall through to message polling.
+
+**Verification:** A local fake relay returning `404` makes the guest bridge exit with runtime state `failed` instead of polling forever. `node --check bridge.mjs` passes.
+
+**Lesson:** Long-poll clients must distinguish "empty poll" from "relay error". Empty is a normal state; unauthorized/not-found is a shutdown condition; quota/server errors need explicit backoff. Otherwise a background daemon turns a harmless stale test into a quota burner.
 
 ---
 
@@ -806,4 +820,4 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-15** Strict T3 v1 average-user E2E attempt. Room `t_e5f0c995-23e` reached ASK_OWNER on real local + Railway bridges and wrote the Telegram binding, but no human Telegram reply entered OpenClaw inbound before timeout. Committed a failed redacted artifact and hardened bridge owner UX with ForceReply plus `owner_reply_timeout`. Added Lesson AL.
 - **2026-04-16** Strict T3 v1 average-user E2E passed. Room `t_2fbfc1f7-f66` used real Telegram Desktop ForceReply input; owner reply landed as `source: telegram_inbound`; room closed with 8 events, 4 negotiation messages, 2 close events, and both runtimes stopped. Added redacted artifact and cropped Telegram screenshot evidence.
 - **2026-04-16** Average-user product-path E2E hardening. Room `t_fc9adb58-da7` passed Telegram bootstrap smoke but did not trigger ASK_OWNER. Room `t_93dc5ede-d2d` exposed stale local `/tmp` bridge assets. Added launcher feature gates, bridge feature telemetry, relay fetch retries, updated the downloadable gist bundle, and fixed validator Chinese approval detection. Room `t_cf09a77b-543` is a recovered pass after retry patch/restart. Room `t_867a3a94-479` is the clean product-path T3 pass with `source: telegram_inbound`, above-ceiling approval, mutual close, and both runtimes stopped. Added Lessons AM-AN.
-- **2026-04-17** Final stability matrix and launch-boundary hardening. Added `clawroomctl.mjs`, public `/i/:thread/:code` guest invites, owner-safe skill instructions, E2E/validator fetch retries, and refreshed the self-download gist bundle. Cross-machine stability passed for `t_dba18332-f9f` (average calendar, 2 messages), `t_0babf6d2-297` (product launch comms, 4 messages), and `t_10f2b0e8-b00` (term-sheet negotiation, real Telegram `owner_reply` from Link side, `source: telegram_inbound`). Wrapper smoke then hit Cloudflare Durable Objects free-tier quota, making paid/staging relay capacity the next pre-launch blocker. Added Lessons AO-AP and redacted artifacts.
+- **2026-04-17** Final stability matrix and launch-boundary hardening. Added `clawroomctl.mjs`, public `/i/:thread/:code` guest invites, owner-safe skill instructions, E2E/validator fetch retries, and refreshed the self-download gist bundle. Cross-machine stability passed for `t_dba18332-f9f` (average calendar, 2 messages), `t_0babf6d2-297` (product launch comms, 4 messages), and `t_10f2b0e8-b00` (term-sheet negotiation, real Telegram `owner_reply` from Link side, `source: telegram_inbound`). Wrapper smoke then hit Cloudflare Durable Objects free-tier quota; follow-up found stale local bridges converting relay errors into empty polls, so `bridge.mjs` now exits on auth/not-found and backs off on quota/server errors. Added Lessons AO-AQ and redacted artifacts.
