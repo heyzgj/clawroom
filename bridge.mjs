@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "v3.1.0";
+const VERSION = "v3.1.1";
 const FEATURES = [
   "telegram-ask-owner-bindings",
   "telegram-force-reply",
@@ -37,7 +37,7 @@ const FEATURES = [
 const DEFAULT_RELAY = "https://clawroom-v3-relay.heyzgj.workers.dev";
 const POLL_WAIT_SECONDS = 20;
 const HEARTBEAT_MS = 15_000;
-const AGENT_TIMEOUT = 90_000;
+const AGENT_TIMEOUT = Math.max(30_000, Number(process.env.CLAWROOM_AGENT_TIMEOUT_MS || 240_000) || 240_000);
 const CHALLENGE_WAIT = 5_000;
 const OWNER_REPLY_TTL_SECONDS = 30 * 60;
 const FATAL_RELAY_STATUSES = new Set([401, 403, 404, 410]);
@@ -449,6 +449,19 @@ function extractText(payload) {
   return JSON.stringify(payload);
 }
 
+function extractChatMessageText(message) {
+  const content = message?.content;
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => typeof part === "string" ? part : String(part?.text || ""))
+      .join("")
+      .trim();
+    if (text) return text;
+  }
+  if (typeof content === "string" && content.trim()) return content.trim();
+  return String(message?.text || "").trim();
+}
+
 async function gatewayCall(message) {
   const wsUrl = resolveGatewayUrl();
   const gatewayToken = resolveGatewayToken();
@@ -464,6 +477,8 @@ async function gatewayCall(message) {
     let state = "waiting_challenge";
     let connectId = "";
     let reqId = "";
+    let runId = "";
+    let lastAssistantText = "";
 
     const mainTimer = setTimeout(() => {
       try { ws.close(); } catch {}
@@ -571,9 +586,40 @@ async function gatewayCall(message) {
         return;
       }
 
-      if (state === "requesting" && msg.type === "res" && msg.id === reqId) {
+      if ((state === "requesting" || state === "accepted") && msg.type === "event" && runId) {
         const payload = msg.payload || {};
-        if (payload.status === "accepted") return;
+        if (msg.event === "agent" && payload.runId === runId && payload.stream === "assistant") {
+          const text = String(payload.data?.text || "").trim();
+          if (text) lastAssistantText = text;
+          return;
+        }
+        if (msg.event === "agent" && payload.runId === runId && payload.stream === "lifecycle" && payload.data?.phase === "end") {
+          if (lastAssistantText) {
+            state = "done";
+            writeRuntimeState("running", { gateway_connected: true, last_gateway_success_at: new Date().toISOString() });
+            finish(lastAssistantText);
+          }
+          return;
+        }
+        if (msg.event === "chat" && payload.runId === runId && payload.state === "final") {
+          const text = extractChatMessageText(payload.message);
+          if (text) {
+            state = "done";
+            writeRuntimeState("running", { gateway_connected: true, last_gateway_success_at: new Date().toISOString() });
+            finish(text);
+          }
+          return;
+        }
+      }
+
+      if ((state === "requesting" || state === "accepted") && msg.type === "res" && msg.id === reqId) {
+        const payload = msg.payload || {};
+        if (payload.status === "accepted") {
+          state = "accepted";
+          runId = String(payload.runId || "");
+          if (runId) log(`OpenClaw accepted run ${runId.slice(0, 8)}`);
+          return;
+        }
         if (!msg.ok) {
           finish(new Error(`Agent error: ${JSON.stringify(msg.error || {})}`));
           return;
@@ -1250,10 +1296,15 @@ async function run() {
   }
 }
 
-run().catch((error) => {
+run().catch(async (error) => {
   try {
     writeRuntimeState("failed", { last_error: error.message });
   } catch {}
+  try {
+    await maybeHeartbeat("failed", true, { last_error: error.message });
+  } catch (heartbeatError) {
+    log(`failed heartbeat could not be sent: ${heartbeatError.message}`);
+  }
   console.error(error);
   process.exit(1);
 });
