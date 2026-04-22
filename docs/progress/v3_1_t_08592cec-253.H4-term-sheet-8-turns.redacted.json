@@ -1,0 +1,299 @@
+{
+  "phase": "closed",
+  "scenario": "H4_multi_issue_term_sheet_8_turns_safe_bootstrap",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_08592cec-253",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_url": "REDACTED_URL",
+    "invite_code": "CR-DD78239E",
+    "public_invite_url": "REDACTED_URL",
+    "public_message": "REDACTED_URL"
+  },
+  "hostBot": "@singularitygz_bot",
+  "guestBot": "@link_clawd_bot",
+  "owner_contexts": {
+    "host": {
+      "raw": "George represents a game studio. MANDATE: budget_ceiling_jpy=120000\nPreferred deal: JPY 75,000, 2 short videos, 1 livestream slot, 45-day usage, one approval round, 50% upfront / 50% on delivery, no exclusivity, mutual cancellation with 7 days notice. Ask owner before exceeding JPY 120,000 or granting exclusivity.",
+      "mandates": {}
+    },
+    "guest": {
+      "raw": "Tom represents a creator. Target: JPY 110,000, 2 short videos, 1 livestream slot, 90-day usage, 50% upfront, 1 revision round, no category exclusivity unless paid extra. Push for clear approval timing and cancellation terms.",
+      "mandates": {}
+    }
+  },
+  "hostPromptPath": "/Users/supergeorge/.clawroom-v3/e2e/t_08592cec-253-host-prompt.txt",
+  "guestPromptPath": "/Users/supergeorge/.clawroom-v3/e2e/t_08592cec-253-guest-prompt.txt",
+  "snapshot": {
+    "thread_id": "t_08592cec-253",
+    "role": "host",
+    "topic": "Multi-issue creator sponsorship term sheet",
+    "goal": "Negotiate a creator sponsorship term sheet. Final answer must include price, deliverables, payment timing, usage rights, approval rights, cancellation/reschedule, confidentiality or public announcement, and next step. Do not close before at least 8 negotiation messages.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract."
+    },
+    "last_message": {
+      "id": 9,
+      "from": "guest",
+      "text": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract.",
+      "ts": 1776535665725,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 8,
+        "pid": "31416",
+        "bridge_version": "v3.1.1",
+        "updated": 1776535665928
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 8,
+        "pid": "99198",
+        "bridge_version": "v3.1.1",
+        "updated": 1776535665895
+      }
+    ]
+  },
+  "ownerReplies": [],
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "text": "Hi, I'm reaching out on behalf of George from [game studio]. We'd love to sponsor your content. Our opening offer: JPY 75,000 for 2 short videos + 1 livestream, 45-day usage rights, 50/50 payment, one approval round, no exclusivity. Happy to discuss. What's your initial thought?",
+      "ts": 1776535511531,
+      "kind": "message"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "text": "Thanks for reaching out. The deliverables and structure work for us. We'd like to move on price (JPY 110K) and usage term (90 days). Can you meet those?",
+      "ts": 1776535556866,
+      "kind": "message"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "text": "Can do JPY 95,000 and 60-day usage — that's a fair split. Any flexibility on your end around the 90-day ask?",
+      "ts": 1776535569058,
+      "kind": "message"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "text": "JPY 102,500 and 75-day usage gets us to yes. Approval timing and cancellation terms still need to be locked in — what's your stance on those?",
+      "ts": 1776535585403,
+      "kind": "message"
+    },
+    {
+      "id": 4,
+      "from": "host",
+      "text": "Close on JPY 102,500 + 75 days works for me. On approval: one round, 48 hours for revisions. Cancellation: 7-day mutual notice. Agreed on both?",
+      "ts": 1776535601879,
+      "kind": "message"
+    },
+    {
+      "id": 5,
+      "from": "guest",
+      "text": "We can agree on those terms. Two final items: payment timing (50% upfront before work begins?), and are we okay with a public announcement or is this confidential?",
+      "ts": 1776535617785,
+      "kind": "message"
+    },
+    {
+      "id": 6,
+      "from": "host",
+      "text": "Yes — 50% upfront, 50% on delivery. Announcement can be joint on delivery date if mutually agreed. Ready to finalize — anything else?",
+      "ts": 1776535632140,
+      "kind": "message"
+    },
+    {
+      "id": 7,
+      "from": "guest",
+      "text": "Approval timing — when do we need your brief and asset approvals from your end to keep the schedule on track? Then let's confirm next steps and we're done.",
+      "ts": 1776535651225,
+      "kind": "message"
+    },
+    {
+      "id": 8,
+      "from": "host",
+      "text": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract.",
+      "ts": 1776535664865,
+      "kind": "close"
+    },
+    {
+      "id": 9,
+      "from": "guest",
+      "text": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract.",
+      "ts": 1776535665725,
+      "kind": "close"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_08592cec-253",
+    "role": "host",
+    "topic": "Multi-issue creator sponsorship term sheet",
+    "goal": "Negotiate a creator sponsorship term sheet. Final answer must include price, deliverables, payment timing, usage rights, approval rights, cancellation/reschedule, confidentiality or public announcement, and next step. Do not close before at least 8 negotiation messages.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract.",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract."
+    },
+    "last_message": {
+      "id": 9,
+      "from": "guest",
+      "text": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract.",
+      "ts": 1776535665725,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 8,
+        "pid": "31416",
+        "bridge_version": "v3.1.1",
+        "updated": 1776535665928
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 8,
+        "pid": "99198",
+        "bridge_version": "v3.1.1",
+        "updated": 1776535665895
+      }
+    ]
+  },
+  "validation": {
+    "ok": true,
+    "room_id": "t_08592cec-253",
+    "stop_reason": "mutual_close",
+    "turn_count": 10,
+    "message_count": 8,
+    "close_count": 2,
+    "transcript_source": "relay",
+    "owner_reply_sources": [],
+    "mandate": null,
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "10 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "8 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest -> host -> guest -> host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": true,
+        "detail": "host and guest runtime heartbeats stopped"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "Deal confirmed: JPY 102,500 for 2 short videos + 1 livestream, 75-day usage, 50% upfront / 50% on delivery, one approval round (48hr), 7-day mutual cancellation, joint announcement on delivery. Brief to be provided within 3 business days of signing; approval turnaround 48 hours. Next step: confirm brief delivery date and send draft contract."
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "9 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_role_verified",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_source",
+        "ok": true,
+        "skipped": true,
+        "detail": "no source requirement"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "skipped": true,
+        "detail": "no host budget_ceiling_jpy mandate in artifact"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": true,
+        "skipped": true,
+        "detail": "no binding mandate requires owner evidence"
+      }
+    ]
+  },
+  "scenario_oracle": {
+    "required_terms_present": {
+      "price": true,
+      "deliverables": true,
+      "payment_timing": true,
+      "usage_rights": true,
+      "approval_rights": true,
+      "cancellation": true,
+      "confidentiality_or_announcement": true,
+      "next_step": true
+    }
+  },
+  "screenshots": [
+    "docs/progress/screenshots/t_08592cec-253-guest-term-sheet-safe-output-with-technical-test-input.png",
+    "docs/progress/screenshots/t_08592cec-253-host-term-sheet-safe-output-with-technical-test-input.png"
+  ],
+  "ux_findings": [
+    {
+      "severity": "pass_with_test_harness_caveat",
+      "finding": "Bot replies/final report are human-facing and do not include launcher JSON, pid, runtime paths, hashes, or tokens."
+    },
+    {
+      "severity": "harness_caveat",
+      "finding": "The direct Telegram E2E prompt still displays a technical command block as test input, so this screenshot is bridge-regression evidence, not full product-path average-user evidence."
+    },
+    {
+      "severity": "product_noise",
+      "finding": "Guest bot emitted unrelated memory/persona chatter before launch confirmation (\"Hey Zelda\" / Zama PR mention). It did not break the room but is not acceptable for polished product UX."
+    }
+  ]
+}

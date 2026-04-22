@@ -9,6 +9,7 @@
  *   POST /threads/:id/messages - send message
  *   GET  /threads/:id/messages - poll messages (?after=N&wait=20)
  *   POST /threads/:id/ask-owner - create an owner authorization question
+ *   GET  /threads/:id/owner-reply?code=... - owner decision page (non-mutating)
  *   POST /threads/:id/owner-reply - answer an owner authorization question
  *   POST /threads/:id/close    - mark this side closed
  *   POST /threads/:id/heartbeat - bridge runtime heartbeat
@@ -65,6 +66,7 @@ interface MessageRow {
 
 const MAX_WAIT_SECONDS = 25;
 const OWNER_REPLY_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_PUBLIC_ORIGIN = "https://clawroom-v3-relay.heyzgj.workers.dev";
 const DEFAULT_MAX_THREAD_MS = 2 * 60 * 60 * 1000;
 const DEFAULT_MAX_MESSAGES = 120;
 const DEFAULT_MAX_TEXT_CHARS = 8000;
@@ -126,12 +128,23 @@ async function guardCreate(request: Request, env: Env, bodyKey?: unknown): Promi
   return null;
 }
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
+function json(data: unknown, status = 200, includeBody = true): Response {
+  return new Response(includeBody ? JSON.stringify(data) : null, {
     status,
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+function html(body: string, status = 200, includeBody = true): Response {
+  return new Response(includeBody ? body : null, {
+    status,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "X-Robots-Tag": "noindex",
     },
   });
 }
@@ -160,6 +173,19 @@ function randomInviteCode(): string {
 
 function randomOwnerReplyToken(): string {
   return `owner_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+function randomOwnerReplyCode(): string {
+  return `OR-${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function readJson<T = Record<string, unknown>>(request: Request): Promise<T> {
@@ -205,6 +231,7 @@ function routeHelp(): Response {
       "GET /threads/:id/messages?token=...&after=N&wait=20",
       "GET /threads/:id/post?token=...&text=...",
       "POST /threads/:id/ask-owner",
+      "GET /threads/:id/owner-reply?code=...",
       "POST /threads/:id/owner-reply",
       "POST /threads/:id/close",
       "GET /threads/:id/done?token=...&summary=...",
@@ -241,7 +268,7 @@ export default {
       }
 
       const inviteMatch = path.match(/^\/i\/([^/]+)\/([^/]+)$/);
-      if (request.method === "GET" && inviteMatch) {
+      if ((request.method === "GET" || request.method === "HEAD") && inviteMatch) {
         const [, id, code] = inviteMatch;
         const params = new URLSearchParams({
           code,
@@ -295,8 +322,8 @@ export class ThreadDurableObject {
       const expiry = this.expiredResponse();
       if (expiry) return expiry;
 
-      if (request.method === "GET" && action === "invite") {
-        return this.handlePublicInvite(url);
+      if ((request.method === "GET" || request.method === "HEAD") && action === "invite") {
+        return this.handlePublicInvite(url, request);
       }
 
       if (request.method === "GET" && action === "join") {
@@ -305,10 +332,14 @@ export class ThreadDurableObject {
         return json(this.snapshot(id, auth));
       }
 
+      if ((request.method === "GET" || request.method === "HEAD") && action === "owner-reply") {
+        return this.handleOwnerReplyPage(id, request, url);
+      }
+
       if (action === "owner-reply" && request.method !== "POST") {
         return json({
           error: "method_not_allowed",
-          hint: "owner-reply is POST-only so link previews cannot consume one-time tokens.",
+          hint: "Use GET only to view the owner decision page. Mutating owner replies are POST-only.",
         }, 405);
       }
       if (request.method === "POST" && action === "owner-reply") {
@@ -334,13 +365,13 @@ export class ThreadDurableObject {
       if (request.method === "POST" && action === "ask-owner") {
         const body = await readJson<{ text?: string; idempotency_key?: string; ttl_seconds?: number }>(request);
         const key = this.idempotencyKey(request, url, body.idempotency_key);
-        return this.handleAskOwner(id, auth, body.text || "", key, body.ttl_seconds);
+        return this.handleAskOwner(id, auth, body.text || "", key, body.ttl_seconds, url);
       }
       if (request.method === "GET" && action === "ask-owner") {
         const text = url.searchParams.get("text") || "";
         const key = this.idempotencyKey(request, url);
         const ttlSeconds = Number(url.searchParams.get("ttl_seconds") || 0);
-        return this.handleAskOwner(id, auth, text, key, ttlSeconds);
+        return this.handleAskOwner(id, auth, text, key, ttlSeconds, url);
       }
       if (request.method === "GET" && action === "done") {
         const summary = url.searchParams.get("summary") || "";
@@ -369,6 +400,7 @@ export class ThreadDurableObject {
         id TEXT PRIMARY KEY,
         topic TEXT NOT NULL,
         goal TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT '',
         created INTEGER NOT NULL,
         updated INTEGER NOT NULL,
         closed INTEGER NOT NULL DEFAULT 0,
@@ -398,12 +430,16 @@ export class ThreadDurableObject {
     try {
       this.state.storage.sql.exec("ALTER TABLE thread ADD COLUMN guest_invite_code TEXT NOT NULL DEFAULT ''");
     } catch {}
+    try {
+      this.state.storage.sql.exec("ALTER TABLE thread ADD COLUMN origin TEXT NOT NULL DEFAULT ''");
+    } catch {}
     this.state.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS owner_questions (
         question_id TEXT PRIMARY KEY,
         role TEXT NOT NULL,
         ask_message_id INTEGER NOT NULL,
         owner_reply_token TEXT NOT NULL,
+        owner_reply_code TEXT NOT NULL DEFAULT '',
         text TEXT NOT NULL,
         created INTEGER NOT NULL,
         expires_at INTEGER NOT NULL,
@@ -413,9 +449,16 @@ export class ThreadDurableObject {
         reply_message_id INTEGER NOT NULL DEFAULT -1
       )
     `);
+    try {
+      this.state.storage.sql.exec("ALTER TABLE owner_questions ADD COLUMN owner_reply_code TEXT NOT NULL DEFAULT ''");
+    } catch {}
     this.state.storage.sql.exec(`
       CREATE INDEX IF NOT EXISTS owner_questions_token_idx
       ON owner_questions(owner_reply_token)
+    `);
+    this.state.storage.sql.exec(`
+      CREATE INDEX IF NOT EXISTS owner_questions_code_idx
+      ON owner_questions(owner_reply_code)
     `);
     this.state.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS idempotency (
@@ -447,15 +490,21 @@ export class ThreadDurableObject {
     }
     if (this.threadExists(body.id)) {
       const row = this.threadRow();
+      const origin = this.cleanOrigin(body.origin);
+      if (row && !String(row.origin || "") && origin) {
+        this.state.storage.sql.exec("UPDATE thread SET origin=? WHERE id=?", origin, body.id);
+      }
       return json(this.createResponse(body.origin, row));
     }
     const now = Date.now();
+    const origin = this.cleanOrigin(body.origin);
     this.state.storage.sql.exec(
-      `INSERT INTO thread (id, topic, goal, created, updated, host_token, guest_token, guest_invite_code)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO thread (id, topic, goal, origin, created, updated, host_token, guest_token, guest_invite_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       body.id,
       body.topic || "untitled",
       body.goal || "",
+      origin,
       now,
       now,
       body.host_token,
@@ -465,22 +514,34 @@ export class ThreadDurableObject {
     return json(this.createResponse(body.origin, this.threadRow()));
   }
 
+  private cleanOrigin(origin: unknown): string {
+    const value = String(origin || "").trim().replace(/\/$/, "");
+    if (!/^https?:\/\/[^/\s]+$/i.test(value)) return "";
+    if (/^https?:\/\/thread$/i.test(value)) return "";
+    return value;
+  }
+
+  private publicOrigin(row: Record<string, unknown> | null, origin?: unknown): string {
+    return this.cleanOrigin(row?.origin) || this.cleanOrigin(origin) || DEFAULT_PUBLIC_ORIGIN;
+  }
+
   private createResponse(origin: string, row: Record<string, unknown> | null): Record<string, unknown> {
     const id = String(row?.id || "");
     const guestToken = String(row?.guest_token || "");
     const inviteCode = String(row?.guest_invite_code || "");
+    const publicOrigin = this.publicOrigin(row, origin);
     return {
       thread_id: id,
       host_token: String(row?.host_token || ""),
       guest_token: guestToken,
-      invite_url: `${origin}/threads/${id}/join?token=${encodeURIComponent(guestToken)}`,
+      invite_url: `${publicOrigin}/threads/${id}/join?token=${encodeURIComponent(guestToken)}`,
       invite_code: inviteCode,
-      public_invite_url: `${origin}/i/${id}/${encodeURIComponent(inviteCode)}`,
-      public_message: `Send this invite to the other person's agent: ${origin}/i/${id}/${encodeURIComponent(inviteCode)}`,
+      public_invite_url: `${publicOrigin}/i/${id}/${encodeURIComponent(inviteCode)}`,
+      public_message: `Send this invite to the other person's agent: ${publicOrigin}/i/${id}/${encodeURIComponent(inviteCode)}`,
     };
   }
 
-  private handlePublicInvite(url: URL): Response {
+  private handlePublicInvite(url: URL, request: Request): Response {
     const row = this.threadRow();
     if (!row) return json({ error: "thread not found" }, 404);
     const code = String(url.searchParams.get("code") || "").trim();
@@ -490,14 +551,46 @@ export class ThreadDurableObject {
     }
     const id = String(row.id || "");
     const origin = String(url.searchParams.get("origin") || "").replace(/\/$/, "") || url.origin;
-    return json({
+    const payload = {
       thread_id: id,
       role: "guest",
       token: String(row.guest_token || ""),
       topic: String(row.topic || ""),
       goal: String(row.goal || ""),
       join_url: `${origin}/threads/${id}/join?token=${encodeURIComponent(String(row.guest_token || ""))}`,
-    });
+    };
+    const accept = request.headers.get("Accept") || "";
+    const wantsJson = url.searchParams.get("format") === "json" || /\bapplication\/(?:json|clawroom\+json)\b/i.test(accept);
+    const includeBody = request.method !== "HEAD";
+    if (wantsJson) return json(payload, 200, includeBody);
+
+    const title = "ClawRoom Invite";
+    const description = "Forward this link to the other person's agent so it can join the room.";
+    return html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta property="og:title" content="${title}">
+  <meta property="og:description" content="${description}">
+  <title>${title}</title>
+  <style>
+    body { font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #17202a; background: #f6f8fb; }
+    main { max-width: 560px; margin: 12vh auto; padding: 32px; background: #fff; border: 1px solid #d7dde8; border-radius: 8px; }
+    h1 { font-size: 24px; margin: 0 0 12px; }
+    p { margin: 0 0 12px; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ClawRoom invite</h1>
+    <p>Forward this link to the other person's agent. The agent can join the room and report back when the agents settle it.</p>
+    <p><strong>Room:</strong> <code>${id}</code></p>
+  </main>
+</body>
+</html>`, 200, includeBody);
   }
 
   private threadExists(id: string): boolean {
@@ -731,6 +824,7 @@ export class ThreadDurableObject {
     rawText: string,
     idempotencyKey: string,
     ttlSeconds?: number,
+    url?: URL,
   ): Response {
     const parsedText = this.textOrError(rawText);
     if (parsedText instanceof Response) return parsedText;
@@ -751,6 +845,7 @@ export class ThreadDurableObject {
     const ttlMs = Math.max(60_000, Math.min(OWNER_REPLY_TTL_MS, Number(ttlSeconds || 0) * 1000 || OWNER_REPLY_TTL_MS));
     const questionId = `q_${crypto.randomUUID().slice(0, 12)}`;
     const ownerReplyToken = randomOwnerReplyToken();
+    const ownerReplyCode = randomOwnerReplyCode();
     const expiresAt = now + ttlMs;
 
     this.state.storage.sql.exec(
@@ -764,12 +859,13 @@ export class ThreadDurableObject {
     );
     this.state.storage.sql.exec(
       `INSERT INTO owner_questions
-       (question_id, role, ask_message_id, owner_reply_token, text, created, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (question_id, role, ask_message_id, owner_reply_token, owner_reply_code, text, created, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       questionId,
       auth.role,
       nextId,
       ownerReplyToken,
+      ownerReplyCode,
       text,
       now,
       expiresAt,
@@ -784,6 +880,7 @@ export class ThreadDurableObject {
       kind: "ask_owner",
       question_id: questionId,
       owner_reply_token: ownerReplyToken,
+      owner_reply_url: `${this.publicOrigin(row, url?.origin)}/threads/${id}/owner-reply?code=${encodeURIComponent(ownerReplyCode)}`,
       expires_at: expiresAt,
     };
     this.recordIdempotency(auth.role, idempotencyKey, 201, response);
@@ -791,23 +888,145 @@ export class ThreadDurableObject {
     return json(response, 201);
   }
 
-  private async handleOwnerReply(id: string, request: Request, url: URL): Promise<Response> {
-    const body = await readJson<{ token?: string; question_id?: string; role?: string; text?: string; source?: string }>(request);
-    const token = String(body.token || url.searchParams.get("token") || "").trim();
-    const questionId = String(body.question_id || url.searchParams.get("question_id") || "").trim();
-    const role = String(body.role || url.searchParams.get("role") || "").trim();
-    const parsedText = this.textOrError(String(body.text || url.searchParams.get("text") || ""));
-    if (parsedText instanceof Response) return parsedText;
-    const { text } = parsedText;
-    const source = this.sanitizeMetadataText(body.source || url.searchParams.get("source") || "", 64);
-
-    if (!token || !questionId || !role) return json({ error: "invalid_owner_reply" }, 400);
-    if (!["host", "guest"].includes(role)) return json({ error: "invalid_owner_reply" }, 400);
+  private handleOwnerReplyPage(id: string, request: Request, url: URL): Response {
+    const includeBody = request.method !== "HEAD";
+    const code = String(url.searchParams.get("code") || "").trim();
+    if (!code) return this.ownerReplyHtml("Decision Link", "This decision link is missing its code.", 400, includeBody);
 
     const question = this.state.storage.sql
+      .exec("SELECT * FROM owner_questions WHERE owner_reply_code=? LIMIT 1", code)
+      .toArray()[0] as Record<string, unknown> | undefined;
+    if (!question) return this.ownerReplyHtml("Decision Link", "This decision link is not valid.", 404, includeBody);
+
+    const now = Date.now();
+    if (Boolean(Number(question.consumed || 0))) {
+      return this.ownerReplyHtml("Already Recorded", "This decision was already recorded.", 409, includeBody);
+    }
+    const expiresAt = Number(question.expires_at || 0);
+    if (expiresAt && now > expiresAt) {
+      return this.ownerReplyHtml("Expired", "This decision link expired. Ask your agent to send a fresh question.", 410, includeBody);
+    }
+
+    const questionText = escapeHtml(question.text || "");
+    const role = escapeHtml(question.role || "");
+    const action = `/threads/${encodeURIComponent(id)}/owner-reply`;
+    return html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>ClawRoom Decision</title>
+  <style>
+    body { font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #17202a; background: #f6f8fb; }
+    main { max-width: 620px; margin: 8vh auto; padding: 28px; background: #fff; border: 1px solid #d7dde8; border-radius: 8px; }
+    h1 { font-size: 24px; margin: 0 0 12px; }
+    .question { padding: 16px; border: 1px solid #d7dde8; border-radius: 8px; background: #f9fbff; margin: 16px 0; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 110px; padding: 12px; border: 1px solid #bac4d3; border-radius: 8px; font: inherit; }
+    button { border: 0; border-radius: 8px; padding: 10px 14px; margin: 8px 8px 0 0; font: inherit; color: #fff; background: #106b5f; cursor: pointer; }
+    button.secondary { background: #425466; }
+    .muted { color: #5f6b7a; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ClawRoom needs your decision</h1>
+    <p class="muted">This will be sent to your ${role} agent so it can continue the room.</p>
+    <div class="question">${questionText}</div>
+    <form method="post" action="${action}">
+      <input type="hidden" name="code" value="${escapeHtml(code)}">
+      <input type="hidden" name="source" value="owner_url">
+      <textarea name="text" placeholder="Approve, reject, or give a counter-instruction." required></textarea>
+      <button type="submit">Send Decision</button>
+    </form>
+    <form method="post" action="${action}">
+      <input type="hidden" name="code" value="${escapeHtml(code)}">
+      <input type="hidden" name="source" value="owner_url">
+      <button type="submit" name="text" value="approve">Approve</button>
+      <button class="secondary" type="submit" name="text" value="reject">Reject</button>
+    </form>
+  </main>
+</body>
+</html>`, 200, includeBody);
+  }
+
+  private ownerReplyHtml(title: string, message: string, status = 200, includeBody = true): Response {
+    return html(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)}</title>
+<style>body{font:16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;color:#17202a;background:#f6f8fb}main{max-width:560px;margin:12vh auto;padding:28px;background:#fff;border:1px solid #d7dde8;border-radius:8px}h1{font-size:24px;margin:0 0 12px}</style></head>
+<body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body></html>`, status, includeBody);
+  }
+
+  private wantsOwnerReplyHtml(request: Request): boolean {
+    const accept = request.headers.get("Accept") || "";
+    const contentType = request.headers.get("Content-Type") || "";
+    return /\btext\/html\b/i.test(accept) || /\bapplication\/x-www-form-urlencoded\b|\bmultipart\/form-data\b/i.test(contentType);
+  }
+
+  private async ownerReplyPayload(request: Request, url: URL): Promise<Record<string, string>> {
+    const contentType = request.headers.get("Content-Type") || "";
+    const fromUrl: Record<string, string> = {};
+    for (const key of ["token", "code", "question_id", "role", "text", "source"]) {
+      const value = url.searchParams.get(key);
+      if (value != null) fromUrl[key] = value;
+    }
+    if (/\bapplication\/x-www-form-urlencoded\b|\bmultipart\/form-data\b/i.test(contentType)) {
+      const form = await request.formData();
+      const out = { ...fromUrl };
+      for (const key of ["token", "code", "question_id", "role", "text", "source"]) {
+        const value = form.get(key);
+        if (value != null) out[key] = String(value);
+      }
+      return out;
+    }
+    const body = await readJson<Record<string, unknown>>(request);
+    const out = { ...fromUrl };
+    for (const key of ["token", "code", "question_id", "role", "text", "source"]) {
+      if (body[key] != null) out[key] = String(body[key]);
+    }
+    return out;
+  }
+
+  private ownerReplyError(request: Request, error: string, status: number): Response {
+    if (this.wantsOwnerReplyHtml(request)) {
+      return this.ownerReplyHtml("Decision Not Recorded", error, status);
+    }
+    return json({ error }, status);
+  }
+
+  private async handleOwnerReply(id: string, request: Request, url: URL): Promise<Response> {
+    const body = await this.ownerReplyPayload(request, url);
+    const code = String(body.code || "").trim();
+    let token = String(body.token || "").trim();
+    let questionId = String(body.question_id || "").trim();
+    let role = String(body.role || "").trim();
+    let question: Record<string, unknown> | undefined;
+
+    if (code) {
+      question = this.state.storage.sql
+        .exec("SELECT * FROM owner_questions WHERE owner_reply_code=? LIMIT 1", code)
+        .toArray()[0] as Record<string, unknown> | undefined;
+      if (!question) return this.ownerReplyError(request, "question_not_found", 404);
+      if (questionId && questionId !== String(question.question_id || "")) return this.ownerReplyError(request, "unauthorized_owner_reply", 401);
+      if (role && role !== String(question.role || "")) return this.ownerReplyError(request, "unauthorized_owner_reply", 401);
+      if (token && token !== String(question.owner_reply_token || "")) return this.ownerReplyError(request, "unauthorized_owner_reply", 401);
+      token = String(question.owner_reply_token || "");
+      questionId = String(question.question_id || "");
+      role = String(question.role || "");
+    }
+
+    const parsedText = this.textOrError(String(body.text || ""));
+    if (parsedText instanceof Response) return parsedText;
+    const { text } = parsedText;
+    const source = this.sanitizeMetadataText(body.source || (code ? "owner_url" : ""), 64);
+
+    if (!token || !questionId || !role) return this.ownerReplyError(request, "invalid_owner_reply", 400);
+    if (!["host", "guest"].includes(role)) return this.ownerReplyError(request, "invalid_owner_reply", 400);
+
+    question ||= this.state.storage.sql
       .exec("SELECT * FROM owner_questions WHERE question_id=? LIMIT 1", questionId)
       .toArray()[0] as Record<string, unknown> | undefined;
-    if (!question) return json({ error: "question_not_found" }, 404);
+    if (!question) return this.ownerReplyError(request, "question_not_found", 404);
     const storedRole = String(question.role || "");
     if (storedRole !== role) {
       console.warn(JSON.stringify({
@@ -817,14 +1036,14 @@ export class ThreadDurableObject {
         requested_role: role,
         stored_role: storedRole,
       }));
-      return json({ error: "unauthorized_owner_reply" }, 401);
+      return this.ownerReplyError(request, "unauthorized_owner_reply", 401);
     }
-    if (String(question.owner_reply_token || "") !== token) return json({ error: "unauthorized_owner_reply" }, 401);
-    if (Boolean(Number(question.consumed || 0))) return json({ error: "owner_reply_already_consumed" }, 409);
+    if (String(question.owner_reply_token || "") !== token) return this.ownerReplyError(request, "unauthorized_owner_reply", 401);
+    if (Boolean(Number(question.consumed || 0))) return this.ownerReplyError(request, "owner_reply_already_consumed", 409);
 
     const now = Date.now();
     const expiresAt = Number(question.expires_at || 0);
-    if (expiresAt && now > expiresAt) return json({ error: "owner_reply_expired" }, 410);
+    if (expiresAt && now > expiresAt) return this.ownerReplyError(request, "owner_reply_expired", 410);
     const budget = this.messageBudgetError();
     if (budget) return budget;
 
@@ -865,6 +1084,9 @@ export class ThreadDurableObject {
       ok: true,
     };
     this.wake();
+    if (this.wantsOwnerReplyHtml(request)) {
+      return this.ownerReplyHtml("Decision Recorded", "Your decision was recorded. Your agent can continue now.", 201);
+    }
     return json(response, 201);
   }
 

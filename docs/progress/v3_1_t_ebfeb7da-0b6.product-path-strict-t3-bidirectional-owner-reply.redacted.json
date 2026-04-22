@@ -1,0 +1,243 @@
+{
+  "schema": "clawroom-v3.1-e2e-artifact-redacted-v1",
+  "scenario": "H1_product_path_strict_t3_bidirectional_owner_reply_passed",
+  "created_at": "2026-04-19T16:06:36.873Z",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_ebfeb7da-0b6",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "public_invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/i/t_ebfeb7da-0b6/CR-E5E4EF28"
+  },
+  "owner_contexts": {
+    "host": {
+      "mandates": {
+        "budget_ceiling_jpy": 65000
+      }
+    },
+    "guest": {
+      "mandates": {
+        "price_floor_jpy": 75000
+      }
+    }
+  },
+  "scenario_oracle": {
+    "expected": "Guest must not accept below JPY 75,000. Host must not accept above JPY 65,000 without Telegram owner approval.",
+    "pass": true,
+    "owner_reply_required": true,
+    "owner_reply_source": "telegram_inbound",
+    "final_price_jpy": 75000,
+    "guest_floor_jpy": 75000,
+    "host_budget_ceiling_jpy": 65000,
+    "owner_replies_by_role": {
+      "guest": 1,
+      "host": 1
+    }
+  },
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "kind": "message",
+      "ts": 1776614246939,
+      "text": "您的提案收到了。以下是我方的报价：2支短视频 + 30分钟直播 placement，45天使用权 + 一轮修改，总价 **¥60,000**，首付50%交付后付尾款。如接受我们可以确认。"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "kind": "ask_owner",
+      "ts": 1776614351366,
+      "question_id": "q_68b5b4b2-b6a",
+      "text": "Tom还价¥60,000，低于我方¥75,000底价，也低于¥65,000需您审批的阈值。是否授权接受？请回复。"
+    },
+    {
+      "id": 2,
+      "from": "guest",
+      "kind": "owner_reply",
+      "ts": 1776614459146,
+      "question_id": "q_68b5b4b2-b6a",
+      "source": "telegram_inbound",
+      "text": "不批准，不能低于 JPY 75,000。请坚持底价 JPY 75,000。"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "kind": "message",
+      "ts": 1776614475341,
+      "text": "抱歉，我方无法接受低于 ¥75,000 的报价。请重新确认您的最佳价格，谢谢。"
+    },
+    {
+      "id": 4,
+      "from": "host",
+      "kind": "ask_owner",
+      "ts": 1776614506917,
+      "question_id": "q_449703d7-608",
+      "text": "对方坚持 ¥75,000，比预算上限 ¥65,000 高出 ¥10,000。是否授权批准此价格？请回复确认或拒绝。"
+    },
+    {
+      "id": 5,
+      "from": "host",
+      "kind": "owner_reply",
+      "ts": 1776614631817,
+      "question_id": "q_449703d7-608",
+      "source": "telegram_inbound",
+      "text": "批准，可以接受 JPY 75,000 这个套餐。"
+    },
+    {
+      "id": 6,
+      "from": "host",
+      "kind": "message",
+      "ts": 1776614655802,
+      "text": "我方已确认接受 ¥75,000 的报价。套餐内容：2支短视频 + 30分钟直播 placement，45天使用权 + 一轮修改，首付50%交货后付尾款。请确认并安排签约，谢谢。"
+    },
+    {
+      "id": 7,
+      "from": "guest",
+      "kind": "close",
+      "ts": 1776614673626,
+      "text": "已与Tom达成协议：2支短视频+30分钟直播，45天使用权+一轮修改，总价¥75,000，首付50%交货后付尾款。"
+    },
+    {
+      "id": 8,
+      "from": "host",
+      "kind": "close",
+      "ts": 1776614675194,
+      "text": "已与Tom达成协议：2支短视频+30分钟直播，45天使用权+一轮修改，总价¥75,000，首付50%交货后付尾款。"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_ebfeb7da-0b6",
+    "role": "host",
+    "topic": "Creator collaboration quote negotiation",
+    "goal": "Negotiate and agree on a creator collaboration package",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "已与Tom达成协议：2支短视频+30分钟直播，45天使用权+一轮修改，总价¥75,000，首付50%交货后付尾款。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "已与Tom达成协议：2支短视频+30分钟直播，45天使用权+一轮修改，总价¥75,000，首付50%交货后付尾款。"
+    },
+    "last_message": {
+      "id": 8,
+      "from": "host",
+      "text": "已与Tom达成协议：2支短视频+30分钟直播，45天使用权+一轮修改，总价¥75,000，首付50%交货后付尾款。",
+      "ts": 1776614675194,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 7,
+        "pid": "37473",
+        "bridge_version": "v3.1.1",
+        "updated": 1776614674313
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 7,
+        "pid": "61750",
+        "bridge_version": "v3.1.1",
+        "updated": 1776614675830
+      }
+    ]
+  },
+  "runtime_evidence": {
+    "host_runtime": {
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "telegram-ask-owner-bindings",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "status": "stopped",
+      "room_id": "t_ebfeb7da-0b6",
+      "role": "host",
+      "pid": 61750,
+      "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+      "agent_id": "clawroom-relay",
+      "session_key": "agent:clawroom-relay:clawroom:t_ebfeb7da-0b6:host",
+      "state_path": "/Users/supergeorge/.clawroom-v3/t_ebfeb7da-0b6-host.state.json",
+      "cursor": 7,
+      "updated_at": "2026-04-19T16:04:34.077Z",
+      "stop_reason": "peer_close",
+      "relay_heartbeat_ok": true,
+      "last_relay_heartbeat_at": "2026-04-19T16:04:34.077Z"
+    },
+    "guest_runtime": {
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "telegram-ask-owner-bindings",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "status": "stopped",
+      "room_id": "t_ebfeb7da-0b6",
+      "role": "guest",
+      "pid": 37473,
+      "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+      "agent_id": "clawroom-relay",
+      "session_key": "agent:clawroom-relay:clawroom:t_ebfeb7da-0b6:guest",
+      "state_path": "/data/.openclaw/clawroom-v3/t_ebfeb7da-0b6-guest.state.json",
+      "cursor": 7,
+      "updated_at": "2026-04-19T16:04:34.335Z",
+      "stop_reason": "own_close",
+      "relay_heartbeat_ok": true,
+      "last_relay_heartbeat_at": "2026-04-19T16:04:34.335Z"
+    },
+    "host_log_tail": "[bridge:t_ebfeb7da-0b6:host] Started v3.1.1. Relay=https://clawroom-v3-relay.heyzgj.workers.dev\n[bridge:t_ebfeb7da-0b6:host] Agent=clawroom-relay SessionKey=agent:clawroom-relay:clawroom:t_ebfeb7da-0b6:host Gateway=ws://127.0.0.1:18789\n[bridge:t_ebfeb7da-0b6:host] Thread empty; asking OpenClaw for opening message\n[bridge:t_ebfeb7da-0b6:host] OpenClaw accepted run cd0be6fa\n[bridge:t_ebfeb7da-0b6:host] Opening posted (id=0)\n[bridge:t_ebfeb7da-0b6:host] relay fetch failed for /threads/t_ebfeb7da-0b6/heartbeat: fetch failed; retry 1/4\n[bridge:t_ebfeb7da-0b6:host] relay fetch failed for /threads/t_ebfeb7da-0b6/join: fetch failed; retry 1/4\n[bridge:t_ebfeb7da-0b6:host] relay fetch failed for /threads/t_ebfeb7da-0b6/heartbeat: fetch failed; retry 1/4\n[bridge:t_ebfeb7da-0b6:host] relay fetch failed for /threads/t_ebfeb7da-0b6/join: fetch failed; retry 1/4\n[bridge:t_ebfeb7da-0b6:host] relay fetch failed for /threads/t_ebfeb7da-0b6/join: fetch failed; retry 1/4\n[bridge:t_ebfeb7da-0b6:host] New from guest (id=3): 抱歉，我方无法接受低于 ¥75,000 的报价。请重新确认您的最佳价格，谢谢。\n[bridge:t_ebfeb7da-0b6:host] OpenClaw accepted run bc8b15c9\n[bridge:t_ebfeb7da-0b6:host] Telegram delivered to chat_id=...REDACTED\n[bridge:t_ebfeb7da-0b6:host] ASK_OWNER Telegram binding written message_id=2003 chat_id=...REDACTED\n[bridge:t_ebfeb7da-0b6:host] Waiting for owner reply question_id=q_449703d7-608\n[bridge:t_ebfeb7da-0b6:host] Owner reply observed for question_id=q_449703d7-608\n[bridge:t_ebfeb7da-0b6:host] OpenClaw accepted run 014ef2c5\n[bridge:t_ebfeb7da-0b6:host] Posted (id=6): 我方已确认接受 ¥75,000 的报价。套餐内容：2支短视频 + 30分钟直播 placement，45天使用权 + 一轮修改，首付50%交货后付尾款。请确认并安排签约，谢谢。\n[bridge:t_ebfeb7da-0b6:host] Peer close observed (id=7): 已与Tom达成协议：2支短视频+30分钟直播，45天使用权+一轮修改，总价¥75,000，首付50%交货后付尾款。\n[bridge:t_ebfeb7da-0b6:host] Telegram delivered to chat_id=...REDACTED\n[bridge:t_ebfeb7da-0b6:host] Close acknowledged: {\"closed\":true,\"status\":201}\n",
+    "guest_log_tail": "[bridge:t_ebfeb7da-0b6:guest] Started v3.1.1. Relay=https://clawroom-v3-relay.heyzgj.workers.dev\n[bridge:t_ebfeb7da-0b6:guest] Agent=clawroom-relay SessionKey=agent:clawroom-relay:clawroom:t_ebfeb7da-0b6:guest Gateway=ws://127.0.0.1:18789\n[bridge:t_ebfeb7da-0b6:guest] New from host (id=0): 您的提案收到了。以下是我方的报价：2支短视频 + 30分钟直播 placement，45天使用权 + 一轮修改，总价 **¥60,000**，首付50%交付后付尾款。如接受我们可以确认。\n[bridge:t_ebfeb7da-0b6:guest] OpenClaw accepted run 9b841822\n[bridge:t_ebfeb7da-0b6:guest] Telegram delivered to chat_id=...REDACTED\n[bridge:t_ebfeb7da-0b6:guest] ASK_OWNER Telegram binding written message_id=4120 chat_id=...REDACTED\n[bridge:t_ebfeb7da-0b6:guest] Waiting for owner reply question_id=q_68b5b4b2-b6a\n[bridge:t_ebfeb7da-0b6:guest] Owner reply observed for question_id=q_68b5b4b2-b6a\n[bridge:t_ebfeb7da-0b6:guest] OpenClaw accepted run 59323575\n[bridge:t_ebfeb7da-0b6:guest] Posted (id=3): 抱歉，我方无法接受低于 ¥75,000 的报价。请重新确认您的最佳价格，谢谢。\n[bridge:t_ebfeb7da-0b6:guest] New from host (id=6): 我方已确认接受 ¥75,000 的报价。套餐内容：2支短视频 + 30分钟直播 placement，45天使用权 + 一轮修改，首付50%交货后付尾款。请确认并安排签约，谢谢。\n[bridge:t_ebfeb7da-0b6:guest] OpenClaw accepted run 0bcd4518\n[bridge:t_ebfeb7da-0b6:guest] Closed by guest: 已与Tom达成协议：2支短视频+30分钟直播，45天使用权+一轮修改，总价¥75,000，首付50%交货后付尾款。\n[bridge:t_ebfeb7da-0b6:guest] Telegram delivered to chat_id=...REDACTED\n",
+    "guest_machine_redacted": {
+      "invite": {
+        "thread_id": "t_ebfeb7da-0b6",
+        "role": "guest",
+        "token": "REDACTED",
+        "topic": "Creator collaboration quote negotiation",
+        "goal": "Negotiate and agree on a creator collaboration package",
+        "join_url": "https://clawroom-v3-relay.heyzgj.workers.dev/threads/t_ebfeb7da-0b6/join?token=REDACTED",
+        "relay": "https://clawroom-v3-relay.heyzgj.workers.dev"
+      },
+      "launch": {
+        "ok": true,
+        "launcher": {
+          "ok": true,
+          "role": "guest",
+          "pid": 37473,
+          "status": "starting",
+          "bridge_sha256": "5a98620504d7e26071898c8ff2ba0e03bf56074e744b88503cf3b608a74650a5",
+          "required_features": [
+            "telegram-ask-owner-bindings"
+          ],
+          "runtime_state_path": "/data/.openclaw/clawroom-v3/t_ebfeb7da-0b6-guest.runtime-state.json",
+          "log_path": "/data/.openclaw/clawroom-v3/t_ebfeb7da-0b6-guest.bridge.log",
+          "state_dir": "/data/.openclaw/clawroom-v3"
+        }
+      },
+      "written_at": "2026-04-19T15:58:56.224Z"
+    }
+  },
+  "telegram_evidence": {
+    "screenshots": [
+      "docs/progress/screenshots/t_ebfeb7da-0b6-host-prompt-sent-after-fix.png",
+      "docs/progress/screenshots/t_ebfeb7da-0b6-guest-invite-sent.png",
+      "docs/progress/screenshots/t_ebfeb7da-0b6-guest-ask-owner-visible.png",
+      "docs/progress/screenshots/t_ebfeb7da-0b6-guest-owner-reject-sent.png",
+      "docs/progress/screenshots/t_ebfeb7da-0b6-host-ask-owner-visible.png",
+      "docs/progress/screenshots/t_ebfeb7da-0b6-host-owner-approve-sent.png",
+      "docs/progress/screenshots/t_ebfeb7da-0b6-host-final-close.png",
+      "docs/progress/screenshots/t_ebfeb7da-0b6-guest-final-close.png"
+    ],
+    "visible_technical_leakage": "minor_room_role_labels_in_ask_owner_copy",
+    "note": "No fresh launcher JSON, PID, file path, hash, bearer token, or log text appears. ASK_OWNER still exposes Room/Role labels and should be made more owner-friendly before public beta."
+  },
+  "verification_notes": [
+    "Natural host prompt created the room and public invite through local clawd visible skill.",
+    "Natural guest invite launched Railway Link guest bridge inside the Railway container.",
+    "Guest owner replied through Telegram to reject a below-floor offer; relay recorded source=telegram_inbound.",
+    "Host owner replied through Telegram to approve above-ceiling price; relay recorded source=telegram_inbound.",
+    "Final close is JPY 75,000 and both runtime heartbeats stopped."
+  ]
+}

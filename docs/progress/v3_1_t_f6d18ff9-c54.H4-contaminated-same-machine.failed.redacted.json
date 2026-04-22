@@ -1,0 +1,334 @@
+{
+  "schema": "clawroom-v3.1-e2e-artifact-redacted-v1",
+  "phase": "closed_failed_cross_machine_oracle",
+  "scenario": {
+    "id": "H4_contaminated_same_machine_ui_misroute",
+    "description": "Attempted post-clean H4 product-path term-sheet run. Telegram UI automation failed to switch from local clawd to Railway Link before sending the guest invite. Local clawd launched both host and guest bridges, so the protocol reached a valid 8-message close but failed the cross-machine product-path oracle.",
+    "started_at_local": "2026-04-20T19:49:00+08:00",
+    "completed_at_local": "2026-04-20T19:54:00+08:00",
+    "coverage_note": "Counts as failure/contamination evidence only. Do not use as cross-machine E2E proof."
+  },
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_f6d18ff9-c54",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_code": "REDACTED",
+    "public_invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/i/t_f6d18ff9-c54/REDACTED"
+  },
+  "owner_contexts": {
+    "host": {
+      "mandates": {
+        "budget_ceiling_jpy": 90000
+      },
+      "min_messages": 8
+    },
+    "guest": {
+      "mandates": {
+        "price_floor_jpy": 90000
+      },
+      "min_messages": 8
+    }
+  },
+  "scenario_oracle": {
+    "pass": false,
+    "protocol_closed": true,
+    "required_terms_present": true,
+    "min_messages_met": true,
+    "cross_machine_guest_runtime": false,
+    "reason": "Guest runtime files and heartbeat came from local ~/.clawroom-v3, not Railway /data/.openclaw. The guest prompt was visibly sent to clawd instead of Link_🦀."
+  },
+  "transcript": [
+    {
+      "id": 0,
+      "ts": 1776685808063,
+      "from": "host",
+      "kind": "message",
+      "text": "Hi! Here's our opening proposal for the sponsorship: **Total: JPY 85,000** | Deliverables: 2 short videos (15-30s each) + 1 live stream appearance (20-30 min) | 45-day usage rights | 1 revision round | 50% upfront, 50% on delivery | 7-day notice for cancellation. No exclusivity. Happy to discuss!"
+    },
+    {
+      "id": 1,
+      "ts": 1776685893644,
+      "from": "guest",
+      "kind": "message",
+      "text": "JPY 85,000 is below our floor. We'd need JPY 95,000 minimum. Also need to discuss approval timing and cancellation/reschedule terms before closing — can you share your proposed language on those?"
+    },
+    {
+      "id": 2,
+      "ts": 1776685911518,
+      "from": "host",
+      "kind": "message",
+      "text": "Our max is JPY 90,000 — that's the ceiling. Can you meet us there? Also, our cancellation/reschedule clause: either party gives 7 days' written notice. Approval: you submit drafts, we approve within 48 hours. Works for you?"
+    },
+    {
+      "id": 3,
+      "ts": 1776685931231,
+      "from": "guest",
+      "kind": "message",
+      "text": "JPY 90,000 works if we can lock in 90-day usage rights (your 45-day is too short). Also need a confidentiality clause before public announcement — can you draft that?"
+    },
+    {
+      "id": 4,
+      "ts": 1776685943478,
+      "from": "host",
+      "kind": "message",
+      "text": "60-day usage is our counter — fair middle ground. Confidentiality clause: neither party discloses deal terms publicly before joint announcement. Agreed? Any issue with the 7-day cancellation notice remaining as is?"
+    },
+    {
+      "id": 5,
+      "ts": 1776685964326,
+      "from": "guest",
+      "kind": "message",
+      "text": "60-day usage works for us. 7-day cancellation notice is fine. One gap: what happens if either party breaches — do we need a force majeure clause? And what's the next step to finalize the contract?"
+    },
+    {
+      "id": 6,
+      "ts": 1776685979275,
+      "from": "host",
+      "kind": "message",
+      "text": "Standard force majeure: neither party liable for delays caused by events beyond reasonable control (illness, natural disaster, platform issues). Next step: I draft the full term sheet for both sides to review and sign. Deal?"
+    },
+    {
+      "id": 7,
+      "ts": 1776685997298,
+      "from": "guest",
+      "kind": "message",
+      "text": "Force majeure language is acceptable. One last confirm: approval timing — you approve drafts within 48 hours, we get how many rounds of revision before final delivery? Once clarified, we're ready for you to draft."
+    },
+    {
+      "id": 8,
+      "ts": 1776686020024,
+      "from": "host",
+      "kind": "close",
+      "text": "总价 JPY 90,000；交付物：2 条短视频（15-30秒）+ 1 次直播露出（20-30分钟）；付款：50% 上线前 + 50% 交付后；使用权：60 天；审批：48 小时内批准，1 轮修改；取消/改期：提前 7 天通知；保密：双方不得在联合公告前披露协议内容；下一步：起草并签署正式合同。"
+    },
+    {
+      "id": 9,
+      "ts": 1776686021610,
+      "from": "guest",
+      "kind": "close",
+      "text": "总价 JPY 90,000；交付物：2 条短视频（15-30秒）+ 1 次直播露出（20-30分钟）；付款：50% 上线前 + 50% 交付后；使用权：60 天；审批：48 小时内批准，1 轮修改；取消/改期：提前 7 天通知；保密：双方不得在联合公告前披露协议内容；下一步：起草并签署正式合同。"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_f6d18ff9-c54",
+    "role": "host",
+    "topic": "Creator Sponsorship Term Sheet Negotiation",
+    "goal": "Negotiate a creator sponsorship term sheet. Both agents should discuss and agree on all terms. Final term sheet must include: price, deliverables, payment timing, usage rights, approval/revision, cancellation/reschedule, confidentiality/public announcement, next step. Report final agreed term sheet in Chinese to the owner.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "总价 JPY 90,000；交付物：2 条短视频（15-30秒）+ 1 次直播露出（20-30分钟）；付款：50% 上线前 + 50% 交付后；使用权：60 天；审批：48 小时内批准，1 轮修改；取消/改期：提前 7 天通知；保密：双方不得在联合公告前披露协议内容；下一步：起草并签署正式合同。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "总价 JPY 90,000；交付物：2 条短视频（15-30秒）+ 1 次直播露出（20-30分钟）；付款：50% 上线前 + 50% 交付后；使用权：60 天；审批：48 小时内批准，1 轮修改；取消/改期：提前 7 天通知；保密：双方不得在联合公告前披露协议内容；下一步：起草并签署正式合同。"
+    },
+    "last_message": {
+      "id": 9,
+      "from": "guest",
+      "text": "总价 JPY 90,000；交付物：2 条短视频（15-30秒）+ 1 次直播露出（20-30分钟）；付款：50% 上线前 + 50% 交付后；使用权：60 天；审批：48 小时内批准，1 轮修改；取消/改期：提前 7 天通知；保密：双方不得在联合公告前披露协议内容；下一步：起草并签署正式合同。",
+      "ts": 1776686021610,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "pid": "2477",
+        "bridge_version": "v3.1.1",
+        "stop_reason": null,
+        "cursor": 8,
+        "message_count": null,
+        "min_messages": null,
+        "updated_at": null,
+        "relay_heartbeat_ok": null
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "pid": "99853",
+        "bridge_version": "v3.1.1",
+        "stop_reason": null,
+        "cursor": 8,
+        "message_count": null,
+        "min_messages": null,
+        "updated_at": null,
+        "relay_heartbeat_ok": null
+      }
+    ]
+  },
+  "runtime_evidence": {
+    "host": {
+      "location": "local",
+      "role": "host",
+      "status": "stopped",
+      "pid": 99853,
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "owner-reply-url",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "stop_reason": "own_close",
+      "cursor": 8,
+      "message_count": null,
+      "min_messages": null,
+      "updated_at": "2026-04-20T11:53:41.491Z",
+      "relay_heartbeat_ok": true
+    },
+    "guest": {
+      "location": "local_unexpected",
+      "role": "guest",
+      "status": "stopped",
+      "pid": 2477,
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "owner-reply-url",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "stop_reason": "peer_close",
+      "cursor": 8,
+      "message_count": null,
+      "min_messages": null,
+      "updated_at": "2026-04-20T11:53:41.726Z",
+      "relay_heartbeat_ok": true
+    },
+    "railway_guest_files_present": false,
+    "railway_guest_files_listing_redacted": ""
+  },
+  "telegram_evidence": {
+    "screenshots": [
+      "docs/progress/screenshots/t_f6d18ff9-c54-h4-host-prompt-sent.png",
+      "docs/progress/screenshots/t_f6d18ff9-c54-h4-host-after-create-wait.png",
+      "docs/progress/screenshots/t_f6d18ff9-c54-h4-guest-invite-sent-clean-reinstall.png",
+      "docs/progress/screenshots/t_f6d18ff9-c54-h4-after-link-row-click-2.png",
+      "docs/progress/screenshots/t_f6d18ff9-c54-h4-contaminated-after-wait.png",
+      "docs/progress/screenshots/t_f6d18ff9-c54-link-deeplink-check-after-misroute.png"
+    ],
+    "screenshot_review": {
+      "contamination": "The guest invite prompt is visible under the clawd chat rather than the Link_🦀 chat. Later deep-link screenshot shows Link_🦀 can be opened, but too late for this room.",
+      "technical_leakage": "Fresh ClawRoom-owned bot outputs in this contaminated room did not show launcher JSON, PID, path, hash, token, or logs; the failure is routing/cross-machine, not output leakage."
+    }
+  },
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "Telegram UI automation misrouted the guest invite to clawd",
+      "detail": "Keyboard search did not switch to Link_🦀 before paste/send, so clawd launched the guest bridge locally. This creates a convincing but invalid pass unless runtime location is checked."
+    },
+    {
+      "severity": "P2",
+      "title": "Protocol can look excellent while product-path oracle fails",
+      "detail": "The room produced 8 negotiation messages, a complete term sheet, mutual close, and stopped runtimes. The artifact must still fail because both roles ran on the local machine."
+    },
+    {
+      "severity": "P3",
+      "title": "Validator requires ASK_OWNER when a rejected above-ceiling amount appears in transcript",
+      "detail": "This failed artifact includes a JPY 95,000 counteroffer but final close is JPY 90,000. The validator treats any above-ceiling transcript amount as ask_owner evidence. That is conservative and acceptable for hard gates, but future evaluator should distinguish accepted over-ceiling terms from rejected proposals."
+    }
+  ],
+  "_redaction_notice": "Bearer tokens, invite code, create key, owner_reply_token, full local log paths, and command arguments are intentionally omitted or redacted. Embedded transcript allows offline validation of the protocol portion.",
+  "validator": {
+    "ok": false,
+    "room_id": "t_f6d18ff9-c54",
+    "stop_reason": "mutual_close",
+    "turn_count": 10,
+    "message_count": 8,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "owner_reply_sources": [],
+    "mandate": {
+      "host_budget_ceiling_jpy": 90000,
+      "max_close_jpy": 90000,
+      "max_transcript_jpy": 95000,
+      "approved_excess": false,
+      "guest_price_floor_jpy": 90000,
+      "min_close_jpy": 90000,
+      "min_transcript_jpy": 85000
+    },
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "10 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "8 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest -> host -> guest -> host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": true,
+        "detail": "host and guest runtime heartbeats stopped"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "总价 JPY 90,000；交付物：2 条短视频（15-30秒）+ 1 次直播露出（20-30分钟）；付款：50% 上线前 + 50% 交付后；使用权：60 天；审批：48 小时内批准，1 轮修改；取消/改期：提前 7 天通知；保密：双方不得在联合公告前披露协议内容；下一步：起草并签署正式合同。"
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "9 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_role_verified",
+        "ok": true,
+        "skipped": true,
+        "detail": "no owner_reply events in transcript"
+      },
+      {
+        "name": "owner_reply_source",
+        "ok": true,
+        "skipped": true,
+        "detail": "no source requirement"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "detail": "close max ¥90000 within host ceiling ¥90000"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": false,
+        "detail": "ask_owner events=0, owner_reply events=0"
+      },
+      {
+        "name": "guest_floor_compliance",
+        "ok": true,
+        "detail": "close max ¥90000 respects guest floor ¥90000"
+      }
+    ]
+  },
+  "validator_command": "node scripts/validate_e2e_artifact.mjs --artifact docs/progress/v3_1_t_f6d18ff9-c54.H4-contaminated-same-machine.failed.redacted.json --min-events 10 --min-messages 8",
+  "validator_exit_code": 1
+}

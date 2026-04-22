@@ -6,3 +6,5 @@ node_modules/
 *.runtime-state.json
 *.state.json
 *.launch.json
+.playwright-cli/
+docs/progress/screenshots/current-*.png

@@ -30,7 +30,7 @@ import {
 
 const VERSION = "v3.1.1";
 const FEATURES = [
-  "telegram-ask-owner-bindings",
+  "owner-reply-url",
   "telegram-force-reply",
   "openclaw-state-dir-fallback",
 ];
@@ -153,8 +153,20 @@ function negotiationMessageCount(rows) {
 function parseMandates(text) {
   const mandates = {};
   for (const line of String(text || "").split("\n")) {
-    const match = line.match(/^\s*MANDATE\s*:\s*budget_ceiling_jpy\s*=\s*([0-9][0-9,]*)\s*$/i);
-    if (match) mandates.budget_ceiling_jpy = Number(match[1].replace(/,/g, ""));
+    const ceilingMatch = line.match(/^\s*MANDATE\s*:\s*(?:budget_ceiling_jpy|budget_ceiling|ceiling_jpy)\s*=\s*([0-9][0-9,]*)\s*$/i);
+    if (ceilingMatch) mandates.budget_ceiling_jpy = Number(ceilingMatch[1].replace(/,/g, ""));
+
+    const floorMatch = line.match(/^\s*MANDATE\s*:\s*(?:price_floor_jpy|minimum_price_jpy|min_price_jpy|floor_jpy)\s*=\s*([0-9][0-9,]*)\s*$/i);
+    if (floorMatch) mandates.price_floor_jpy = Number(floorMatch[1].replace(/,/g, ""));
+
+    const amounts = parseJpyAmounts(line);
+    if (!amounts.length) continue;
+    if (!mandates.budget_ceiling_jpy && /ceiling|not above|do not exceed|don't exceed|max(?:imum)?|最多|上限|不超过|不能超过|超出|超过/.test(line)) {
+      mandates.budget_ceiling_jpy = Math.max(...amounts);
+    }
+    if (!mandates.price_floor_jpy && /floor|bottom|lowest|min(?:imum)?|底价|最低|不低于|至少/.test(line)) {
+      mandates.price_floor_jpy = Math.max(...amounts);
+    }
   }
   return mandates;
 }
@@ -164,6 +176,7 @@ function parseJpyAmounts(text) {
   const amounts = [];
   const patterns = [
     /¥\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /(?:JPY|jpy|yen|円|日元)\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
     /([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?\s*(?:JPY|jpy|yen|円|日元)/g,
   ];
   for (const pattern of patterns) {
@@ -179,6 +192,26 @@ function parseJpyAmounts(text) {
 function maxJpyAmount(text) {
   const amounts = parseJpyAmounts(text);
   return amounts.length ? Math.max(...amounts) : null;
+}
+
+function minJpyAmount(text) {
+  const amounts = parseJpyAmounts(text);
+  return amounts.length ? Math.min(...amounts) : null;
+}
+
+function mandatePromptLines(useAskOwner = false) {
+  const lines = [];
+  if (mandates.budget_ceiling_jpy) {
+    lines.push(
+      `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves.${useAskOwner ? " Use ASK_OWNER before exceeding it." : ""}`
+    );
+  }
+  if (mandates.price_floor_jpy) {
+    lines.push(
+      `Mandate: do not accept or propose below ${mandates.price_floor_jpy} JPY unless the owner explicitly approves.${useAskOwner ? " Use ASK_OWNER before going below it." : ""}`
+    );
+  }
+  return lines;
 }
 
 function ownerReplyApprovesExcess(text) {
@@ -676,7 +709,7 @@ function openingPrompt() {
     "",
     `Owner context: ${ownerCtx}`,
     `Goal: ${goal}`,
-    mandates.budget_ceiling_jpy ? `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves.` : "",
+    ...mandatePromptLines(false),
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     "",
     "Start the conversation with one concrete proposal or the most useful context.",
@@ -692,8 +725,8 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
   return [
     firstTurn ? "You are acting for your owner in a private two-agent coordination room." : "",
     firstTurn ? `Owner context: ${ownerCtx}` : "",
-    firstTurn ? `Goal: ${goal}` : "",
-    mandates.budget_ceiling_jpy ? `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves. Use ASK_OWNER before exceeding it.` : "",
+    `Goal: ${goal}`,
+    ...mandatePromptLines(true),
     minMessages ? `Negotiation messages so far, including the latest received message: ${messageCount}.` : "",
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     minMessages && !canClose ? "You MUST continue with REPLY. Do not close yet." : "",
@@ -702,12 +735,13 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
     "",
     "Reply with one concise message that moves toward the goal.",
     canClose ? "If the agreement is clear and ready to report to your owner, close instead." : "Do not close yet; ask a useful question, make a counteroffer, or confirm one missing detail.",
+    canClose ? "When closing, include all key fields explicitly requested in the goal, including the agreed next step when relevant." : "",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
     "",
     "Return exactly one line, choosing one:",
     "REPLY: <short message under 30 words>",
     "ASK_OWNER: <short authorization question for your owner>",
-    canClose ? "CLAWROOM_CLOSE: <one sentence owner-ready summary>" : "",
+    canClose ? "CLAWROOM_CLOSE: <concise owner-ready summary with final terms and next step>" : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -733,7 +767,7 @@ function ownerReplyPrompt(waiting, ownerReplyText, messageCount) {
     "Your owner has replied to your authorization question.",
     `Owner context: ${ownerCtx}`,
     `Goal: ${goal}`,
-    mandates.budget_ceiling_jpy ? `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves.` : "",
+    ...mandatePromptLines(true),
     `Original counterpart message: ${JSON.stringify(waiting.peer_text || "")}`,
     waiting.attempted_close_summary ? `Your blocked close summary: ${JSON.stringify(waiting.attempted_close_summary)}` : "",
     waiting.blocked_reply_text ? `Your blocked reply: ${JSON.stringify(waiting.blocked_reply_text)}` : "",
@@ -742,11 +776,12 @@ function ownerReplyPrompt(waiting, ownerReplyText, messageCount) {
     "",
     "Continue the negotiation according to the owner reply.",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
+    canClose ? "When closing, include all key fields explicitly requested in the goal, including the agreed next step when relevant." : "",
     "",
     "Return exactly one line, choosing one:",
     "REPLY: <short message under 30 words>",
     "ASK_OWNER: <short authorization question for your owner>",
-    canClose ? "CLAWROOM_CLOSE: <one sentence owner-ready summary>" : "",
+    canClose ? "CLAWROOM_CLOSE: <concise owner-ready summary with final terms and next step>" : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -768,7 +803,9 @@ async function telegramNotify(text, options = {}) {
     return { ok: false, message_id: null, chat_id: null };
   }
   const requestBody = { chat_id: chatId, text };
-  if (options.forceReply) {
+  if (options.replyMarkup) {
+    requestBody.reply_markup = options.replyMarkup;
+  } else if (options.forceReply) {
     requestBody.reply_markup = {
       force_reply: true,
       input_field_placeholder: "Approve, reject, or give instructions",
@@ -803,6 +840,10 @@ async function notifyOwnerOnce(key, summary) {
 
 function ownerReplyEndpoint() {
   return `${relayBase}/threads/${threadId}/owner-reply`;
+}
+
+function ownerDecisionUrl(question) {
+  return String(question?.owner_reply_url || "");
 }
 
 function askOwnerBindingPath(chatId, messageId) {
@@ -856,16 +897,32 @@ function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
 
 function mandateViolation(text, action) {
   const ceiling = Number(mandates.budget_ceiling_jpy || 0);
-  if (!ceiling || bridgeState.mandate_approvals?.budget_ceiling_jpy) return null;
-  const amount = maxJpyAmount(text);
-  if (!amount || amount <= ceiling) return null;
-  if (action === "reply" && obviousRejection(text)) return null;
-  return {
-    kind: "budget_ceiling_jpy",
-    ceiling,
-    amount,
-    action,
-  };
+  if (ceiling && !bridgeState.mandate_approvals?.budget_ceiling_jpy) {
+    const amount = maxJpyAmount(text);
+    if (amount && amount > ceiling && !(action === "reply" && obviousRejection(text))) {
+      return {
+        kind: "budget_ceiling_jpy",
+        ceiling,
+        amount,
+        action,
+      };
+    }
+  }
+
+  const floor = Number(mandates.price_floor_jpy || 0);
+  if (floor && !bridgeState.mandate_approvals?.price_floor_jpy) {
+    const amount = maxJpyAmount(text);
+    if (amount && amount < floor && !(action === "reply" && obviousRejection(text))) {
+      return {
+        kind: "price_floor_jpy",
+        floor,
+        amount,
+        action,
+      };
+    }
+  }
+
+  return null;
 }
 
 function ownerQuestionText(parsed, violation) {
@@ -873,6 +930,12 @@ function ownerQuestionText(parsed, violation) {
   if (violation?.kind === "budget_ceiling_jpy") {
     return [
       `The proposed ${violation.action} mentions ${violation.amount} JPY, above your ${violation.ceiling} JPY ceiling.`,
+      "Approve this exception, reject it, or give a counter-instruction.",
+    ].join(" ");
+  }
+  if (violation?.kind === "price_floor_jpy") {
+    return [
+      `The proposed ${violation.action} mentions ${violation.amount} JPY, below your ${violation.floor} JPY floor.`,
       "Approve this exception, reject it, or give a counter-instruction.",
     ].join(" ");
   }
@@ -885,25 +948,29 @@ async function notifyOwnerQuestion(question, questionText) {
     return null;
   }
   const endpoint = ownerReplyEndpoint();
+  const decisionUrl = ownerDecisionUrl(question);
+  const debugOwnerReply = process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true";
   const text = [
     "ClawRoom needs your decision",
-    `Room: ${threadId}`,
-    `Role: ${role}`,
-    "",
     questionText,
     "",
-    "Reply directly to this Telegram message.",
-    "Say approve, reject, or give a counter-instruction. Other chats will keep going to your normal OpenClaw agent.",
+    decisionUrl ? "Tap Open Decision Page to approve, reject, or give a counter-instruction." : "Approve, reject, or give a counter-instruction.",
     "",
     "Examples: approve; reject; do not go above 65000 JPY; offer extra deliverables instead.",
-    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? "" : null,
-    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? "Debug fallback:" : null,
-    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? `Endpoint: ${endpoint}` : null,
+    debugOwnerReply ? "" : null,
+    debugOwnerReply ? "Debug details:" : null,
+    debugOwnerReply ? `Room: ${threadId}` : null,
+    debugOwnerReply ? `Role: ${role}` : null,
+    debugOwnerReply ? `Endpoint: ${endpoint}` : null,
   ].filter((line) => line !== null).join("\n");
-  const delivered = await telegramNotify(text, { forceReply: true });
+  const replyMarkup = decisionUrl
+    ? { inline_keyboard: [[{ text: "Open Decision Page", url: decisionUrl }]] }
+    : { force_reply: true, input_field_placeholder: "Approve, reject, or give instructions" };
+  const delivered = await telegramNotify(text, { replyMarkup });
   return {
     ...delivered,
     owner_reply_endpoint: endpoint,
+    owner_reply_url: decisionUrl || null,
   };
 }
 
@@ -943,16 +1010,21 @@ async function enterWaitingOwner(parsed, context = {}) {
   try {
     const delivery = await notifyOwnerQuestion(question, questionText);
     let binding = { ok: false, reason: "not_attempted" };
-    try {
-      binding = writeAskOwnerTelegramBinding(question, delivery);
-      if (binding.ok) {
-        log(`ASK_OWNER Telegram binding written message_id=${binding.message_id} chat_id=...${binding.chat_id_suffix}`);
-      } else {
-        log(`ASK_OWNER Telegram binding skipped: ${binding.reason}`);
+    if (process.env.CLAWROOM_ENABLE_TELEGRAM_INBOUND_BINDINGS === "true") {
+      try {
+        binding = writeAskOwnerTelegramBinding(question, delivery);
+        if (binding.ok) {
+          log(`ASK_OWNER Telegram binding written message_id=${binding.message_id} chat_id=...${binding.chat_id_suffix}`);
+        } else {
+          log(`ASK_OWNER Telegram binding skipped: ${binding.reason}`);
+        }
+      } catch (error) {
+        binding = { ok: false, reason: "write_failed" };
+        log(`ASK_OWNER Telegram binding write failed: ${error.message}`);
       }
-    } catch (error) {
-      binding = { ok: false, reason: "write_failed" };
-      log(`ASK_OWNER Telegram binding write failed: ${error.message}`);
+    } else {
+      binding = { ok: false, reason: "disabled_optional_adapter" };
+      log("ASK_OWNER Telegram inbound binding skipped: optional adapter disabled");
     }
     bridgeState.waiting_owner = {
       ...bridgeState.waiting_owner,
@@ -960,6 +1032,7 @@ async function enterWaitingOwner(parsed, context = {}) {
       telegram_chat_hash: binding.ok ? binding.chat_id_hash : null,
       telegram_binding_written: Boolean(binding.ok),
       owner_reply_endpoint: delivery?.owner_reply_endpoint || null,
+      owner_reply_url: delivery?.owner_reply_url || null,
       notified_at: new Date().toISOString(),
     };
     persistState();
@@ -1079,7 +1152,8 @@ async function handleWaitingOwner() {
       log(`Owner reply observed for question_id=${waiting.question_id}`);
       if (ownerReplyApprovesExcess(message.text)) {
         bridgeState.mandate_approvals ||= {};
-        bridgeState.mandate_approvals.budget_ceiling_jpy = {
+        const approvedMandate = waiting.mandate_violation?.kind || "budget_ceiling_jpy";
+        bridgeState.mandate_approvals[approvedMandate] = {
           question_id: waiting.question_id,
           approved_at: new Date().toISOString(),
         };
@@ -1132,10 +1206,11 @@ async function handleOwnerWaitExpired(waiting) {
 
   await notifyOwnerOnce(`owner-timeout:${waiting.question_id}`, [
     "ClawRoom authorization expired",
-    `Room: ${threadId}`,
     "",
     "No reply was recorded before the question expired, so I closed without approving the exception.",
-  ].join("\n")).catch((error) => {
+    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? "" : null,
+    process.env.CLAWROOM_DEBUG_OWNER_REPLY === "true" ? `Room: ${threadId}` : null,
+  ].filter((line) => line !== null).join("\n")).catch((error) => {
     log(`owner timeout notify failed: ${error.message}`);
   });
 

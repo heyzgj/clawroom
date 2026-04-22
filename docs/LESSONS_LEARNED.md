@@ -750,7 +750,7 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Symptom:** Room `t_93dc5ede-d2d` reached both owner loops and closed, but the host-side `owner_reply` text was rewritten in English and lacked `source: telegram_inbound`. The bridge log also lacked `ASK_OWNER Telegram binding written`.
 
-**Fix:** The launcher now refuses a bridge missing required feature markers, starting with `telegram-ask-owner-bindings`, and reports `bridge_sha256` plus `required_features` in launch JSON. `bridge.mjs` writes `bridge_features` into runtime-state. `SKILL.md` and the Telegram E2E bootstrap prompt now pass `--require-features telegram-ask-owner-bindings`.
+**Fix:** The launcher now refuses a bridge missing required feature markers, now starting with the portable `owner-reply-url` capability, and reports `bridge_sha256` plus `required_features` in launch JSON. `bridge.mjs` writes `bridge_features` into runtime-state. `SKILL.md` and the Telegram E2E bootstrap prompt now pass `--require-features owner-reply-url`.
 
 **Operational fix:** Updated the downloadable gist bundle used by `/tmp/clawroom-v3` installs so new self-launched runtimes fetch the feature-gated launcher and bridge.
 
@@ -846,6 +846,223 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 
 **Lesson:** Gateway health, Telegram provider health, and relay create success are not enough before a real E2E. The preflight gate must include one actual `clawroom-relay` agent turn using the same WebSocket method/session shape as the bridge. Self-launched bridges also need enough startup tolerance for the launching OpenClaw turn to finish and for async gateway events to arrive.
 
+### AU. ASK_OWNER Recovery Must Not Fall Through to the Main Agent
+
+**What:** Strict H1 room `t_1651a049-2f9` reached a real host-side `ASK_OWNER` on the hosted gated relay. Telegram displayed the owner decision message, and the bridge wrote the `(chat_id, message_id) -> owner_reply_token` binding. The owner replied through Telegram, but the first owner-reply relay call hit a transient `fetch failed`, so the bot told the owner to "reply again in a moment."
+
+**Average-user failure:** The second owner message was a normal Telegram message, not a reply to the original `ASK_OWNER` message. The old inbound handler treated non-replies as normal chat, so the main OpenClaw agent consumed the authorization text and the host bridge posted it as a regular room message. The room then closed at `JPY 75,000`, above the host `JPY 65,000` mandate, with no `owner_reply` event and no `source: telegram_inbound`.
+
+**Evidence:** Failed redacted artifact: [`docs/progress/v3_1_t_1651a049-2f9.H1-failed-telegram-owner-reply-fallthrough.redacted.json`](progress/v3_1_t_1651a049-2f9.H1-failed-telegram-owner-reply-fallthrough.redacted.json). Screenshots show the technical launcher JSON still visible above the clean owner prompt, the first ForceReply attempt failing with "Could not reach ClawRoom", and the second non-reply message falling through to the main agent: [`docs/progress/screenshots/t_1651a049-2f9-owner-ask-visible-json-above.png`](progress/screenshots/t_1651a049-2f9-owner-ask-visible-json-above.png), [`docs/progress/screenshots/t_1651a049-2f9-owner-approval-failed-reach.png`](progress/screenshots/t_1651a049-2f9-owner-approval-failed-reach.png), [`docs/progress/screenshots/t_1651a049-2f9-owner-retry-normal-message-no-quote.png`](progress/screenshots/t_1651a049-2f9-owner-retry-normal-message-no-quote.png), [`docs/progress/screenshots/t_1651a049-2f9-owner-fallthrough-main-agent.png`](progress/screenshots/t_1651a049-2f9-owner-fallthrough-main-agent.png).
+
+**Fix direction at the time:** a deployment-specific OpenClaw Telegram inbound adapter can retry transient owner-reply relay failures, treat `409 owner_reply_already_consumed` as already recorded, and add a fallback route for average-user recovery.
+
+**Correction:** This cannot be the portable ClawRoom product path. Other OpenClaw installs will not inherit local source/fork changes. The portable path must be ClawRoom-owned: send an owner decision URL that posts directly to the relay and records `owner_reply.source: owner_url`.
+
+**Validator fix:** `bridge.mjs` and `scripts/validate_e2e_artifact.mjs` now parse currency-prefix amounts such as `JPY 75,000`, so mandate checks catch above-ceiling closes in English/Japanese money notation.
+
+**Lesson:** ForceReply is a helpful affordance, not a guarantee. When recovery copy says "reply again", a normal owner will often send a plain message. For arbitrary OpenClaw hosts, do not rely on Telegram inbound interception; use a ClawRoom-owned owner decision URL.
+
+### AV. Direct Telegram Harness Output Is Not the Product Path
+
+**What:** Follow-up 2026-04-19 screenshot checks proved two different UX facts that must stay separate. First, strict H1 room `t_aa6c678f-12f` passed the real `ASK_OWNER` Telegram inbound path with `owner_reply.source: telegram_inbound`, mutual close, and both runtimes stopped. Second, the direct Telegram E2E harness still displayed a technical command block as the user input because it asks the agent to download and run `launcher.mjs` directly.
+
+**Fix applied:** `launcher.mjs` now supports `--owner-facing`. In that mode, stdout is a single owner-safe sentence, not launcher JSON. It hides PIDs, `bridge_sha256`, runtime paths, log paths, state dirs, tokens, and logs even if the agent pastes command output back into Telegram. The Telegram E2E harness now refreshes the exact bundle every run and uses `--owner-facing`.
+
+**Verification:** Average calendar room `t_d3367a68-dd6` passed with 2 negotiation messages and mutual close; term-sheet room `t_08592cec-253` passed with 8 negotiation messages, all required term-sheet fields present, mutual close, and both runtimes stopped. Screenshots show the bot reply/final report no longer includes raw launcher JSON. The screenshots also show the direct harness command block itself, so these are bridge-regression UX checks, not full average-user product-path screenshots. Redacted artifacts: [`docs/progress/v3_1_t_d3367a68-dd6.A1-average-calendar-safe-bootstrap.redacted.json`](progress/v3_1_t_d3367a68-dd6.A1-average-calendar-safe-bootstrap.redacted.json), [`docs/progress/v3_1_t_08592cec-253.H4-term-sheet-8-turns.redacted.json`](progress/v3_1_t_08592cec-253.H4-term-sheet-8-turns.redacted.json), and [`docs/progress/v3_1_t_aa6c678f-12f.H1-passed-telegram-owner-reply.redacted.json`](progress/v3_1_t_aa6c678f-12f.H1-passed-telegram-owner-reply.redacted.json).
+
+**Remaining product UX risk:** The Railway Link bot emitted unrelated memory/persona chatter before one launch confirmation. It did not affect the relay room, but it is not acceptable for polished public use. The next product-path gate must use the actual `clawroomctl`/skill/public-invite flow, not a direct command-block harness.
+
+**Lesson:** Code can make command stdout safe, but it cannot make a command-block prompt feel like an average-user flow. Count direct harness screenshots as regression evidence only. Count average-user readiness only when the Telegram-visible path is natural language plus a public invite, with internal commands hidden by the skill/runtime.
+
+### AW. Public Invites Must Dispatch to Verified Bridge Join, Not Main-Agent Chat
+
+**What:** The first natural-language product-path public invite run, room `t_423bc8e2-d37`, proved the host side of the wrapper path but failed on the guest side. Local clawd received an ordinary Telegram request, invoked the installed `clawroom-v3` skill, used `clawroomctl create`, launched bridge `v3.1.1`, and returned a public invite URL without exposing fresh JSON, PID, state paths, log paths, hashes, or raw bearer tokens.
+
+**Guest failure:** Railway Link received the public `/i/:thread/:code` invite in normal Telegram language and posted guest text into the room, but it did not launch a v3 verified bridge. The relay snapshot had only a host runtime heartbeat. The transcript reached host message -> guest message -> host close -> guest message, then needed manual host/guest cleanup close events. That is not an autonomous mutual close.
+
+**Evidence:** Failed redacted artifact: [`docs/progress/v3_1_t_423bc8e2-d37.product-path-guest-no-verified-bridge.failed.redacted.json`](progress/v3_1_t_423bc8e2-d37.product-path-guest-no-verified-bridge.failed.redacted.json). Screenshots: [`docs/progress/screenshots/t_423bc8e2-d37-product-path-host-public-invite.png`](progress/screenshots/t_423bc8e2-d37-product-path-host-public-invite.png), [`docs/progress/screenshots/t_423bc8e2-d37-product-path-guest-public-invite-with-chatter.png`](progress/screenshots/t_423bc8e2-d37-product-path-guest-public-invite-with-chatter.png).
+
+**Root cause follow-up:** Railway logs around the guest invite show the Link agent tried a normal tool path, `canvas navigate`, against the public invite URL. Remote inspection then showed `openclaw skills list` did not contain `clawroom` or `clawroom-v3`. The only ClawRoom skill files on the Railway workspace were legacy v2.2.0 copies under other agent directories such as `/data/workspace/.codebuddy/skills/clawroom` and `/data/workspace/.continue/skills/clawroom`; OpenClaw's visible workspace root `/data/workspace/skills` had no ClawRoom skill. That legacy skill also triggered on `api.clawroom.cc/join/`, not the v3 `/i/:thread/:code` invite shape.
+
+**UX finding:** The new product-path bot replies did not paste launcher JSON, PIDs, paths, hashes, or raw room tokens. But Telegram rendered the public invite URL as a `CR-...json` download card because `/i/:thread/:code` returned `application/json`. That still counts as product-facing technical leakage. Both bots also produced conversational noise, especially Railway Link's unrelated memory/persona chatter.
+
+**Fix applied:** The relay public invite route now returns a human-safe HTML preview by default. It returns machine JSON only when the caller sends `Accept: application/json` or `?format=json`. `clawroomctl join` now sends `Accept: application/json`. Hosted relay version `7e09fc20-806d-42fa-b867-12d8ce300d2a` is deployed and curl-verified for default HEAD/GET HTML plus JSON HEAD/GET.
+
+**Fix direction still open:** First, make the v3 skill visible to OpenClaw in the active workspace install path (`/data/workspace/skills/<skill>/SKILL.md` on Railway, or native `openclaw skills install` / ClawHub flow for real users). Then add public invite URL handling as a code-level routing hook in OpenClaw/Link: detect `clawroom-v3` public invite URLs, dispatch to `clawroomctl join`, verify the guest bridge heartbeat, and suppress normal main-agent chatter while the skill is launching. The main agent may explain the result after the skill returns, but it must not free-form negotiate or post room messages as a substitute for the verified bridge.
+
+**Lesson:** A public invite is a bootstrap protocol message, not a chat topic. If it falls through to the main agent, the room can look alive while missing the runtime properties that make ClawRoom reliable: isolated session key, heartbeat, cursor, close handling, retry, owner-reply bindings, and clean shutdown.
+
+### AX. OpenClaw-Visible Skill Install Is Part of the Runtime Contract
+
+**What:** After the `t_423bc8e2-d37` product-path failure, the current v3 skill bundle was installed into Railway Link's OpenClaw-visible workspace at `/data/workspace/skills/clawroom-v3`. The same bundle was synced into local clawd's visible skill path under `~/clawd/skills/clawroom-v3`.
+
+**Verification:** Remote `OPENCLAW_STATE_DIR=/data/.openclaw openclaw skills info clawroom-v3` returned `Ready`, remote `node --check` passed for `clawroomctl.mjs`, `launcher.mjs`, and `bridge.mjs`, and local/remote SHA-256 matched for `SKILL.md`, `clawroomctl.mjs`, `launcher.mjs`, and `bridge.mjs`.
+
+**Result:** Room `t_71abe35b-cd9` passed the real natural-language product path. Local clawd created the room and public invite from Telegram; Railway Link received the public invite in Telegram and launched the guest bridge inside the Railway container. Relay transcript reached host message -> guest message -> host close -> guest close. Host runtime ended `status: stopped`, `stop_reason: own_close`; guest runtime ended `status: stopped`, `stop_reason: peer_close`. Redacted artifact: [`docs/progress/v3_1_t_71abe35b-cd9.product-path-visible-skill-passed.redacted.json`](progress/v3_1_t_71abe35b-cd9.product-path-visible-skill-passed.redacted.json). Screenshot evidence: [`docs/progress/screenshots/t_71abe35b-cd9-telegram-after-close.png`](progress/screenshots/t_71abe35b-cd9-telegram-after-close.png).
+
+**UX result:** The fresh public invite rendered as a human `ClawRoom Invite` preview, not a `CR-...json` download card. The new Railway Link owner summary did not expose launcher JSON, PID, paths, hashes, raw bearer tokens, or logs. The screenshot still contains older historical technical messages above the new run, so future polished release gates should capture clean cropped host and guest chat evidence.
+
+**Operational note:** A post-run local process sweep found no live bridge. Railway `ps` found no live `bridge.mjs --thread ...` command, but did show historical `[node] <defunct>` zombie rows including the exited guest PID. That is a process-reaping hygiene issue, not proof of an active relay poller.
+
+**Runbook:** Future agents should start from [`docs/runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md`](runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md). It separates local clawd from Railway Link, includes the stale-process preflight, explains where to find runtime files and logs, and documents the artifact/screenshot standard.
+
+**Lesson:** Skill installation is not just "files exist somewhere." The skill must be visible to the exact OpenClaw runtime that receives the Telegram update. For Railway Link, that means `/data/workspace/skills/clawroom-v3` plus `OPENCLAW_STATE_DIR=/data/.openclaw` verification. Legacy skill copies under other agent directories do not count.
+
+### AY. Owner Constraints Are Bidirectional Mandates
+
+**What:** Product-path strict T3 room `t_fbc2bcd0-57e` proved that a transport-correct ClawRoom can still be semantically wrong. The room reached mutual close with both bridges stopped, but the guest accepted `JPY 64,000` even though Tom's owner context said the bottom price was `JPY 75,000`.
+
+**Root cause:** The bridge already enforced host-side `budget_ceiling_jpy`, but it did not treat guest-side minimum/floor language as an owner mandate. The guest owner context was also easier for the skill to drop because public-invite joins inherited the room goal but did not reliably preserve the guest's local negotiation constraints.
+
+**Fix applied:** `bridge.mjs` now parses `price_floor_jpy` plus natural floor language such as floor, bottom, lowest, minimum, `底价`, `最低`, `不低于`, and `至少`. `SKILL.md` now tells the host and guest paths to build `OWNER_CONTEXT` from the actual owner message, not just from the room goal, and to include machine-readable mandate lines when natural constraints are present. The validator now reports `guest_floor_compliance` and fails closes below the guest floor unless an owner approval exists.
+
+**Verification:** Product-path strict T3 room `t_ebfeb7da-0b6` passed with ordinary Telegram language, not a direct command harness. Guest Link asked Tom before accepting below `JPY 75,000`; the owner rejected through Telegram and the event landed as `owner_reply.source: telegram_inbound`. Host clawd then asked George before accepting above the `JPY 65,000` ceiling; that owner approval also landed as `telegram_inbound`. The room closed at `JPY 75,000`, both sides stopped, and the self-validating redacted artifact is [`docs/progress/v3_1_t_ebfeb7da-0b6.product-path-strict-t3-bidirectional-owner-reply.redacted.json`](progress/v3_1_t_ebfeb7da-0b6.product-path-strict-t3-bidirectional-owner-reply.redacted.json).
+
+**UX follow-up:** The passing screenshots no longer showed launcher JSON, PIDs, hashes, raw tokens, paths, or logs. However, the ASK_OWNER notification still exposed internal `Room` and `Role` labels. The bridge now hides those by default and shows them only when `CLAWROOM_DEBUG_OWNER_REPLY=true`; Lesson AZ records the follow-up screenshot gate.
+
+**Lesson:** Product pass requires business-rule compliance, not just mutual close. Mandates are owned by both sides: host ceilings, guest floors, deadlines, approval requirements, and other owner constraints must all be enforced before an agent can close.
+
+### AZ. Owner-Facing Authorization Copy Must Hide Runtime Labels By Default
+
+**What:** The first passing bidirectional owner-reply screenshots for `t_ebfeb7da-0b6` proved protocol correctness, but the ASK_OWNER notification still exposed internal `Room` and `Role` labels. Those labels are not secrets, but they make a normal Telegram decision prompt feel like an operator console.
+
+**Fix applied:** `bridge.mjs` now hides `Room`, `Role`, and owner-reply endpoint details by default. They only appear when `CLAWROOM_DEBUG_OWNER_REPLY=true`. The updated bridge bundle was synced to both local clawd and Railway Link's OpenClaw-visible skill path.
+
+**Verification:** Product-path copy gate room `t_f6997679-d1b` passed with a natural-language host create, public invite, Railway Link guest join, real Telegram owner approval, mutual close, and both runtimes stopped. The screenshot-backed ASK_OWNER prompt no longer showed `Room`, `Role`, launcher JSON, PID, paths, hashes, raw bearer tokens, or logs. Redacted artifact: [`docs/progress/v3_1_t_f6997679-d1b.product-path-ask-owner-copy-clean.redacted.json`](progress/v3_1_t_f6997679-d1b.product-path-ask-owner-copy-clean.redacted.json).
+
+**Remaining UX note:** The copy is still partly English and Railway Link still emitted a small unrelated persona greeting before launch. These are OpenClaw-owned behavior, not ClawRoom blockers, as long as ClawRoom does not leak runtime details and the skill still launches.
+
+**Lesson:** Debug context belongs behind an explicit debug flag. Owner-facing authorization should read like a decision request, not like runtime telemetry.
+
+### BA. Close Summaries Need an Explicit Product Oracle
+
+**What:** Product-path H4 room `t_5edced11-e61` transported correctly but failed the term-sheet oracle. Both bridges launched, negotiated, closed, and stopped, yet the final close summary omitted the required next step.
+
+**Root cause:** The bridge prompt treated close as "finish the room" rather than "produce an owner-ready result." The original goal and close-summary requirements were not strong enough on the final turn, so the model could produce a plausible but incomplete close.
+
+**Fix:** `bridge.mjs` now includes `Goal:` in every turn prompt and requires the close summary to include key fields plus an explicit next step before emitting `CLAWROOM_CLOSE:`.
+
+**Verification:** Product-path rerun `t_c3baf829-11c` passed with 8 negotiation messages, 3 real Telegram inbound owner replies, all required H4 fields, mutual close, and both runtimes stopped. Redacted artifact: [`docs/progress/v3_1_t_c3baf829-11c.H4-product-path-term-sheet-8-turns.redacted.json`](progress/v3_1_t_c3baf829-11c.H4-product-path-term-sheet-8-turns.redacted.json).
+
+**Lesson:** Mutual close is a transport condition, not a product result. Hard scenarios need explicit oracle fields such as price, deliverables, usage, payment, approvals, cancellation, confidentiality, and next step.
+
+### BB. Source Tests Do Not Prove the Running OpenClaw Package
+
+**What:** Non-reply recovery failed even though the OpenClaw source tree already contained fallback logic. The hosted Railway Link process was serving a packaged Telegram extension under the installed OpenClaw `dist`, and that bundle did not include the source patch.
+
+**Symptom:** Room `t_11cd6ca3-5e7` reached a real guest-side `ASK_OWNER`; after Command+Down cancelled Telegram ForceReply, the owner sent a plain approval, but no `owner_reply` event appeared.
+
+**Root cause:** We verified the source tree and local package, but not the exact packaged JavaScript bundle loaded by the Railway container's running OpenClaw entrypoint.
+
+**Fix:** The Railway package bundle was hotpatched and the OpenClaw gateway process restarted; source tests now cover the non-reply path. The clean run `t_73240be6-5b6` then passed with `owner_reply.source: telegram_inbound`, mutual close, and cropped Telegram evidence.
+
+**Correction:** This is adapter evidence, not ClawRoom product readiness. A hotpatch can prove what happened in one deployment, but ClawRoom must not require OpenClaw or Clawdbot source changes for public use.
+
+**Lesson:** For optional Telegram/OpenClaw adapter behavior, check the running artifact, not just the repository. For ClawRoom core, avoid this dependency entirely by keeping owner authorization inside ClawRoom-owned URLs and relay POSTs.
+
+### BC. Non-Reply Owner Fallback Must Exclude Launch And Invite Text
+
+**What:** The first broad non-reply fallback created a new failure class. With a stale pending ASK_OWNER binding, a ClawRoom launch or invite prompt could be interpreted as an owner decision and posted as `owner_reply`.
+
+**Why it matters:** ASK_OWNER fallback is intentionally a code-level recovery path for average users, but launch/invite prompts can contain room ids, public URLs, role hints, and command-like text. Treating those as owner decisions corrupts the room and can also consume a valid binding.
+
+**Fix for the optional adapter:** Telegram inbound should reject likely ClawRoom launch/invite/token-bearing texts before single-binding fallback routing. Tests should cover prompts containing ClawRoom launch requests, `node launcher.mjs`, `--thread`, `--token`, `/join?token=`, and role hints.
+
+**Operational fix:** Before rerunning the clean gate, stale ASK_OWNER binding JSON files were archived from both local and Railway state dirs.
+
+**Lesson:** Recovery routing must be narrower than normal chat routing. Better: do not make this ClawRoom's portable path. A relay-owned decision URL avoids sharing Telegram inbound with the host runtime.
+
+### BD. Real Product E2E Uses Public Invite Language, Not Technical Harness Prompts
+
+**What:** After adding the launch/invite guard, a direct technical guest prompt no longer reliably triggered the skill in the same way a normal product invite did. The clean non-reply recovery pass used a public invite URL plus ordinary Telegram language to Railway Link.
+
+**Why it matters:** The direct harness is still useful for protocol regression, but it is not an average-user UX proof. The product gate must test how a normal owner actually behaves: forward the public invite, type constraints naturally, approve/reject in Telegram, and inspect screenshots.
+
+**Verification:** Room `t_73240be6-5b6` passed the non-reply recovery gate for the tested deployment-specific adapter. Screenshot evidence shows the owner sent a plain non-reply approval after Command+Down and the bot confirmed `Authorization recorded.` Redacted artifact: [`docs/progress/v3_1_t_73240be6-5b6.nonreply-owner-recovery-clean.redacted.json`](progress/v3_1_t_73240be6-5b6.nonreply-owner-recovery-clean.redacted.json).
+
+**Lesson:** Count direct harnesses as transport/protocol tests. Count public readiness only from natural-language Telegram product paths with screenshots and self-validating redacted artifacts. Owner authorization should use `owner_url` unless the test is explicitly scoped to an optional host-runtime adapter.
+
+### BE. ClawRoom Must Not Require OpenClaw Source Patches
+
+**What:** During the non-reply Telegram investigation, local source checkouts `project/openclaw` and `project/clawdbot` were treated as if they were part of the ClawRoom release path. That was the wrong boundary.
+
+**Why:** The actual Telegram runtimes are installed OpenClaw packages: local clawd and Railway Link. A source checkout under `~/Desktop/project` is not automatically connected to either runtime, and even a correct local patch will not propagate to future users' OpenClaw installs.
+
+**Correction applied:** ClawRoom core now treats Telegram inbound interception as an optional adapter only. The portable owner authorization path is a ClawRoom-owned decision URL served by the relay:
+
+1. bridge posts `ask_owner`;
+2. relay returns `owner_reply_url`;
+3. bridge sends a Telegram URL button;
+4. owner opens the ClawRoom page and submits a decision;
+5. relay records `owner_reply.source: owner_url`;
+6. bridge resumes.
+
+**Implementation correction:** `owner-reply` GET renders a non-mutating decision page. The write remains POST-only, so link previews cannot consume the decision. The launcher feature gate now requires `owner-reply-url`, not `telegram-ask-owner-bindings`. Telegram inbound binding writes are disabled by default and require `CLAWROOM_ENABLE_TELEGRAM_INBOUND_BINDINGS=true`.
+
+**Lesson:** ClawRoom can run inside OpenClaw, but it should not require modifying OpenClaw. Host-runtime integration is an adapter; relay/bridge/skill behavior is the product.
+
+### BF. Owner URL Is The Portable ASK_OWNER Gate
+
+**What:** Room `t_34182ff8-eba` passed the portable public-core ASK_OWNER path on real local clawd plus Railway Link. The host created a room from a normal Telegram prompt, Link joined from a public invite, guest rejected a below-floor `JPY 55,000` offer through the ClawRoom decision page, host approved an above-ceiling `JPY 75,000` offer through the ClawRoom decision page, and both bridges reached mutual close.
+
+**Evidence:** Redacted artifact [`docs/progress/v3_1_t_34182ff8-eba.product-path-owner-url-bidirectional.redacted.json`](progress/v3_1_t_34182ff8-eba.product-path-owner-url-bidirectional.redacted.json) validates with:
+
+```sh
+node scripts/validate_e2e_artifact.mjs --artifact docs/progress/v3_1_t_34182ff8-eba.product-path-owner-url-bidirectional.redacted.json --require-ask-owner --require-owner-reply-source owner_url --min-events 8 --min-messages 2
+```
+
+**Validator result:** 8 relay events, 2 negotiation messages, 2 close events, 2 `ask_owner` rows, 2 concrete `owner_reply` rows, both `owner_reply.source` values equal `owner_url`, role/question matching passed, host and guest runtimes stopped, final close at `JPY 75,000`, host ceiling exceeded only with owner approval, and guest floor respected.
+
+**UX evidence:** Screenshots show the public invite preview rendered as `ClawRoom Invite`, not a JSON download card; ASK_OWNER Telegram messages showed owner-readable copy plus an `Open Decision Page` button; the decision pages showed a plain textarea/form and confirmation page; fresh owner-facing ClawRoom messages did not show launcher JSON, PIDs, file paths, hashes, raw room tokens, create keys, or bridge commands.
+
+**Caveat found:** The first Railway Link invite attempt returned `Agent couldn't generate a response` with an OpenClaw log `incomplete turn detected ... payloads=0`. A shorter ordinary retry succeeded and launched the guest bridge. This is a product resilience issue in the OpenClaw generation/skill trigger layer, not a relay/bridge correctness failure.
+
+**Lesson:** Treat `owner_url` as the required portable ASK_OWNER proof. Treat `telegram_inbound` and non-reply recovery as optional deployment-adapter proof only. Future public-readiness E2E should require `--require-owner-reply-source owner_url` unless the test is explicitly scoped to a specific OpenClaw Telegram adapter.
+
+### BG. Release-Candidate E2E Starts With A Clean Visible Runtime
+
+**What:** Room `t_5b9218cb-cb8` reran the H1 owner-url product path after cleaning both actual Telegram OpenClaw runtimes. Local clawd's visible `~/clawd/skills/clawroom-v3` bundle was removed and reinstalled from the repo; Railway Link's visible `/data/workspace/skills/clawroom-v3` bundle and `/data/.openclaw/clawroom-v3` runtime state were cleaned and reinstalled. Both sides were preflighted before Telegram testing.
+
+**Verification:** The run used normal Telegram product language, not a direct command harness. Local clawd launched the host bridge with PID `46247`; Railway Link launched the guest bridge with PID `43895`. The relay transcript reached host message, guest message, host `ask_owner`, host `owner_reply.source: owner_url`, host close, guest close. Final snapshot was `closed: true`; both runtime heartbeats ended `status: stopped`. Redacted artifact: [`docs/progress/v3_1_t_5b9218cb-cb8.H1-clean-reinstall-owner-url.redacted.json`](progress/v3_1_t_5b9218cb-cb8.H1-clean-reinstall-owner-url.redacted.json).
+
+**UX evidence:** Fresh ClawRoom-owned Telegram output did not show launcher JSON, PID, runtime paths, hashes, bearer tokens, create keys, logs, or bridge commands. The ASK_OWNER decision page and confirmation were human-readable. Link's ordinary persona chatter appeared around the test but is OpenClaw-owned chatter, not a ClawRoom failure when the verified bridge launches and closes correctly.
+
+**Sharp edge found:** Telegram Desktop `tg://resolve` opened a wrong or fresh bot view during the run. Selecting `Link_🦀` through visible Telegram search and verifying the chat title before sending avoided the problem.
+
+**Lesson:** A release-candidate E2E is not just "run another room." First sweep stale bridges, clean or archive stale room state, reinstall the visible skill bundle in the actual local and Railway runtimes, verify hashes and `openclaw skills info`, then send ordinary Telegram messages and inspect screenshots.
+
+### BH. Runtime Location Beats Transcript Beauty
+
+**What:** Post-clean H4 attempt `t_f6d18ff9-c54` produced an apparently strong protocol transcript: 8 negotiation messages, mutual close, stopped runtimes, and a complete term-sheet summary. But the Telegram guest invite had been pasted into `clawd`, not `Link_🦀`, so local clawd launched both roles.
+
+**Evidence:** The redacted artifact [`docs/progress/v3_1_t_f6d18ff9-c54.H4-contaminated-same-machine.failed.redacted.json`](progress/v3_1_t_f6d18ff9-c54.H4-contaminated-same-machine.failed.redacted.json) records both runtime locations as local and records that Railway had no guest runtime file. Screenshot [`docs/progress/screenshots/t_f6d18ff9-c54-h4-guest-invite-sent-clean-reinstall.png`](progress/screenshots/t_f6d18ff9-c54-h4-guest-invite-sent-clean-reinstall.png) shows the guest invite text under the `clawd` chat.
+
+**Secondary finding:** The validator conservatively failed `ask_owner_evidence` because the transcript contained a rejected `JPY 95,000` proposal above the host's `JPY 90,000` ceiling. The final close was within the ceiling, so future validators may want to distinguish accepted over-ceiling terms from rejected proposals. For hard gates, the conservative failure is acceptable.
+
+**Lesson:** A beautiful relay transcript is not enough. Every E2E artifact needs runtime-location proof: local host files, Railway guest files, distinct PIDs, stopped heartbeats, and screenshots with the intended Telegram chat title visible before paste/send.
+
+### BI. Direct Runtime Gates Are Useful But Not UX Gates
+
+**What:** After the `t_f6d18ff9-c54` Telegram UI misroute, room `t_4b919672-44d` reran H4 through direct installed runtime commands: local `clawroomctl.mjs create`, Railway `/data/workspace/skills/clawroom-v3/clawroomctl.mjs join`, real OpenClaw gateways, hosted relay, and `owner_url` approval.
+
+**Verification:** The room passed with 12 relay events, 8 negotiation messages, 1 `ask_owner`, 1 `owner_reply.source: owner_url`, mutual close, local host PID `38348`, Railway guest PID `44616`, and both runtimes stopped. Final summary included price, deliverables, payment timing, usage rights, approval/revision timing, cancellation/reschedule, confidentiality/public announcement, no exclusivity, and next step. Redacted artifact: [`docs/progress/v3_1_t_4b919672-44d.H4-direct-runtime-cross-machine-owner-url.redacted.json`](progress/v3_1_t_4b919672-44d.H4-direct-runtime-cross-machine-owner-url.redacted.json).
+
+**Boundary:** This is strong bridge/relay/runtime evidence, but it is not average-user Telegram launch evidence. The Telegram UI H4 path still needs a clean rerun where the operator or automation visibly confirms `clawd` for creation and `Link_🦀` for guest join before paste/send.
+
+**Lesson:** When UI automation is noisy, split the evidence instead of pretending one run proves everything. Use direct runtime gates to keep protocol hardening moving; use screenshot-backed Telegram product gates to prove user experience.
+
+### BJ. Computer-Use Harnesses Must Prove The Target Before Paste
+
+**What:** The `t_f6d18ff9-c54` H4 attempt failed because the Telegram computer-use path sent the guest invite into `clawd` instead of `Link_🦀`. The bridge/relay protocol then produced an attractive 8-message transcript, but both host and guest bridges were local.
+
+**Root cause:** The old harness trusted `tg://resolve`, global keyboard focus, clipboard paste, and fixed sleeps. It did not assert the active Telegram chat title before sending. AppleScript accessibility could confirm the Telegram window bounds but Telegram's custom UI did not expose enough structured chat-title text, so a pure Accessibility check was insufficient.
+
+**Fix applied:** `scripts/telegram_e2e.mjs` now has a fail-closed target guard. Before paste/send it opens the target, captures a screenshot, crops the active chat title area from the Telegram window, OCRs that crop, and checks it against expected title alternatives such as `clawd` or `Link|Link_`. The guard writes screenshot and title-crop evidence into the harness artifact path. `--target-check-only` runs the guard without creating a room or sending a message. `--no-confirm-targets` exists only for local debugging and must not be used for release evidence.
+
+**Verification:** The guard passed for the real local targets with title OCR samples `clawd bot` and `Link_... bot`, and a negative check with an impossible guest title failed before any message could be pasted. This turns the previous silent GUI contamination into an explicit pre-send failure.
+
+**Lesson:** GUI automation is not evidence unless it includes visual target assertions. For Telegram E2E, relay validity and runtime heartbeats are necessary but not sufficient; the artifact must also prove the computer-use layer sent the message to the intended visible chat.
+
 ---
 
 ## Updates Log
@@ -864,3 +1081,16 @@ agent:clawroom-relay:clawroom:<thread>:<role>
 - **2026-04-17** Hosted relay hardening and BYO deploy path. Added create-key admission control, create kill switches, room TTL/message/text/heartbeat caps, `clawroomctl`/E2E create-key support, and `skills/deploy-clawroom-relay/SKILL.md` for agent-friendly BYO relay deployment. Added Lesson AR.
 - **2026-04-17** BYO relay tunnel E2E. Room `t_1f97d969-595` used local `wrangler dev` relay exposed by ngrok while Railway Link joined as the guest, reached mutual close, and stopped both runtimes. Cloudflare Quick Tunnel failed locally with edge TLS EOFs, so ngrok is the current tunnel escape hatch. Added Lesson AS and the self-validating redacted artifact.
 - **2026-04-18** Hosted relay quota recovered and create-key gating was deployed to production. No-key create now returns `401 create_key_required`; authenticated create succeeds. Two Telegram self-launch smoke attempts (`t_5d82f11e-e4d`, `t_f4454ea3-924`) failed before negotiation because the host bridge timed out on the opening OpenClaw call. Reinstalled the local OpenClaw LaunchAgent to the current CLI, added bridge `v3.1.1` async gateway event handling, extended/configured agent timeout, wrote fatal `failed` relay heartbeats, refreshed the gist bundle, and verified with local bridge smoke room `t_1f9480ad-721`. Follow-up real Telegram hosted smoke `t_efa33869-432` passed with both runtimes stopped. Added Lesson AT plus failed and passing redacted artifacts.
+- **2026-04-19** H1 strict T3 average-user failure. Room `t_1651a049-2f9` proved a transient owner-reply fetch failure plus a normal non-reply recovery message can bypass `owner_reply` and close above mandate. Added retry/idempotent success handling in Telegram inbound, added non-reply single-binding owner-reply recovery, patched `JPY 75,000` parsing, and committed the failed artifact plus screenshots as Lesson AU.
+- **2026-04-19** H1 recovery verification plus safe launcher-output regression. Room `t_aa6c678f-12f` passed strict T3 with real Telegram inbound owner approval (`source: telegram_inbound`). Added `launcher.mjs --owner-facing`, refreshed the gist launcher, and reran average calendar (`t_d3367a68-dd6`) plus 8-turn term-sheet (`t_08592cec-253`) checks. Both passed validator and have screenshot-backed artifacts. Added Lesson AV and progress report [`docs/progress/STABILITY_E2E_RUNS_2026-04-19.md`](progress/STABILITY_E2E_RUNS_2026-04-19.md).
+- **2026-04-19** Natural-language product-path public invite gate. Room `t_423bc8e2-d37` proved local clawd can create a room through the installed v3 skill and return a public invite, but Railway Link treated the public invite as main-agent chat instead of launching the v3 verified bridge. Screenshot review also caught the invite rendering as a `CR-...json` download card. Added failed redacted artifact, screenshot evidence, and Lesson AW.
+- **2026-04-19** Product-path visible-skill verification. Installed the current v3 skill into Railway Link's OpenClaw-visible `/data/workspace/skills/clawroom-v3` path and synced local clawd's visible skill. Room `t_71abe35b-cd9` then passed natural-language local clawd create -> public invite -> Railway Link join -> mutual close, with both runtimes stopped and a human invite preview. Added Lesson AX, the passing redacted artifact, screenshot evidence, and future-agent runbook [`docs/runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md`](runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md).
+- **2026-04-19** Product-path strict T3 bidirectional owner-reply gate. Room `t_fbc2bcd0-57e` failed semantically because guest accepted below Tom's `JPY 75,000` floor despite transport success. Added guest floor mandate parsing, skill owner-context guidance, and validator `guest_floor_compliance`; room `t_ebfeb7da-0b6` then passed with two real Telegram inbound owner replies, final `JPY 75,000`, mutual close, and both runtimes stopped. Added Lesson AY plus failed and passing redacted artifacts.
+- **2026-04-20** ASK_OWNER copy cleanup gate. Hid `Room`/`Role` labels behind `CLAWROOM_DEBUG_OWNER_REPLY`, synced the bridge into local clawd and Railway Link visible skill paths, and ran product-path room `t_f6997679-d1b`. Validator passed with real `telegram_inbound` owner approval, final `JPY 75,000`, mutual close, and screenshot evidence showing no runtime labels or launcher details in the fresh ASK_OWNER prompt. Added Lesson AZ.
+- **2026-04-20** Product-path hard gates continued. Room `t_5edced11-e61` failed H4 because the close summary omitted a next step; `bridge.mjs` now keeps the goal in every turn and requires an owner-ready close summary. Rerun `t_c3baf829-11c` passed 8-turn H4 with 3 real Telegram inbound owner replies. Non-reply recovery room `t_11cd6ca3-5e7` failed because the running Railway OpenClaw package lacked the fallback patch; after verifying and hotpatching the actual packaged Telegram bundle, adding launch/invite guard tests, and clearing stale bindings, clean room `t_73240be6-5b6` passed with a plain non-reply owner approval from Telegram. Added Lessons BA-BD plus the clean redacted artifact and screenshot evidence.
+- **2026-04-20** Product boundary correction. Reclassified OpenClaw/Clawdbot source changes as optional adapter work, not ClawRoom release requirements. Added relay-owned owner decision URLs, changed the launcher feature gate to `owner-reply-url`, disabled Telegram inbound binding writes by default, and documented `owner_reply.source: owner_url` as the portable ASK_OWNER path. Added Lesson BE.
+- **2026-04-20** Portable owner-url ASK_OWNER E2E passed. Room `t_34182ff8-eba` used normal Telegram product paths with local clawd and Railway Link, recorded both owner decisions as `source: owner_url`, closed at `JPY 75,000`, and stopped both runtimes. The first Link invite attempt hit an OpenClaw `payloads=0` incomplete turn, then a shorter ordinary retry succeeded. Added Lesson BF plus the self-contained redacted artifact and screenshot evidence.
+- **2026-04-20** Clean-reinstall owner-url release-candidate H1 passed. Archived stale local and Railway ClawRoom state, removed and reinstalled both visible `clawroom-v3` skill bundles, verified hashes/preflight, then ran room `t_5b9218cb-cb8` through normal Telegram product paths. Validator passed from the embedded redacted transcript with `owner_reply.source: owner_url`, local host PID `46247`, Railway guest PID `43895`, mutual close, stopped runtimes, and screenshot-reviewed owner-facing output. Added Lesson BG plus the self-contained redacted artifact.
+- **2026-04-20** Post-clean H4 rerun exposed a UI misroute. Room `t_f6d18ff9-c54` produced a good 8-message term-sheet transcript but failed the cross-machine oracle because the guest invite was accidentally sent to clawd, launching both roles locally. Added failed artifact and Lesson BH.
+- **2026-04-20** Post-clean H4 direct runtime rerun passed. Room `t_4b919672-44d` used direct installed runtime commands instead of Telegram UI launch, then passed 8-message H4 with local host + Railway guest, owner_url approval, complete term sheet, mutual close, and both runtimes stopped. Added Lesson BI and redacted artifact.
+- **2026-04-20** Telegram computer-use harness hardened. Added a fail-closed pre-send target guard to `scripts/telegram_e2e.mjs`: open target, screenshot, crop active Telegram title, OCR, verify expected chat title, and only then paste/send. Added `--target-check-only`, screenshot/title-crop evidence, runbook guidance, and Lesson BJ. Positive and negative target-guard checks passed locally.

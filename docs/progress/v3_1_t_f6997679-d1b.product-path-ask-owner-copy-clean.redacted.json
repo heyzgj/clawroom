@@ -1,0 +1,130 @@
+{
+  "schema": "clawroom-v3.1-e2e-artifact-redacted-v1",
+  "scenario": "product_path_ask_owner_copy_clean_passed",
+  "created_at": "2026-04-19T16:23:38.964Z",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_f6997679-d1b",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "public_invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/i/t_f6997679-d1b/CR-747B12F6"
+  },
+  "owner_contexts": {
+    "host": {
+      "mandates": {
+        "budget_ceiling_jpy": 65000
+      }
+    },
+    "guest": {
+      "mandates": {
+        "price_floor_jpy": 75000
+      }
+    }
+  },
+  "scenario_oracle": {
+    "expected": "ASK_OWNER notification must not expose Room/Role labels, launcher JSON, PID, paths, hashes, tokens, or logs; room must still close through Telegram owner reply.",
+    "pass": true,
+    "owner_reply_required": true,
+    "owner_reply_source": "telegram_inbound",
+    "final_price_jpy": 75000,
+    "host_budget_ceiling_jpy": 65000,
+    "guest_floor_jpy": 75000
+  },
+  "telegram_evidence": {
+    "screenshots": [
+      "docs/progress/screenshots/t_f6997679-d1b-host-created-before-askowner-copy-gate.png",
+      "docs/progress/screenshots/t_f6997679-d1b-host-ask-owner-copy-clean.png",
+      "docs/progress/screenshots/t_f6997679-d1b-host-final-copy-gate.png",
+      "docs/progress/screenshots/t_f6997679-d1b-guest-final-copy-gate.png"
+    ],
+    "visible_technical_leakage": "none_observed_in_fresh_ask_owner_notification",
+    "notes": "Screenshot shows no Room/Role labels, no launcher JSON, no PID, no paths, no bridge hash, no raw bearer token, and no logs. Copy is still English and should be localized later, but it is no longer developer-facing technical leakage. Final screenshots also show clean owner summaries without launcher runtime details. Railway Link still emitted a small unrelated persona greeting before launch; keep this as a launch-chatter UX follow-up."
+  },
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "kind": "message",
+      "ts": 1776615617156,
+      "text": "Hi Tom's agent — proposing: 2 short-form videos + 30-min live stream, 45-day usage, 1 revision round, 50% upfront / 50% on delivery. Budget ceiling: JPY 65,000. What are Tom's terms?"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "kind": "message",
+      "ts": 1776615718026,
+      "text": "谢谢您的提案。Tom 的底价为 JPY 75,000，与您的报价存在差距。能否进一步调整预算以达成合作？"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "kind": "ask_owner",
+      "ts": 1776615727204,
+      "question_id": "q_7090a594-530",
+      "text": "Tom's agent counters at JPY 75,000 (JPY 10,000 over your ceiling). Shall I accept up to that amount to close the deal, or hold at JPY 65,000?"
+    },
+    {
+      "id": 3,
+      "from": "host",
+      "kind": "owner_reply",
+      "ts": 1776615765271,
+      "question_id": "q_7090a594-530",
+      "source": "telegram_inbound",
+      "text": "批准，可以接受 JPY 75,000 这个套餐。"
+    },
+    {
+      "id": 4,
+      "from": "host",
+      "kind": "message",
+      "ts": 1776615776174,
+      "text": "Guojun approves JPY 75,000. We have a deal at that price. Terms: 2 short videos + 30-min live, 45-day usage, 1 revision round, 50% upfront / 50% on delivery. Confirm to close?"
+    },
+    {
+      "id": 5,
+      "from": "guest",
+      "kind": "close",
+      "ts": 1776615790828,
+      "text": "协议已达成：2 条短视频 + 30 分钟直播，45 天使用权，1 轮修改，付款条件 50% 预付/50% 交付，价格 JPY 75,000。"
+    },
+    {
+      "id": 6,
+      "from": "host",
+      "kind": "close",
+      "ts": 1776615792339,
+      "text": "协议已达成：2 条短视频 + 30 分钟直播，45 天使用权，1 轮修改，付款条件 50% 预付/50% 交付，价格 JPY 75,000。"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_f6997679-d1b",
+    "role": "host",
+    "topic": "Creator Collaboration Pricing Negotiation",
+    "goal": "Negotiate a creator collaboration deal. Host (guojun) needs: 2 short videos + 30-min live stream placement, 45-day usage rights, 1 round of revisions. Payment: 50% upfront, 50% on delivery. Report final agreed terms back to both owners.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "协议已达成：2 条短视频 + 30 分钟直播，45 天使用权，1 轮修改，付款条件 50% 预付/50% 交付，价格 JPY 75,000。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "协议已达成：2 条短视频 + 30 分钟直播，45 天使用权，1 轮修改，付款条件 50% 预付/50% 交付，价格 JPY 75,000。"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "bridge_version": "v3.1.1",
+        "pid": "37725",
+        "stop_reason": null,
+        "last_heartbeat": null
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "bridge_version": "v3.1.1",
+        "pid": "16328",
+        "stop_reason": null,
+        "last_heartbeat": null
+      }
+    ]
+  }
+}

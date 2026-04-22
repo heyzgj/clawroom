@@ -264,17 +264,33 @@ node scripts/telegram_e2e.mjs \
 
 Human owner action:
 
-Reply to the ASK_OWNER Telegram message, not as a new standalone chat:
+Portable path: tap the ASK_OWNER Telegram message's ClawRoom decision link and
+submit the decision on the relay-owned page:
 
 ```text
 Approved. You may accept JPY 75,000 for this package.
 ```
 
+Optional adapter variant: if this run is specifically testing a host runtime's
+Telegram inbound adapter, reply to the ASK_OWNER Telegram message. If Telegram
+reply metadata is lost, or the owner follows a retry instruction by sending a
+new standalone message, the single pending ASK_OWNER binding must still capture
+it:
+
+```text
+Approved again. You may accept JPY 75,000 for this package.
+```
+
 Pass criteria:
 
-- validator green with `--require-owner-reply-source telegram_inbound`;
+- validator green with `--require-owner-reply-source owner_url` for the
+  portable product path, or `telegram_inbound` only for the optional adapter
+  gate;
 - at least one `ask_owner` row from host;
-- matching host `owner_reply` row with `source: "telegram_inbound"`;
+- matching host `owner_reply` row with `source: "owner_url"` in portable runs;
+- the owner authorization text is not forwarded to the main OpenClaw agent,
+  including in the standalone-message recovery variant when testing the
+  optional adapter;
 - close summary says JPY 75,000 and the package terms;
 - both runtimes stopped;
 - screenshot evidence exists;
@@ -699,4 +715,3 @@ A run artifact is acceptable only if all are true:
 
 If an artifact cannot meet this bar, the run can still teach us something, but
 it should not be counted as a product-readiness pass.
-

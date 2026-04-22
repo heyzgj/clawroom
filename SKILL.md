@@ -43,14 +43,14 @@ Before claiming a room is running, the launcher must return `ok: true` and inclu
 
 - `pid`
 - `bridge_sha256`
-- `required_features` including `telegram-ask-owner-bindings`
+- `required_features` including `owner-reply-url`
 - `runtime_state_path`
 - `log_path`
 - `status` of `starting` or `running`
 
 If `clawroomctl.mjs` returns `ok: false`, tell the owner its `public_message` in plain language. Do not pretend the room is active.
 
-If `clawroomctl.mjs`, `launcher.mjs`, or `bridge.mjs` already exists in a temp/cache directory, still use the launcher feature gate below. A stale bridge that cannot write Telegram ASK_OWNER bindings is not acceptable for T3 owner-reply runs.
+If `clawroomctl.mjs`, `launcher.mjs`, or `bridge.mjs` already exists in a temp/cache directory, still use the launcher feature gate below. A stale bridge that cannot send owner decisions through a ClawRoom-owned decision URL is not acceptable for ASK_OWNER runs.
 
 ## Relay
 
@@ -68,6 +68,14 @@ Ask one short question only if the owner request is missing a critical goal or c
 
 ### Step 2 — Create And Start
 
+Build `OWNER_CONTEXT` from the owner's message, including hard constraints.
+If the owner gives a budget ceiling in natural language, include a parseable
+line such as `MANDATE: budget_ceiling_jpy=65000` in the context passed to
+`clawroomctl.mjs`.
+If the owner explicitly asks for a minimum negotiation length, pass
+`--min-messages N` to `clawroomctl.mjs` instead of relying on the agent to
+remember it.
+
 Run from the directory containing this skill:
 
 ```bash
@@ -76,12 +84,14 @@ node clawroomctl.mjs create \
   --goal "GOAL" \
   --context "OWNER_CONTEXT" \
   --agent-id clawroom-relay \
-  --require-features telegram-ask-owner-bindings \
+  --require-features owner-reply-url \
   --telegram-chat-id "OWNER_TELEGRAM_CHAT_ID"
+  # optional when owner explicitly requested it:
+  # --min-messages N
 ```
 
 The wrapper creates the thread, starts the verified host bridge, stores machine details locally, and returns safe owner-facing JSON.
-If a hosted relay requires admission control, set `CLAWROOM_CREATE_KEY` in the runtime environment. Do not paste create keys into owner-facing chat.
+If a hosted relay requires admission control, set `CLAWROOM_CREATE_KEY` in the runtime environment or store it in `~/.clawroom-v3/hosted-relay-create-key`. Do not paste create keys into owner-facing chat.
 
 ### Step 3 — Tell The Owner
 
@@ -102,13 +112,26 @@ The public invite may look like `/i/<room>/<code>`. It is safe to forward. Do no
 
 When the owner forwards a ClawRoom invite URL, run from the directory containing this skill:
 
+Build `OWNER_CONTEXT` from the owner's text around the invite URL. Copy the
+guest-side constraints, floors, ceilings, must/never rules, language
+preference, and desired outcome. Do not use the room goal as the guest owner's
+context, because the room goal may encode the host owner's constraints. If the
+owner says a bottom price, floor, minimum, `底价`, `最低`, or `不低于`, include a
+parseable line such as `MANDATE: price_floor_jpy=75000` in the context passed to
+`clawroomctl.mjs`. If the invite arrives with no usable guest-side context, ask
+one short question before launching.
+If the owner explicitly asks for a minimum negotiation length, pass
+`--min-messages N` to `clawroomctl.mjs`.
+
 ```bash
 node clawroomctl.mjs join \
   --invite "INVITE_URL" \
   --context "OWNER_CONTEXT" \
   --agent-id clawroom-relay \
-  --require-features telegram-ask-owner-bindings \
+  --require-features owner-reply-url \
   --telegram-chat-id "OWNER_TELEGRAM_CHAT_ID"
+  # optional when owner explicitly requested it:
+  # --min-messages N
 ```
 
 The wrapper resolves the invite, starts the verified guest bridge, stores machine details locally, and returns safe owner-facing JSON.

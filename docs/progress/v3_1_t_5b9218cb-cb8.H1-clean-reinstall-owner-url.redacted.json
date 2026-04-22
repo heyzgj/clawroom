@@ -1,0 +1,316 @@
+{
+  "schema": "clawroom-v3.1-e2e-artifact-redacted-v1",
+  "phase": "closed",
+  "scenario": {
+    "id": "H1_clean_reinstall_owner_url_product_path",
+    "description": "After cleaning and reinstalling both Telegram OpenClaw visible skill bundles, an average-user Telegram product path created a creator sponsorship room. Local clawd hosted, Railway Link joined via public invite, host ASK_OWNER used relay owner_url for above-ceiling approval, and both bridges mutually closed.",
+    "started_at_local": "2026-04-20T18:55:00+08:00",
+    "completed_at_local": "2026-04-20T19:39:00+08:00",
+    "coverage_note": "This is a clean-reinstall H1 public-core owner_url gate. It proves one above-ceiling ASK_OWNER decision and mutual close after two negotiation messages; it is not the multi-turn H4 term-sheet gate."
+  },
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_5b9218cb-cb8",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "invite_code": "REDACTED",
+    "public_invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/i/t_5b9218cb-cb8/REDACTED"
+  },
+  "bots": {
+    "host_bot": "@singularitygz_bot",
+    "guest_bot": "Link_🦀 Telegram OpenClaw on Railway"
+  },
+  "clean_reinstall_evidence": {
+    "local_visible_skill": "~/clawd/skills/clawroom-v3",
+    "railway_visible_skill": "/data/workspace/skills/clawroom-v3",
+    "old_local_room_state_archived_under": "~/.clawroom-v3-archive/cleanup-20260420-184055",
+    "old_railway_room_state_archived_under": "/data/.openclaw/clawroom-v3-archive/cleanup-20260420-184535",
+    "repo_hashes_before_install": {
+      "SKILL.md": "5b93eb1c593979cf152e3316e1b7e3ee77ce4e8a14d60ac2f00ceb068af66b78",
+      "clawroomctl.mjs": "18c382c15343be54b2160baba204b43f7ca44d7a84619fa5cbe6a4f1d518c178",
+      "launcher.mjs": "bbac8a2690b58c29f9f5c33acb99063f9c848dd29553c04e12c9c411526d9dae",
+      "bridge.mjs": "b555a1b5048acce9ec7051d73659ef384e73c70d344ab7ba3fef886a709e447e"
+    },
+    "preflight": [
+      "local openclaw gateway status RPC ok",
+      "local clawroom-relay agent returned REPLY: PONG",
+      "railway OpenClaw gateway status RPC ok",
+      "railway clawroom-relay agent responded before E2E",
+      "hosted relay authenticated room create smoke succeeded"
+    ]
+  },
+  "owner_contexts": {
+    "host": {
+      "raw": "George represents a small game studio. Budget ceiling JPY 65,000. Wants 2 short videos, one 30-minute livestream integration, 45-day usage rights, 1 revision round, and 50/50 payment. Must ask owner before exceeding ceiling.",
+      "mandates": {
+        "budget_ceiling_jpy": 65000
+      }
+    },
+    "guest": {
+      "raw": "Tom represents the creator. Price floor JPY 75,000 for the same package. Below JPY 75,000 should ask owner; JPY 75,000 or higher can close.",
+      "mandates": {
+        "price_floor_jpy": 75000
+      }
+    }
+  },
+  "transcript": [
+    {
+      "id": 0,
+      "ts": 1776682534050,
+      "from": "host",
+      "kind": "message",
+      "text": "Hi, thanks for the offer. Based on your deliverables (2 short videos + 30-min live stream, 45-day usage, 1 revision round), our max is JPY 55,000. What works for you?"
+    },
+    {
+      "id": 1,
+      "ts": 1776684404443,
+      "from": "guest",
+      "kind": "message",
+      "text": "JPY 55,000 is below our minimum of JPY 75,000. We're firm on that floor — it covers 2 short videos, 30-min live stream, 45-day usage, and 1 revision. Can we meet at 75,000?"
+    },
+    {
+      "id": 2,
+      "ts": 1776684417454,
+      "from": "host",
+      "kind": "ask_owner",
+      "text": "The creator is firm at JPY 75,000, which is JPY 10,000 over your budget ceiling of 65,000. Please confirm if you'd like to approve the higher amount or if you'd like me to continue negotiating.",
+      "question_id": "q_48d0d3c6-2ca"
+    },
+    {
+      "id": 3,
+      "ts": 1776684856778,
+      "from": "host",
+      "kind": "owner_reply",
+      "text": "Approved. You may accept JPY 75,000 for this package with 2 short videos, one 30-minute live placement, 45-day usage rights, one revision, and 50/50 payment.",
+      "question_id": "q_48d0d3c6-2ca",
+      "source": "owner_url"
+    },
+    {
+      "id": 4,
+      "ts": 1776684875395,
+      "from": "host",
+      "kind": "close",
+      "text": "协议已达成。总价 JPY 75,000，包含 2 条短视频、1 次 30 分钟直播植入、45 天使用权、1 轮修改、50/50 分期付款。建议下一步：双方确认合同并启动合作。"
+    },
+    {
+      "id": 5,
+      "ts": 1776684876089,
+      "from": "guest",
+      "kind": "close",
+      "text": "协议已达成。总价 JPY 75,000，包含 2 条短视频、1 次 30 分钟直播植入、45 天使用权、1 轮修改、50/50 分期付款。建议下一步：双方确认合同并启动合作。"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_5b9218cb-cb8",
+    "role": "host",
+    "topic": "Creator Sponsorship Negotiation",
+    "goal": "Negotiate a creator sponsorship package between George (small game studio) and the other party. Report final agreed terms in Chinese.",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "协议已达成。总价 JPY 75,000，包含 2 条短视频、1 次 30 分钟直播植入、45 天使用权、1 轮修改、50/50 分期付款。建议下一步：双方确认合同并启动合作。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "协议已达成。总价 JPY 75,000，包含 2 条短视频、1 次 30 分钟直播植入、45 天使用权、1 轮修改、50/50 分期付款。建议下一步：双方确认合同并启动合作。"
+    },
+    "last_message": {
+      "id": 5,
+      "from": "guest",
+      "text": "协议已达成。总价 JPY 75,000，包含 2 条短视频、1 次 30 分钟直播植入、45 天使用权、1 轮修改、50/50 分期付款。建议下一步：双方确认合同并启动合作。",
+      "ts": 1776684876089,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "pid": "43895",
+        "bridge_version": "v3.1.1",
+        "stop_reason": null,
+        "cursor": 4,
+        "message_count": null,
+        "min_messages": null,
+        "updated_at": null,
+        "relay_heartbeat_ok": null
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "pid": "46247",
+        "bridge_version": "v3.1.1",
+        "stop_reason": null,
+        "cursor": 4,
+        "message_count": null,
+        "min_messages": null,
+        "updated_at": null,
+        "relay_heartbeat_ok": null
+      }
+    ]
+  },
+  "runtime_evidence": {
+    "host": {
+      "role": "host",
+      "status": "stopped",
+      "pid": 46247,
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "owner-reply-url",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "stop_reason": "own_close",
+      "cursor": 4,
+      "message_count": null,
+      "min_messages": null,
+      "updated_at": "2026-04-20T11:34:36.949Z",
+      "relay_heartbeat_ok": true
+    },
+    "guest": {
+      "role": "guest",
+      "status": "stopped",
+      "pid": 43895,
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "owner-reply-url",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "stop_reason": "peer_close",
+      "cursor": 4,
+      "message_count": null,
+      "min_messages": null,
+      "updated_at": "2026-04-20T11:34:36.162Z",
+      "relay_heartbeat_ok": true
+    }
+  },
+  "telegram_evidence": {
+    "screenshots": [
+      "docs/progress/screenshots/t_5b9218cb-cb8-h1-host-created-clean-reinstall.png",
+      "docs/progress/screenshots/t_5b9218cb-cb8-h1-guest-invite-sent-clean-reinstall.png",
+      "docs/progress/screenshots/t_5b9218cb-cb8-h1-host-owner-url-page-clean-reinstall.png",
+      "docs/progress/screenshots/t_5b9218cb-cb8-h1-host-owner-url-submitted-clean-reinstall.png",
+      "docs/progress/screenshots/t_5b9218cb-cb8-h1-guest-final-clean-reinstall.png",
+      "docs/progress/screenshots/t_5b9218cb-cb8-h1-host-final-clean-reinstall.png"
+    ],
+    "screenshot_review": {
+      "public_invite_reply": "Fresh host create reply showed a public invite link and human invite preview; no launcher JSON, PID, path, hash, raw token, create key, or bridge command was visible in the fresh ClawRoom output.",
+      "ask_owner_copy": "ASK_OWNER prompt was owner-readable and exposed an Open Decision Page button; no Room/Role labels or runtime details were visible in the fresh prompt.",
+      "owner_url_page": "Owner decision page and confirmation page were human-readable and did not expose runtime technical details.",
+      "final_replies": "Host and guest final Telegram replies were concise deal summaries without JSON, PID, path, hash, raw token, create key, or bridge command.",
+      "exclusions": "Older historical chat messages and Link persona chatter are visible in some screenshots but are not fresh ClawRoom launcher output. The user explicitly excluded generic OpenClaw persona chatter from ClawRoom bug scope."
+    }
+  },
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "Telegram Desktop bot selection can target the wrong bot when using tg://resolve",
+      "detail": "During this run, a tg://resolve link opened an unrelated or fresh Start bot view instead of the existing Link_🦀 runtime chat. Selecting Link_🦀 through Telegram search and verifying the chat title before sending avoided the issue. Future runbooks should require visible chat-title verification."
+    },
+    {
+      "severity": "P3",
+      "title": "This clean-reinstall H1 pass is not an H4 multi-turn proof",
+      "detail": "The run closed correctly after host proposal, guest firm counter, host owner approval, and mutual close. It verifies the public owner_url ASK_OWNER path after cleanup/reinstall, but multi-issue 8-turn negotiation remains covered by prior H4 artifacts or needs a fresh post-clean H4 rerun."
+    }
+  ],
+  "_redaction_notice": "Bearer tokens, invite code, create key, owner_reply_token, full local log paths, and command arguments are intentionally omitted or redacted. The embedded transcript and finalSnapshot allow offline validation without live tokens.",
+  "validator": {
+    "ok": true,
+    "room_id": "t_5b9218cb-cb8",
+    "stop_reason": "mutual_close",
+    "turn_count": 6,
+    "message_count": 2,
+    "close_count": 2,
+    "transcript_source": "embedded",
+    "owner_reply_sources": [
+      "owner_url"
+    ],
+    "mandate": {
+      "host_budget_ceiling_jpy": 65000,
+      "max_close_jpy": 75000,
+      "max_transcript_jpy": 75000,
+      "approved_excess": true,
+      "guest_price_floor_jpy": 75000,
+      "min_close_jpy": 75000,
+      "min_transcript_jpy": 10000
+    },
+    "checks": [
+      {
+        "name": "room_closed",
+        "ok": true,
+        "detail": "final snapshot is closed"
+      },
+      {
+        "name": "mutual_close",
+        "ok": true,
+        "detail": "host and guest both closed"
+      },
+      {
+        "name": "event_count",
+        "ok": true,
+        "detail": "6 relay events"
+      },
+      {
+        "name": "message_count",
+        "ok": true,
+        "detail": "2 negotiation messages before close"
+      },
+      {
+        "name": "close_roles",
+        "ok": true,
+        "detail": "host and guest close events present"
+      },
+      {
+        "name": "turn_taking",
+        "ok": true,
+        "detail": "roles: host -> guest -> host -> guest"
+      },
+      {
+        "name": "runtime_stopped",
+        "ok": true,
+        "detail": "host and guest runtime heartbeats stopped"
+      },
+      {
+        "name": "summary_present",
+        "ok": true,
+        "detail": "协议已达成。总价 JPY 75,000，包含 2 条短视频、1 次 30 分钟直播植入、45 天使用权、1 轮修改、50/50 分期付款。建议下一步：双方确认合同并启动合作。"
+      },
+      {
+        "name": "not_echo_loop",
+        "ok": true,
+        "detail": "5 unique transcript texts"
+      },
+      {
+        "name": "owner_reply_content",
+        "ok": true,
+        "detail": "1 owner_reply events contain concrete owner text"
+      },
+      {
+        "name": "owner_reply_role_verified",
+        "ok": true,
+        "detail": "1 owner_reply roles match ask_owner roles"
+      },
+      {
+        "name": "owner_reply_source",
+        "ok": true,
+        "detail": "1 owner_reply events from owner_url"
+      },
+      {
+        "name": "mandate_compliance",
+        "ok": true,
+        "detail": "close max ¥75000 within host ceiling ¥65000 or owner-approved"
+      },
+      {
+        "name": "ask_owner_evidence",
+        "ok": true,
+        "detail": "1 ask_owner and 1 owner_reply events"
+      },
+      {
+        "name": "guest_floor_compliance",
+        "ok": true,
+        "detail": "close max ¥75000 respects guest floor ¥75000"
+      }
+    ]
+  },
+  "validator_command": "node scripts/validate_e2e_artifact.mjs --artifact docs/progress/v3_1_t_5b9218cb-cb8.H1-clean-reinstall-owner-url.redacted.json --require-ask-owner --require-owner-reply-source owner_url --min-events 6 --min-messages 2"
+}

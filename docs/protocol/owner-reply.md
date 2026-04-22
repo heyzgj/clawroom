@@ -10,7 +10,32 @@ ask the owner, record the reply, and resume only after a valid reply.
 
 ## Surfaces
 
-### v0 primary: tokenized owner-reply API
+### v1 primary: ClawRoom-owned decision URL
+
+The portable product path is a relay-hosted decision page:
+
+```
+GET /threads/:id/owner-reply?code=<owner_reply_code>
+```
+
+GET is non-mutating. It only renders a small noindex page with the question,
+quick approve/reject buttons, and a counter-instruction textarea. The form then
+submits:
+
+```
+POST /threads/:id/owner-reply
+Content-Type: application/x-www-form-urlencoded
+
+code=<owner_reply_code>&text=<owner decision>&source=owner_url
+```
+
+This path is owned by ClawRoom and does not require changes to OpenClaw,
+Telegram inbound handlers, or a user-specific fork. The decision link is a
+single-use magic link scoped to the question and protected by TTL. Link previews
+may fetch the page, but they cannot record a decision because writes remain
+POST-only.
+
+### v0 machine API: tokenized owner-reply POST
 
 ```
 POST /threads/:id/owner-reply
@@ -24,22 +49,25 @@ Content-Type: application/json
 }
 ```
 
-`owner-reply` is intentionally POST-only. GET must not consume a token or
-write an event, because Telegram/link previews and other unfurlers may
-fetch URLs automatically. The bridge notification may include the POST
-endpoint and JSON payload template, but it must not include a mutating
-GET URL.
+This API remains useful for harnesses, bridge-local automation, and explicit
+debug tooling. It must not be exposed as a raw owner-facing instruction unless
+the owner asks for debugging.
 
-### v1 target: Telegram reply routing
+`owner-reply` writes are intentionally POST-only. GET must not consume a token,
+code, or event, because Telegram/link previews and other unfurlers may fetch
+URLs automatically.
+
+### optional adapter: Telegram reply routing
 
 The owner replies to the ASK_OWNER notification message in Telegram. The
 Telegram inbound handler recognizes `reply_to_message_id`, maps it to a
 known `(thread_id, role, question_id)`, and POSTs to the same
 `/threads/:id/owner-reply` endpoint.
 
-Inbound routing must intercept these replies before the main OpenClaw
-session sees them. Otherwise the owner reply can become a new instruction
-to the main agent, repeating Lesson F2.
+Inbound routing must intercept these replies before the main OpenClaw session
+sees them. Otherwise the owner reply can become a new instruction to the main
+agent, repeating Lesson F2. This adapter is deployment-specific and is not a
+ClawRoom core requirement.
 
 ## ASK_OWNER Creation
 
@@ -67,25 +95,31 @@ Relay response:
   "ts": 1776221671000,
   "question_id": "q_...",
   "owner_reply_token": "owner_...",
+  "owner_reply_url": "https://relay/threads/t_.../owner-reply?code=OR-...",
   "expires_at": 1776223471000
 }
 ```
 
-The bridge then sends the owner a Telegram notification and enters
-`waiting_owner`.
+The bridge then sends the owner a Telegram notification with an "Open Decision
+Page" URL button and enters `waiting_owner`.
 
 ## Token Rules
 
 - `owner_reply_token` is different from `host_token` and `guest_token`.
+- `owner_reply_code` is different from all room tokens and appears only in the
+  owner decision URL.
 - It is scoped to exactly one `(thread_id, role, question_id)`.
 - It is single-use.
 - Default TTL is 30 minutes.
-- A reply must cite both `question_id` and `role`.
+- A machine API reply must cite both `question_id` and `role`.
 - The relay MUST reject a POST whose `role` field does not exactly
   match the role recorded with the question. A host's
   `owner_reply_token` cannot answer a guest question, and vice versa.
   Mismatch returns `401 unauthorized_owner_reply`.
-- Replay, wrong role, wrong question, expired token, malformed payload,
+- A decision URL reply may cite only `code`; the relay resolves role and
+  question from that code and rejects mismatches if extra role/question fields
+  are supplied.
+- Replay, wrong role, wrong question, expired token/code, malformed payload,
   and missing text are all hard 4xx responses.
 
 ## Event Kinds

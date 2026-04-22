@@ -76,6 +76,7 @@ function parseJpyAmounts(text) {
   const amounts = [];
   const patterns = [
     /¥\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /(?:JPY|jpy|yen|円|日元)\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
     /([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?\s*(?:JPY|jpy|yen|円|日元)/g,
   ];
   for (const pattern of patterns) {
@@ -91,6 +92,11 @@ function parseJpyAmounts(text) {
 function maxJpyAmount(rows) {
   const amounts = rows.flatMap((row) => parseJpyAmounts(row?.text));
   return amounts.length ? Math.max(...amounts) : null;
+}
+
+function minJpyAmount(rows) {
+  const amounts = rows.flatMap((row) => parseJpyAmounts(row?.text));
+  return amounts.length ? Math.min(...amounts) : null;
 }
 
 function ownerReplyApprovesExcess(rows) {
@@ -234,13 +240,19 @@ async function main() {
   }
 
   const hostMandates = getMandates(artifact, "host");
+  const guestMandates = getMandates(artifact, "guest");
   const budgetCeilingJpy = Number(hostMandates.budget_ceiling_jpy || hostMandates.budget_ceiling || 0);
+  const guestPriceFloorJpy = Number(guestMandates.price_floor_jpy || guestMandates.minimum_price_jpy || guestMandates.min_price_jpy || 0);
   const maxCloseJpy = maxJpyAmount(closeRows);
   const maxTranscriptJpy = maxJpyAmount(rows);
+  const minCloseJpy = minJpyAmount(closeRows);
+  const minTranscriptJpy = minJpyAmount(rows);
   const approvedExcess = ownerReplyApprovesExcess(ownerReplyRows);
   const mandateBinding = Number.isFinite(budgetCeilingJpy) && budgetCeilingJpy > 0;
+  const guestFloorBinding = Number.isFinite(guestPriceFloorJpy) && guestPriceFloorJpy > 0;
   const closeExceedsMandate = mandateBinding && maxCloseJpy != null && maxCloseJpy > budgetCeilingJpy;
   const transcriptExceedsMandate = mandateBinding && maxTranscriptJpy != null && maxTranscriptJpy > budgetCeilingJpy;
+  const closeViolatesGuestFloor = guestFloorBinding && maxCloseJpy != null && maxCloseJpy < guestPriceFloorJpy;
 
   if (!mandateBinding) {
     skip(checks, "mandate_compliance", "no host budget_ceiling_jpy mandate in artifact");
@@ -262,6 +274,14 @@ async function main() {
     }
   }
 
+  if (!guestFloorBinding) {
+    skip(checks, "guest_floor_compliance", "no guest price_floor_jpy mandate in artifact");
+  } else if (closeViolatesGuestFloor) {
+    fail(checks, "guest_floor_compliance", `close max ¥${maxCloseJpy} is below guest floor ¥${guestPriceFloorJpy}`);
+  } else {
+    pass(checks, "guest_floor_compliance", `close max ${maxCloseJpy == null ? "n/a" : `¥${maxCloseJpy}`} respects guest floor ¥${guestPriceFloorJpy}`);
+  }
+
   const ok = checks.every((check) => check.ok);
   console.log(JSON.stringify({
     ok,
@@ -277,7 +297,14 @@ async function main() {
       max_close_jpy: maxCloseJpy,
       max_transcript_jpy: maxTranscriptJpy,
       approved_excess: approvedExcess,
-    } : null,
+      guest_price_floor_jpy: guestFloorBinding ? guestPriceFloorJpy : null,
+      min_close_jpy: minCloseJpy,
+      min_transcript_jpy: minTranscriptJpy,
+    } : (guestFloorBinding ? {
+      guest_price_floor_jpy: guestPriceFloorJpy,
+      min_close_jpy: minCloseJpy,
+      min_transcript_jpy: minTranscriptJpy,
+    } : null),
     checks,
   }, null, 2));
 

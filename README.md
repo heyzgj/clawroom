@@ -9,21 +9,22 @@ and an OpenClaw skill — enough to let an invited agent join by URL alone.
 
 v3.1 hardening branch. First real cross-machine Telegram smoke E2E passed
 on 2026-04-14 (local clawd × Railway-hosted Link Telegram bots, mutual
-close, both owner notifications delivered). T2-full multi-turn transport
-E2E passed on 2026-04-15 with 8 negotiation messages. T3 v0 mandate
-guard E2E passed on 2026-04-15 with ASK_OWNER, owner_reply, resume, and
-close at the authorized ceiling. The 2026-04-17 stability matrix passed
-three more cross-machine rooms: calendar coordination, product launch
-communication, and term-sheet negotiation with real Telegram inbound
-owner reply on the Railway Link side.
+close, both owner notifications delivered). Later product-path runs proved
+natural Telegram self-launch, multi-turn negotiation, mandate enforcement,
+and an optional Telegram inbound owner-reply adapter for the tested clawd/Link
+deployment.
+
+Important boundary: ClawRoom public readiness must not depend on local
+OpenClaw or bot source patches. The portable ASK_OWNER path is the
+relay-owned owner decision URL, recorded as `owner_reply.source: owner_url`.
 
 Pending work before v3.1 is promoted to canonical production:
 
 - **Install path**: make first-time skill install pull only the product
   runtime files (`SKILL.md`, `clawroomctl.mjs`, `launcher.mjs`,
   `bridge.mjs`)
-- **Product-path variance**: repeat natural Telegram create/join flows
-  after the install path and relay capacity are fixed
+- **Product-path variance**: repeat natural Telegram create/join flows through
+  owner decision URLs after the install path and relay capacity are fixed
 - **Relay capacity**: the current public relay hit Cloudflare Durable
   Objects free-tier quota during wrapper smoke after stale local bridges
   from old tests kept polling invalid rooms; the bridge now exits on
@@ -121,7 +122,7 @@ node scripts/telegram_e2e.mjs
 node scripts/validate_e2e_artifact.mjs --artifact ~/.clawroom-v3/e2e/<room_id>.json
 ```
 
-Full runbook: [`docs/REAL_TELEGRAM_E2E.md`](docs/REAL_TELEGRAM_E2E.md).
+Full runbook: [`docs/runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md`](docs/runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md).
 
 ## Repo layout
 
@@ -139,7 +140,7 @@ Full runbook: [`docs/REAL_TELEGRAM_E2E.md`](docs/REAL_TELEGRAM_E2E.md).
 ├── scripts/                    E2E harness, validator, Railway helpers
 ├── docs/
 │   ├── LESSONS_LEARNED.md      ← READ THIS BEFORE CHANGING ANYTHING
-│   ├── REAL_TELEGRAM_E2E.md    v3 runbook
+│   ├── runbooks/               E2E/debug procedures
 │   ├── V3_1_E2E_REPORT.md      2026-04-14 E2E writeup
 │   ├── blog/                   Public-facing technical posts
 │   ├── progress/               E2E logs and redacted artifacts

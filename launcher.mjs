@@ -21,8 +21,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_REQUIRED_FEATURES = ["telegram-ask-owner-bindings"];
+const DEFAULT_REQUIRED_FEATURES = ["owner-reply-url"];
 const FEATURE_MARKERS = {
+  "owner-reply-url": "ownerDecisionUrl",
   "telegram-ask-owner-bindings": "writeAskOwnerTelegramBinding",
   "telegram-force-reply": "force_reply",
   "openclaw-state-dir-fallback": "CLAWDBOT_STATE_DIR",
@@ -62,6 +63,26 @@ function emit(payload, status = 0) {
   process.exit(status);
 }
 
+let ownerFacingOutput = false;
+
+function ownerFacingMessage(payload, role) {
+  if (payload?.ok) {
+    if (role === "guest") {
+      return "I joined the ClawRoom and will report back here when the agents settle it.";
+    }
+    return "I started the ClawRoom bridge and will report back here when the agents settle it.";
+  }
+  return "I could not start ClawRoom here. Please try again or ask for debug details.";
+}
+
+function emitLaunch(payload, status = 0) {
+  if (ownerFacingOutput) {
+    process.stdout.write(`${ownerFacingMessage(payload, String(payload?.role || role || ""))}\n`);
+    process.exit(status);
+  }
+  emit(payload, status);
+}
+
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -80,6 +101,7 @@ async function sleep(ms) {
 const args = parseArgs(process.argv.slice(2));
 const threadId = String(args.thread || args["thread-id"] || "");
 const role = String(args.role || "");
+ownerFacingOutput = Boolean(args["owner-facing"] || args.public || args.safe);
 const openClawStateDir = resolve(String(process.env.OPENCLAW_STATE_DIR || join(homedir(), ".openclaw")));
 const defaultStateDir = process.env.OPENCLAW_STATE_DIR ? join(openClawStateDir, "clawroom-v3") : join(homedir(), ".clawroom-v3");
 const stateDir = resolve(String(args["state-dir"] || process.env.CLAWROOM_STATE_DIR || defaultStateDir));
@@ -92,17 +114,18 @@ for (const feature of DEFAULT_REQUIRED_FEATURES) {
 }
 
 if (!threadId || !["host", "guest"].includes(role)) {
-  emit({ ok: false, error: "usage", hint: "Required: --thread <id> --role host|guest plus bridge args." }, 2);
+  emitLaunch({ ok: false, role, error: "usage", hint: "Required: --thread <id> --role host|guest plus bridge args." }, 2);
 }
 if (!existsSync(bridgePath)) {
-  emit({ ok: false, error: "bridge_not_found", bridge_path: bridgePath }, 2);
+  emitLaunch({ ok: false, role, error: "bridge_not_found", bridge_path: bridgePath }, 2);
 }
 
 const bridgeSource = readFileSync(bridgePath, "utf8");
 const bridgeSha256 = sha256(bridgeSource);
 if (expectedBridgeSha && bridgeSha256 !== expectedBridgeSha) {
-  emit({
+  emitLaunch({
     ok: false,
+    role,
     error: "bridge_sha_mismatch",
     bridge_path: bridgePath,
     expected_bridge_sha256: expectedBridgeSha,
@@ -114,8 +137,9 @@ const missingFeatures = requiredFeatures.filter((feature) => {
   return !marker || !bridgeSource.includes(marker);
 });
 if (missingFeatures.length > 0) {
-  emit({
+  emitLaunch({
     ok: false,
+    role,
     error: "bridge_feature_missing",
     bridge_path: bridgePath,
     bridge_sha256: bridgeSha256,
@@ -129,9 +153,11 @@ const runtimeStatePath = join(stateDir, `${threadId}-${role}.runtime-state.json`
 const logPath = join(stateDir, `${threadId}-${role}.bridge.log`);
 const launchPath = join(stateDir, `${threadId}-${role}.launch.json`);
 
+const launcherOnlyValueArgs = new Set(["--bridge", "--wait-ms", "--expect-bridge-sha256"]);
+const launcherOnlyBooleanArgs = new Set(["--owner-facing", "--public", "--safe"]);
 const childArgs = [bridgePath, ...process.argv.slice(2).filter((arg, index, all) => {
   const prev = all[index - 1];
-  return arg !== "--bridge" && prev !== "--bridge" && arg !== "--wait-ms" && prev !== "--wait-ms";
+  return !launcherOnlyValueArgs.has(arg) && !launcherOnlyValueArgs.has(prev) && !launcherOnlyBooleanArgs.has(arg);
 })];
 if (!childArgs.includes("--state-dir")) {
   childArgs.push("--state-dir", stateDir);
@@ -167,8 +193,9 @@ while (Date.now() < deadline) {
   if (lastState?.pid && Number(lastState.pid) === child.pid && pidAlive(child.pid)) {
     const relayHeartbeatSeen = Boolean(lastState.last_relay_heartbeat_at || lastState.relay_heartbeat_ok);
     if (["starting", "running"].includes(String(lastState.status || "")) && relayHeartbeatSeen) {
-      emit({
+      emitLaunch({
         ok: true,
+        role,
         pid: child.pid,
         status: lastState.status,
         bridge_sha256: bridgeSha256,
@@ -179,8 +206,9 @@ while (Date.now() < deadline) {
       });
     }
     if (String(lastState.status || "") === "failed") {
-      emit({
+      emitLaunch({
         ok: false,
+        role,
         error: "bridge_failed",
         pid: child.pid,
         runtime_state_path: runtimeStatePath,
@@ -190,8 +218,9 @@ while (Date.now() < deadline) {
     }
   }
   if (!pidAlive(child.pid)) {
-    emit({
+    emitLaunch({
       ok: false,
+      role,
       error: "bridge_exited_before_ready",
       pid: child.pid,
       runtime_state_path: runtimeStatePath,
@@ -202,8 +231,9 @@ while (Date.now() < deadline) {
   await sleep(500);
 }
 
-emit({
+emitLaunch({
   ok: false,
+  role,
   error: "bridge_ready_timeout",
   pid: child.pid,
   pid_alive: pidAlive(child.pid),

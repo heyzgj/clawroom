@@ -14,6 +14,8 @@ import { dirname, join, resolve } from "node:path";
 const DEFAULT_RELAY = "https://clawroom-v3-relay.heyzgj.workers.dev";
 const DEFAULT_HOST_BOT = "@singularitygz_bot";
 const DEFAULT_GUEST_BOT = "@link_clawd_bot";
+const DEFAULT_HOST_TITLE = "clawd|singularity_claude_co|singularitygz_bot";
+const DEFAULT_GUEST_TITLE = "Link|Link_|link_clawd_bot";
 
 function parseArgs(argv) {
   const result = {};
@@ -48,6 +50,14 @@ function run(cmd, args = [], input = undefined) {
     encoding: "utf8",
     stdio: input === undefined ? ["ignore", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
   });
+}
+
+function runOptional(cmd, args = [], input = undefined) {
+  try {
+    return run(cmd, args, input);
+  } catch {
+    return "";
+  }
 }
 
 function readJsonFile(path) {
@@ -92,18 +102,170 @@ function writeClipboard(text) {
 function runAppleScript(lines) {
   const args = [];
   for (const line of lines) args.push("-e", line);
-  run("osascript", args);
+  return run("osascript", args);
 }
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sendTelegramMessage(bot, text, { resetSession, waitAfterOpenMs, waitAfterNewMs }) {
+function normalizeForMatch(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchesExpectedTitle(actual, expected) {
+  const normalizedActual = normalizeForMatch(actual);
+  return String(expected || "")
+    .split("|")
+    .map((item) => normalizeForMatch(item))
+    .filter(Boolean)
+    .some((item) => normalizedActual.includes(item));
+}
+
+function captureScreenshot(path) {
+  mkdirSync(dirname(path), { recursive: true });
+  run("screencapture", ["-x", path]);
+  return path;
+}
+
+function imageSize(path) {
+  const output = runOptional("sips", ["-g", "pixelWidth", "-g", "pixelHeight", path]);
+  const width = Number(output.match(/pixelWidth:\s*([0-9]+)/)?.[1] || 0);
+  const height = Number(output.match(/pixelHeight:\s*([0-9]+)/)?.[1] || 0);
+  return { width, height };
+}
+
+function mainScreenSize() {
+  const output = runOptional("osascript", [
+    "-l",
+    "JavaScript",
+    "-e",
+    'ObjC.import("AppKit"); const f=$.NSScreen.mainScreen.frame; console.log(f.size.width + "," + f.size.height)',
+  ]);
+  const [width, height] = output
+    .trim()
+    .split(",")
+    .map((item) => Number(item));
+  return { width: width || 0, height: height || 0 };
+}
+
+function telegramWindowBounds() {
+  const output = runAppleScript([
+    'tell application "Telegram" to activate',
+    "delay 0.2",
+    'tell application "System Events"',
+    '  tell process "Telegram"',
+    "    set p to position of window 1",
+    "    set s to size of window 1",
+    '    return ((item 1 of p) as text) & "," & ((item 2 of p) as text) & "," & ((item 1 of s) as text) & "," & ((item 2 of s) as text)',
+    "  end tell",
+    "end tell",
+  ]);
+  const [x, y, width, height] = output
+    .trim()
+    .split(",")
+    .map((item) => Number(item));
+  if (![x, y, width, height].every((item) => Number.isFinite(item) && item >= 0)) return null;
+  return { x, y, width, height };
+}
+
+function cropTelegramTitleScreenshot(screenshotPath, cropPath) {
+  const bounds = telegramWindowBounds();
+  const screenshot = imageSize(screenshotPath);
+  const screen = mainScreenSize();
+  const scale = screen.width > 0 && screenshot.width > 0 ? screenshot.width / screen.width : 2;
+  if (!bounds || !screenshot.width) return null;
+
+  const x = Math.max(0, Math.round((bounds.x + bounds.width * 0.36) * scale));
+  const y = Math.max(0, Math.round((bounds.y + 42) * scale));
+  const width = Math.min(screenshot.width - x, Math.max(320, Math.round(bounds.width * 0.48 * scale)));
+  const height = Math.min(screenshot.height - y, Math.max(80, Math.round(45 * scale)));
+  if (width <= 0 || height <= 0) return null;
+
+  run("cp", [screenshotPath, cropPath]);
+  run("sips", ["--cropToHeightWidth", String(height), String(width), "--cropOffset", String(y), String(x), cropPath]);
+  return { path: cropPath, crop: { x, y, width, height }, bounds, scale };
+}
+
+function ocrImage(path) {
+  return runOptional("tesseract", [path, "stdout", "--psm", "6"]).trim();
+}
+
+function safeUiTextSample(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
+function assertTelegramTarget({
+  role,
+  target,
+  expectedTitle,
+  screenshotPath,
+  cropPath,
+  required,
+}) {
+  const screenshot = captureScreenshot(screenshotPath);
+  const cropInfo = cropTelegramTitleScreenshot(screenshot, cropPath);
+  const titleOcr = cropInfo?.path ? ocrImage(cropInfo.path) : "";
+  const ok = expectedTitle ? matchesExpectedTitle(titleOcr, expectedTitle) : true;
+  const evidence = {
+    role,
+    target,
+    expected_title: expectedTitle,
+    ok,
+    screenshot,
+    title_crop: cropInfo?.path || null,
+    title_ocr_sample: safeUiTextSample(titleOcr),
+    crop: cropInfo?.crop || null,
+  };
+  if (!ok && required) {
+    throw new Error(
+      `telegram_target_not_confirmed:${role}: expected ${JSON.stringify(expectedTitle)} in active chat title OCR, saw ${JSON.stringify(
+        safeUiTextSample(titleOcr)
+      )}; screenshot=${screenshot}`
+    );
+  }
+  return evidence;
+}
+
+async function openAndConfirmTelegramTarget(bot, { role, expectedTitle, confirmTarget, screenshotDir, threadId, waitAfterOpenMs }) {
   const target = normalizeBot(bot);
   if (!target) throw new Error("Telegram bot target is required.");
   run("open", [`tg://resolve?domain=${target}`]);
   await sleep(waitAfterOpenMs);
+  const safeThread = threadId || "target-check";
+  const screenshotPath = join(screenshotDir, `${safeThread}-${role}-before-send.png`);
+  const cropPath = join(screenshotDir, `${safeThread}-${role}-title-crop.png`);
+  return assertTelegramTarget({
+    role,
+    target,
+    expectedTitle,
+    screenshotPath,
+    cropPath,
+    required: confirmTarget,
+  });
+}
+
+async function sendTelegramMessage(
+  bot,
+  text,
+  { role, expectedTitle, confirmTarget, screenshotDir, threadId, resetSession, waitAfterOpenMs, waitAfterNewMs }
+) {
+  const target = normalizeBot(bot);
+  const targetConfirmation = await openAndConfirmTelegramTarget(bot, {
+    role,
+    expectedTitle,
+    confirmTarget,
+    screenshotDir,
+    threadId,
+    waitAfterOpenMs,
+  });
 
   const steps = resetSession
     ? [
@@ -136,6 +298,9 @@ async function sendTelegramMessage(bot, text, { resetSession, waitAfterOpenMs, w
   } finally {
     writeClipboard(previous);
   }
+  const afterScreenshot = join(screenshotDir, `${threadId || "target-check"}-${role}-after-send.png`);
+  captureScreenshot(afterScreenshot);
+  return { target, targetConfirmation, after_screenshot: afterScreenshot };
 }
 
 async function fetchJson(url, options = {}) {
@@ -212,7 +377,7 @@ function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, ass
   if (assetBase) {
     lines.push(
       "",
-      "If clawroomctl.mjs, launcher.mjs, or bridge.mjs are missing, download this exact test bundle first:",
+      "Download or refresh this exact test bundle first:",
       "```bash",
       "mkdir -p /tmp/clawroom-v3",
       "cd /tmp/clawroom-v3",
@@ -238,10 +403,11 @@ function buildBootstrapPrompt({ role, threadId, token, relay, goal, context, ass
     `  --relay ${shellQuote(relay)} \\`,
     minMessages ? `  --min-messages ${shellQuote(minMessages)} \\` : "",
     "  --agent-id clawroom-relay \\",
-    "  --require-features telegram-ask-owner-bindings",
+    "  --require-features owner-reply-url \\",
+    "  --owner-facing",
     "```",
     "",
-    "Reply in Telegram with the launcher JSON only."
+    "Reply in Telegram with one short human confirmation only. Do not paste command output, JSON, PIDs, file paths, hashes, tokens, or logs."
   );
   return lines.join("\n");
 }
@@ -346,6 +512,8 @@ async function main() {
   const createKeyValue = createKey(args);
   const hostBot = String(args["host-bot"] || DEFAULT_HOST_BOT);
   const guestBot = String(args["guest-bot"] || DEFAULT_GUEST_BOT);
+  const hostTitle = String(args["host-title"] || DEFAULT_HOST_TITLE);
+  const guestTitle = String(args["guest-title"] || DEFAULT_GUEST_TITLE);
   const topic = String(args.topic || "ClawRoom v3.1 Telegram E2E");
   const goal = String(args.goal || "Agree on one 30 minute meeting time and close with a concise owner summary.");
   const hostContext = String(args["host-context"] || "George can meet Wednesday 3pm Shanghai time for 30 minutes.");
@@ -354,6 +522,8 @@ async function main() {
   const minMessages = String(args["min-messages"] || "").trim();
   const assetBase = String(args["asset-base"] || "").replace(/\/$/, "");
   const send = boolArg(args, "send");
+  const targetCheckOnly = boolArg(args, "target-check-only");
+  const confirmTargets = !boolArg(args, "no-confirm-targets");
   const noCreate = boolArg(args, "no-create");
   const monitor = boolArg(args, "monitor");
   const waitAfterOpenMs = Number(args["wait-after-open-ms"] || 1200);
@@ -361,10 +531,33 @@ async function main() {
   const timeoutSeconds = Number(args["timeout-seconds"] || 900);
   const pollSeconds = Number(args["poll-seconds"] || 10);
   const artifactDir = resolve(String(args["artifact-dir"] || join(homedir(), ".clawroom-v3", "e2e")));
+  const screenshotDir = resolve(String(args["screenshot-dir"] || join(artifactDir, "screenshots")));
   const autoOwnerReplyRole = String(args["auto-owner-reply-role"] || "host");
   const autoOwnerReplyText = String(args["auto-owner-reply-text"] || "").trim();
   const autoOwnerStateDir = resolve(String(args["auto-owner-state-dir"] || process.env.CLAWROOM_STATE_DIR || join(homedir(), ".clawroom-v3")));
   mkdirSync(artifactDir, { recursive: true });
+  mkdirSync(screenshotDir, { recursive: true });
+
+  if (targetCheckOnly) {
+    const hostEvidence = await openAndConfirmTelegramTarget(hostBot, {
+      role: "host",
+      expectedTitle: hostTitle,
+      confirmTarget: confirmTargets,
+      screenshotDir,
+      threadId: "target-check",
+      waitAfterOpenMs,
+    });
+    const guestEvidence = await openAndConfirmTelegramTarget(guestBot, {
+      role: "guest",
+      expectedTitle: guestTitle,
+      confirmTarget: confirmTargets,
+      screenshotDir,
+      threadId: "target-check",
+      waitAfterOpenMs,
+    });
+    console.log(JSON.stringify({ ok: hostEvidence.ok && guestEvidence.ok, host: hostEvidence, guest: guestEvidence }, null, 2));
+    return;
+  }
 
   const thread = await createThread({ relay, topic, goal, noCreate, createKey: createKeyValue });
   const threadId = thread.thread_id || thread.id;
@@ -409,6 +602,12 @@ async function main() {
       thread,
       hostBot,
       guestBot,
+      expected_titles: {
+        host: hostTitle,
+        guest: guestTitle,
+      },
+      screenshotDir,
+      confirmTargets,
       owner_contexts: {
         host: { raw: hostContext, mandates: parseMandates(hostContext) },
         guest: { raw: guestContext, mandates: parseMandates(guestContext) },
@@ -421,11 +620,44 @@ async function main() {
   console.log(JSON.stringify({ phase: "created", thread_id: threadId, hostPromptPath, guestPromptPath, send, monitor }, null, 2));
 
   if (send) {
-    await sendTelegramMessage(hostBot, hostPrompt, { resetSession: true, waitAfterOpenMs, waitAfterNewMs });
-    console.log(JSON.stringify({ phase: "host_sent", bot: hostBot, thread_id: threadId }));
-    await sleep(2000);
-    await sendTelegramMessage(guestBot, guestPrompt, { resetSession: true, waitAfterOpenMs, waitAfterNewMs });
-    console.log(JSON.stringify({ phase: "guest_sent", bot: guestBot, thread_id: threadId }));
+    try {
+      const hostSend = await sendTelegramMessage(hostBot, hostPrompt, {
+        role: "host",
+        expectedTitle: hostTitle,
+        confirmTarget: confirmTargets,
+        screenshotDir,
+        threadId,
+        resetSession: true,
+        waitAfterOpenMs,
+        waitAfterNewMs,
+      });
+      writeFileSync(artifactPath, `${JSON.stringify({ ...readJsonFile(artifactPath), phase: "host_sent", telegramSend: { host: hostSend } }, null, 2)}\n`);
+      console.log(JSON.stringify({ phase: "host_sent", bot: hostBot, thread_id: threadId, target_confirmed: hostSend.targetConfirmation.ok }));
+      await sleep(2000);
+      const guestSend = await sendTelegramMessage(guestBot, guestPrompt, {
+        role: "guest",
+        expectedTitle: guestTitle,
+        confirmTarget: confirmTargets,
+        screenshotDir,
+        threadId,
+        resetSession: true,
+        waitAfterOpenMs,
+        waitAfterNewMs,
+      });
+      const current = readJsonFile(artifactPath);
+      writeFileSync(
+        artifactPath,
+        `${JSON.stringify({ ...current, phase: "guest_sent", telegramSend: { ...(current.telegramSend || {}), guest: guestSend } }, null, 2)}\n`
+      );
+      console.log(JSON.stringify({ phase: "guest_sent", bot: guestBot, thread_id: threadId, target_confirmed: guestSend.targetConfirmation.ok }));
+    } catch (error) {
+      const current = readJsonFile(artifactPath);
+      writeFileSync(
+        artifactPath,
+        `${JSON.stringify({ ...current, phase: "telegram_send_failed", telegram_send_error: error.message, failed_at: Date.now() }, null, 2)}\n`
+      );
+      throw error;
+    }
   }
 
   if (monitor) {

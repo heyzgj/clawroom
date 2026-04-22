@@ -58,14 +58,14 @@ Everything below is considered obsolete or not-ongoing. Git history at the
   copied. The old versions described v2 architecture and would have been
   misleading.
 
-## Transitional files in this tree (not in initial commit)
+## Transitional files removed from the working tree
 
 - `daemon.mjs`, `daemon.py` — earlier iterations of what became `bridge.mjs`.
-  Kept on disk untracked in case the iteration history is useful later.
 - `experiment/phase1.sh` — one-off experiment harness.
 
-If any of these turn out to be needed, add them in a follow-up commit with
-their own message — don't retroactively rewrite the initial commit.
+These were intentionally left out of the product repo after the v3.1 cleanup.
+If any of them turn out to be needed, recover them from local history or an
+archive and add them back in a follow-up commit with their own message.
 
 ## Deferred (tied to T3 validation, not to this migration)
 

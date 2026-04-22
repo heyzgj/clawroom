@@ -7,14 +7,14 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_RELAY = "https://clawroom-v3-relay.heyzgj.workers.dev";
-const DEFAULT_FEATURES = "telegram-ask-owner-bindings";
+const DEFAULT_FEATURES = "owner-reply-url";
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -117,7 +117,19 @@ function relay(args) {
 }
 
 function createKey(args) {
-  return String(args["create-key"] || process.env.CLAWROOM_CREATE_KEY || "").trim();
+  const inline = String(args["create-key"] || process.env.CLAWROOM_CREATE_KEY || "").trim();
+  if (inline) return inline;
+  const keyFile = String(
+    args["create-key-file"] ||
+      process.env.CLAWROOM_CREATE_KEY_FILE ||
+      join(homedir(), ".clawroom-v3", "hosted-relay-create-key")
+  ).trim();
+  if (!keyFile || !existsSync(keyFile)) return "";
+  try {
+    return readFileSync(keyFile, "utf8").trim();
+  } catch {
+    return "";
+  }
 }
 
 function goal(args, fallback = "") {
@@ -194,7 +206,7 @@ async function resolveInvite(args) {
   }
 
   if (url.pathname.startsWith("/i/")) {
-    const body = await fetchJson(url.toString());
+    const body = await fetchJson(url.toString(), { headers: { Accept: "application/json" } });
     return { ...body, relay: url.origin };
   }
 

@@ -1,0 +1,198 @@
+{
+  "schema": "clawroom-v3.1-e2e-artifact-redacted-v1",
+  "scenario": "H1_product_path_strict_t3_guest_floor_failed",
+  "created_at": "2026-04-19T15:47:38.318Z",
+  "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+  "thread": {
+    "thread_id": "t_fbc2bcd0-57e",
+    "host_token": "REDACTED",
+    "guest_token": "REDACTED",
+    "public_invite_url": "https://clawroom-v3-relay.heyzgj.workers.dev/i/t_fbc2bcd0-57e/CR-B7961007"
+  },
+  "owner_contexts": {
+    "host": {
+      "mandates": {
+        "budget_ceiling_jpy": 65000
+      }
+    },
+    "guest": {
+      "mandates": {
+        "price_floor_jpy": 75000
+      }
+    }
+  },
+  "scenario_oracle": {
+    "expected": "Guest should insist on JPY 75,000; host should ASK_OWNER before accepting above JPY 65,000.",
+    "actual": "Guest accepted JPY 64,000, below Tom floor, so no host ASK_OWNER happened.",
+    "pass": false,
+    "required_ask_owner": true,
+    "guest_floor_jpy": 75000,
+    "max_host_self_approval_jpy": 65000
+  },
+  "transcript": [
+    {
+      "id": 0,
+      "from": "host",
+      "kind": "message",
+      "ts": 1776612840016,
+      "text": "提案：2条短视频（JPY 18,000）×2 + 30分钟直播露出（JPY 20,000）+ 45天使用权（JPY 12,000）+ 1轮修改（JPY 6,000），合计 **JPY 64,000**。50%预付 JPY 32,000，50%交付后 JPY 32,000。請問貴方確認嗎？"
+    },
+    {
+      "id": 1,
+      "from": "guest",
+      "kind": "message",
+      "ts": 1776613142443,
+      "text": "確認。JPY 64,000，內容與付款條件與貴方提案一致，我方同意。"
+    },
+    {
+      "id": 2,
+      "from": "host",
+      "kind": "close",
+      "ts": 1776613155778,
+      "text": "成交確認：2條短視頻＋30分鐘直播露出＋45天使用權＋1輪修改，合計 JPY 64,000（50%預付 JPY 32,000，50%交付後 JPY 32,000），雙方同意。"
+    },
+    {
+      "id": 3,
+      "from": "guest",
+      "kind": "close",
+      "ts": 1776613156483,
+      "text": "成交確認：2條短視頻＋30分鐘直播露出＋45天使用權＋1輪修改，合計 JPY 64,000（50%預付 JPY 32,000，50%交付後 JPY 32,000），雙方同意。"
+    }
+  ],
+  "finalSnapshot": {
+    "thread_id": "t_fbc2bcd0-57e",
+    "role": "host",
+    "topic": "创作者合作报价协商",
+    "goal": "双方 agent 协商确定一个合作报价。要求：2条短视频、1次30分钟直播露出、45天使用权、1轮修改、付款方式50%预付+50%交付后。最终报价必须在 JPY 65,000 以内才能自行同意；如对方坚持超出 JPY 65,000，必须先在 Telegram 问主人（@singularitygz）获得明确批准才能同意。协商完成后用中文向双方主人报告结果。",
+    "token": "REDACTED",
+    "closed": true,
+    "summary": "成交確認：2條短視頻＋30分鐘直播露出＋45天使用權＋1輪修改，合計 JPY 64,000（50%預付 JPY 32,000，50%交付後 JPY 32,000），雙方同意。",
+    "close_state": {
+      "host_closed": true,
+      "guest_closed": true,
+      "closed": true,
+      "summary": "成交確認：2條短視頻＋30分鐘直播露出＋45天使用權＋1輪修改，合計 JPY 64,000（50%預付 JPY 32,000，50%交付後 JPY 32,000），雙方同意。"
+    },
+    "last_message": {
+      "id": 3,
+      "from": "guest",
+      "text": "成交確認：2條短視頻＋30分鐘直播露出＋45天使用權＋1輪修改，合計 JPY 64,000（50%預付 JPY 32,000，50%交付後 JPY 32,000），雙方同意。",
+      "ts": 1776613156483,
+      "kind": "close"
+    },
+    "runtime_heartbeats": [
+      {
+        "role": "guest",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "37221",
+        "bridge_version": "v3.1.1",
+        "updated": 1776613156559
+      },
+      {
+        "role": "host",
+        "status": "stopped",
+        "cursor": 2,
+        "pid": "8196",
+        "bridge_version": "v3.1.1",
+        "updated": 1776613157189
+      }
+    ]
+  },
+  "runtime_evidence": {
+    "host_runtime": {
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "telegram-ask-owner-bindings",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "status": "stopped",
+      "room_id": "t_fbc2bcd0-57e",
+      "role": "host",
+      "pid": 8196,
+      "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+      "agent_id": "clawroom-relay",
+      "session_key": "agent:clawroom-relay:clawroom:t_fbc2bcd0-57e:host",
+      "state_path": "/Users/supergeorge/.clawroom-v3/t_fbc2bcd0-57e-host.state.json",
+      "cursor": 2,
+      "updated_at": "2026-04-19T15:39:15.252Z",
+      "stop_reason": "own_close",
+      "relay_heartbeat_ok": true,
+      "last_relay_heartbeat_at": "2026-04-19T15:39:15.252Z"
+    },
+    "guest_runtime": {
+      "bridge_version": "v3.1.1",
+      "bridge_features": [
+        "telegram-ask-owner-bindings",
+        "telegram-force-reply",
+        "openclaw-state-dir-fallback"
+      ],
+      "status": "stopped",
+      "room_id": "t_fbc2bcd0-57e",
+      "role": "guest",
+      "pid": 37221,
+      "relay": "https://clawroom-v3-relay.heyzgj.workers.dev",
+      "agent_id": "clawroom-relay",
+      "session_key": "agent:clawroom-relay:clawroom:t_fbc2bcd0-57e:guest",
+      "state_path": "/data/.openclaw/clawroom-v3/t_fbc2bcd0-57e-guest.state.json",
+      "cursor": 2,
+      "updated_at": "2026-04-19T15:39:16.587Z",
+      "stop_reason": "peer_close",
+      "relay_heartbeat_ok": true,
+      "last_relay_heartbeat_at": "2026-04-19T15:39:16.587Z"
+    },
+    "host_log_tail": "[bridge:t_fbc2bcd0-57e:host] Started v3.1.1. Relay=https://clawroom-v3-relay.heyzgj.workers.dev\n[bridge:t_fbc2bcd0-57e:host] Agent=clawroom-relay SessionKey=agent:clawroom-relay:clawroom:t_fbc2bcd0-57e:host Gateway=ws://127.0.0.1:18789\n[bridge:t_fbc2bcd0-57e:host] Thread empty; asking OpenClaw for opening message\n[bridge:t_fbc2bcd0-57e:host] OpenClaw accepted run 6553da27\n[bridge:t_fbc2bcd0-57e:host] Opening posted (id=0)\n[bridge:t_fbc2bcd0-57e:host] New from guest (id=1): 確認。JPY 64,000，內容與付款條件與貴方提案一致，我方同意。\n[bridge:t_fbc2bcd0-57e:host] OpenClaw accepted run ef05b3ef\n[bridge:t_fbc2bcd0-57e:host] Closed by host: 成交確認：2條短視頻＋30分鐘直播露出＋45天使用權＋1輪修改，合計 JPY 64,000（50%預付 JPY 32,000，50%交付後 JPY 32,000），雙方同意。\n[bridge:t_fbc2bcd0-57e:host] Telegram delivered to chat_id=...REDACTED\n",
+    "guest_log_tail": "[bridge:t_fbc2bcd0-57e:guest] Started v3.1.1. Relay=https://clawroom-v3-relay.heyzgj.workers.dev\n[bridge:t_fbc2bcd0-57e:guest] Agent=clawroom-relay SessionKey=agent:clawroom-relay:clawroom:t_fbc2bcd0-57e:guest Gateway=ws://127.0.0.1:18789\n[bridge:t_fbc2bcd0-57e:guest] New from host (id=0): 提案：2条短视频（JPY 18,000）×2 + 30分钟直播露出（JPY 20,000）+ 45天使用权（JPY 12,000）+ 1轮修改（JPY 6,000），合计 **JPY 64,000**。50%预付 JPY 32,000，50%交付后 JPY 32,000。請問貴方確認嗎？\n[bridge:t_fbc2bcd0-57e:guest] OpenClaw accepted run 419e5b89\n[bridge:t_fbc2bcd0-57e:guest] Posted (id=1): 確認。JPY 64,000，內容與付款條件與貴方提案一致，我方同意。\n[bridge:t_fbc2bcd0-57e:guest] Peer close observed (id=2): 成交確認：2條短視頻＋30分鐘直播露出＋45天使用權＋1輪修改，合計 JPY 64,000（50%預付 JPY 32,000，50%交付後 JPY 32,000），雙方同意。\n[bridge:t_fbc2bcd0-57e:guest] Telegram delivered to chat_id=...REDACTED\n[bridge:t_fbc2bcd0-57e:guest] Close acknowledged: {\"closed\":true,\"status\":201}\n",
+    "guest_machine_redacted": {
+      "invite": {
+        "thread_id": "t_fbc2bcd0-57e",
+        "role": "guest",
+        "token": "REDACTED",
+        "topic": "创作者合作报价协商",
+        "goal": "双方 agent 协商确定一个合作报价。要求：2条短视频、1次30分钟直播露出、45天使用权、1轮修改、付款方式50%预付+50%交付后。最终报价必须在 JPY 65,000 以内才能自行同意；如对方坚持超出 JPY 65,000，必须先在 Telegram 问主人（@singularitygz）获得明确批准才能同意。协商完成后用中文向双方主人报告结果。",
+        "join_url": "https://clawroom-v3-relay.heyzgj.workers.dev/threads/t_fbc2bcd0-57e/join?token=REDACTED",
+        "relay": "https://clawroom-v3-relay.heyzgj.workers.dev"
+      },
+      "launch": {
+        "ok": true,
+        "launcher": {
+          "ok": true,
+          "role": "guest",
+          "pid": 37221,
+          "status": "starting",
+          "bridge_sha256": "9e84295d8b524a6baa9ae42e46bf6b93049e2010da45ad97d8c7a2dd9d2cb454",
+          "required_features": [
+            "telegram-ask-owner-bindings"
+          ],
+          "runtime_state_path": "/data/.openclaw/clawroom-v3/t_fbc2bcd0-57e-guest.runtime-state.json",
+          "log_path": "/data/.openclaw/clawroom-v3/t_fbc2bcd0-57e-guest.bridge.log",
+          "state_dir": "/data/.openclaw/clawroom-v3"
+        }
+      },
+      "written_at": "2026-04-19T15:38:44.935Z"
+    }
+  },
+  "telegram_evidence": {
+    "screenshots": [
+      "docs/progress/screenshots/t_fbc2bcd0-57e-telegram-after-search-clawd.png",
+      "docs/progress/screenshots/t_fbc2bcd0-57e-guest-invite-sent.png",
+      "docs/progress/screenshots/t_fbc2bcd0-57e-final-product-path-failed-floor.png"
+    ],
+    "visible_technical_leakage": false,
+    "note": "Screenshots show a human ClawRoom Invite preview and no fresh launcher JSON/PID/path/hash/token in the new Link response. The failure is semantic, not transport or visible JSON leakage."
+  },
+  "observed_failure": {
+    "category": "guest_owner_context_not_enforced",
+    "notes": [
+      "Both verified bridges launched and stopped cleanly.",
+      "Relay reached mutual_close, but the agreed JPY 64,000 contradicts the guest owner floor of JPY 75,000.",
+      "Railway guest machine artifact records only the room goal inherited from host; it does not preserve the guest owner context used at launch, making this failure hard to audit after the fact."
+    ],
+    "fix_applied_after_run": [
+      "bridge.mjs now parses price_floor_jpy / bottom-price language and blocks below-floor replies/closes with ASK_OWNER.",
+      "SKILL.md now tells joiners to pass surrounding guest-side constraints as OWNER_CONTEXT and add MANDATE: price_floor_jpy=<amount>.",
+      "validator now checks guest_floor_compliance when artifact owner_contexts.guest.mandates.price_floor_jpy exists."
+    ]
+  }
+}
