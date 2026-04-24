@@ -1,7 +1,26 @@
 # ClawRoom v3 Install Path — Design Draft
 
-**Status:** DRAFT. Contains 5 real decision points requiring owner input.
-Recommendation given for each; not locked in.
+**Status:** DRAFT, updated 2026-04-24. Contains real decision points and the
+current recommended next install experiment.
+
+2026-04-24 update: `npx skills add heyzgj/clawroom --list` now sees exactly
+one available skill, `clawroom-v3`. That makes `npx skills add` the right
+candidate for the public install path. It is not yet the default release path
+because we still need one clean disposable install proof that:
+
+- the installed skill directory contains the four product runtime files
+  (`SKILL.md`, `clawroomctl.mjs`, `launcher.mjs`, `bridge.mjs`);
+- it does not make a normal user's agent reason over maintainer-only docs,
+  relay code, screenshots, artifacts, or scripts;
+- it lands in the actual OpenClaw-visible skill location for both local clawd
+  and Railway Link;
+- after install, `openclaw skills info clawroom-v3` reports `Ready`;
+- a natural Telegram create/join path can launch verified bridges without an
+  operator manually copying files.
+
+Until that proof is run, release-candidate E2E may use a visible-skill clean
+install from the repo files, but new-user docs should treat `npx skills add` as
+the target path to validate next, not as already proven.
 
 ## What a first-time user must do (aspirational happy path)
 
@@ -21,10 +40,10 @@ Working back from that:
 3. **After install, no extra config step**. The friend does not set
    env vars, register agents manually, or deploy anything.
 
-The minimum friction path is:
+The minimum friction path should be:
 
 ```sh
-npx skills add heyzgj/clawroom       # one command
+npx skills add heyzgj/clawroom --skill clawroom-v3
 ```
 
 Everything else must be automatic.
@@ -46,12 +65,17 @@ relay/                    ← **especially** not user-facing (Worker; we host it
 scripts/                  ← E2E harness, for maintainers only
 ```
 
-Running `npx skills add heyzgj/clawroom` today would (probably) pull
-the entire tree into the user's `~/.agents/skills/clawroom/`. That's
-~174 MB including `relay/node_modules/`. Most of it is not only
-useless to the user, it's misleading — if they think they need to
-deploy the relay, the whole "we host a public service" model falls
-apart.
+Earlier we assumed `npx skills add heyzgj/clawroom` would probably pull the
+entire maintainer tree into the user's skill directory. That is now partly
+checked: `npx skills add heyzgj/clawroom --list` finds only one skill,
+`clawroom-v3`, because the root `SKILL.md` is recognized.
+
+The remaining unknown is installed payload shape. If the CLI installs the root
+skill directory by symlink/copy, it may still expose maintainer-only files to
+the runtime even though it lists only one skill. That is not necessarily a
+security bug, but it is a UX and reliability risk: a normal user's agent should
+not see relay source, E2E scripts, screenshots, historical artifacts, or design
+docs as part of the product skill.
 
 So: the install scope needs a filter. Five ways to do this, with
 tradeoffs:
@@ -111,8 +135,15 @@ Lesson AH said should be replaced before production.
 
 ## Recommendation
 
-**Option A first** (if skills CLI honors `.skillsignore` or similar),
-**Option B as fallback** (move to `skill/` subdir).
+**Option A' first:** verify `npx skills add heyzgj/clawroom --skill
+clawroom-v3` in a disposable install target and inspect the installed payload.
+If it installs only the root skill plus sibling runtime files in a clean shape,
+use it as the public install command.
+
+If the payload includes the whole maintainer repo, use **Option B** next: move
+the product skill into a dedicated `skill/` subdirectory and install that
+specific package/path. Option C, D, and E remain premature unless the CLI cannot
+support a clean repo-local package.
 
 Not Option C or D: premature process overhead for a product with
 zero external users.
@@ -121,10 +152,13 @@ as the final trust model.
 
 ## Decision point 1 — which scope filter?
 
-Owner picks: A, B, C, D, or E. I recommend A, with B as fallback.
+Owner picks: A', B, C, D, or E. Current recommendation is A' immediately, with
+B as fallback.
 
-If A (`.skillsignore`): I can create the file and verify behavior
-against a dry-run of the skills CLI.
+If A' (`npx skills add` verification): run a disposable install of
+`heyzgj/clawroom --skill clawroom-v3`, inspect installed files, verify the three
+runtime scripts with `node --check`, and then run one natural Telegram
+create/join room.
 If B (subdirectory): I move files, update README, update the
 CLAUDE.md repo layout map, update the runbook in
 `PROD_URL_CUTOVER`.
