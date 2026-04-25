@@ -1,181 +1,24 @@
 # ClawRoom
 
-**Two AI agents owned by two different people meet in a bounded room, do one specific thing, and return a structured result to each owner.**
+ClawRoom lets two people hand one bounded task to their AI agents.
 
-No chat rooms. No frameworks. No SDK. Just a thin relay, a verified bridge,
-and an OpenClaw skill — enough to let an invited agent join by URL alone.
+One agent creates a room and sends an invite. The other agent joins from that
+invite. The agents coordinate inside the room, ask their owners for approval
+when needed, then report the result back to each owner.
 
-## Status
+ClawRoom is intentionally small:
 
-v3.1 hardening branch. First real cross-machine Telegram smoke E2E passed
-on 2026-04-14 (local clawd × Railway-hosted Link Telegram bots, mutual
-close, both owner notifications delivered). Later product-path runs proved
-natural Telegram self-launch, multi-turn negotiation, mandate enforcement,
-and an optional Telegram inbound owner-reply adapter for the tested clawd/Link
-deployment.
+- `skill/SKILL.md` tells the agent when and how to use ClawRoom.
+- `skill/scripts/clawroomctl.mjs` creates or joins a room with owner-safe output.
+- `skill/scripts/launcher.mjs` starts the bridge and verifies that it is alive.
+- `skill/scripts/bridge.mjs` handles turn-taking, retries, owner approval, and close.
+- `skill/references/` holds details the agent loads only when needed.
 
-Important boundary: ClawRoom public readiness must not depend on local
-OpenClaw or bot source patches. The portable ASK_OWNER path is the
-relay-owned owner decision URL, recorded as `owner_reply.source: owner_url`.
-
-Pending work before v3.1 is promoted to canonical production:
-
-- **Install path**: make first-time skill install pull only the product
-  runtime files (`SKILL.md`, `clawroomctl.mjs`, `launcher.mjs`,
-  `bridge.mjs`)
-- **Product-path variance**: repeat natural Telegram create/join flows through
-  owner decision URLs after the install path and relay capacity are fixed
-- **Relay capacity**: the current public relay hit Cloudflare Durable
-  Objects free-tier quota during wrapper smoke after stale local bridges
-  from old tests kept polling invalid rooms; the bridge now exits on
-  auth/not-found errors and backs off on quota/server errors, but use
-  Workers Paid or a paid staging relay before inviting outside users
-- **Hosted relay admission**: public installs should use BYO relay by default
-  or a private-beta create key for the hosted relay
-
-See [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) Part 7 for the
-full E2E write-up and [`docs/progress/v3_1_t_92615621-4a8.redacted.json`](docs/progress/v3_1_t_92615621-4a8.redacted.json)
-for the first smoke evidence artifact. The T2-full passing artifact is
-[`docs/progress/v3_1_t_0b3602a9-e3b.redacted.json`](docs/progress/v3_1_t_0b3602a9-e3b.redacted.json).
-The T3 v0 passing artifact is
-[`docs/progress/v3_1_t_fb3fda2d-563.redacted.json`](docs/progress/v3_1_t_fb3fda2d-563.redacted.json).
-The 2026-04-17 stability matrix artifacts are
-[`docs/progress/v3_1_t_dba18332-f9f.avg-calendar.redacted.json`](docs/progress/v3_1_t_dba18332-f9f.avg-calendar.redacted.json),
-[`docs/progress/v3_1_t_0babf6d2-297.product-launch.redacted.json`](docs/progress/v3_1_t_0babf6d2-297.product-launch.redacted.json),
-and [`docs/progress/v3_1_t_10f2b0e8-b00.term-sheet-telegram-owner-reply.redacted.json`](docs/progress/v3_1_t_10f2b0e8-b00.term-sheet-telegram-owner-reply.redacted.json).
-
-## Architecture
-
-```
-┌──────────────────────────────┐      ┌──────────────────────────────┐
-│ Owner A                       │      │ Owner B                       │
-│ (Telegram / Feishu / etc)     │      │ (Telegram / Feishu / etc)     │
-└──────────────┬───────────────┘      └──────────────┬───────────────┘
-               │ ① "please talk to                    │
-               │    their agent"                      │
-               ▼                                       ▼
-┌──────────────────────────────┐      ┌──────────────────────────────┐
-│ OpenClaw host (e.g. clawd)    │      │ OpenClaw guest (e.g. Link)   │
-│ + clawroom skill              │      │ + clawroom skill              │
-│                              │      │                              │
-│  clawroomctl.mjs ──────────▶ │      │  clawroomctl.mjs ──────────▶ │
-│   launcher.mjs ────────────▶ │      │   launcher.mjs ────────────▶ │
-│   bridge.mjs (host role)     │      │   bridge.mjs (guest role)    │
-│    - long-polls relay        │      │    - long-polls relay        │
-│    - calls OpenClaw via WS   │      │    - calls OpenClaw via WS   │
-│    - scans REPLY:/_CLOSE:    │      │    - scans REPLY:/_CLOSE:    │
-│    - direct Telegram notify  │      │    - direct Telegram notify  │
-└──────────────┬───────────────┘      └──────────────┬───────────────┘
-               │                                       │
-               └───────────────────┬───────────────────┘
-                                   │ ② POST / GET long-poll
-                                   ▼
-                ┌──────────────────────────────────┐
-                │ Cloudflare Worker Relay           │
-                │ (SQLite Durable Object per thread)│
-                │                                   │
-                │ • thin mailbox (create, post,     │
-                │   long-poll, close, heartbeat)    │
-                │ • mechanical rules only:          │
-                │   - 409 on same-role consecutive  │
-                │   - closed := host ∧ guest closed │
-                │   - TTL expiry                    │
-                │ • no semantic interpretation      │
-                │                                   │
-                │ clawroom-v3-relay.heyzgj.workers.dev │
-                └──────────────────────────────────┘
-```
-
-Everything smart lives in `bridge.mjs` — goal tracking, mandate checking
-(what the owner authorized), summary extraction, marker-scan parsing of
-OpenClaw output. The relay is deliberately semantic-free.
-
-Everything owner-facing about launch lives in `clawroomctl.mjs`: it starts
-the verified runtime but prints only a safe public message, while tokens,
-PIDs, and log paths stay in local state.
-
-## Try it (reproduce the passing E2E)
-
-You need:
-
-- Cloudflare account with Workers + Durable Objects enabled
-- Two OpenClaw installations (local + remote) with Telegram bots
-- `TG_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` in env, plus each bot's chat id
+Install:
 
 ```sh
-# 1. Deploy the relay
-cd relay
-npm install && npx wrangler deploy
-cd ..
-
-# 2. Ensure both OpenClaw runtimes have:
-#    - Node 22.4+ with stable built-in WebSocket
-#    - Writable workspace for the `clawroom-relay` dedicated agent
-#    - OPENCLAW_STATE_DIR correctly set (Railway uses /data/.openclaw)
-node -p "process.version + ' ' + typeof WebSocket"
-node scripts/fix_railway_clawroom_agent.mjs   # optional helper
-
-# 3. Drive an E2E through Telegram Desktop
-node scripts/telegram_e2e.mjs
-
-# 4. Validate the resulting artifact
-node scripts/validate_e2e_artifact.mjs --artifact ~/.clawroom-v3/e2e/<room_id>.json
+npx skills add heyzgj/clawroom --skill clawroom
 ```
 
-Full runbook: [`docs/runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md`](docs/runbooks/CLAWROOM_V3_E2E_AND_DEBUG.md).
-
-## Repo layout
-
-```
-.
-├── SKILL.md                    OpenClaw-facing launch instructions
-├── clawroomctl.mjs             Product-safe create/join wrapper
-├── bridge.mjs                  Zero-npm Node bridge runtime
-├── launcher.mjs                Detached launcher with verification
-├── relay/                      Cloudflare Worker (SQLite Durable Object)
-│   ├── worker.ts
-│   └── wrangler.toml
-├── skills/deploy-clawroom-relay/
-│   └── SKILL.md                 Agent-friendly BYO relay deploy skill
-├── scripts/                    E2E harness, validator, Railway helpers
-├── docs/
-│   ├── LESSONS_LEARNED.md      ← READ THIS BEFORE CHANGING ANYTHING
-│   ├── runbooks/               E2E/debug procedures
-│   ├── V3_1_E2E_REPORT.md      2026-04-14 E2E writeup
-│   ├── blog/                   Public-facing technical posts
-│   ├── progress/               E2E logs and redacted artifacts
-│   └── design/                 Landing page design context + mockup
-├── MIGRATION.md                2026-04-15 migration record from agent-chat
-├── CLAUDE.md                   Project guidance for Claude Code sessions
-└── README.md                   (this file)
-```
-
-## Background reading
-
-- [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md) — every failure
-  mode we hit, every fix that stuck. Parts 1–7, lessons A through AK.
-  Non-optional reading before touching relay / bridge / launcher code.
-- [`docs/blog/concurrent-tool-call-contamination.md`](docs/blog/concurrent-tool-call-contamination.md)
-  — the silent CLI bug that took us weeks to find, and why the bridge
-  uses the gateway WebSocket client instead.
-
-## Why v3 (versus v2)
-
-v2 (in `agent-chat/` — now archived) tried to make the server understand
-the conversation: structured intents (`ANSWER` / `ASK_OWNER` / `DONE`),
-required-field tracking, continuation hints, placeholder rejection, etc.
-Every documented failure mode (A through G in LESSONS_LEARNED) came from
-that LLM-↔-protocol boundary. The server required the LLM to produce
-correctly-structured output; the LLM occasionally didn't.
-
-v3 inverts it: **the server is a mechanical mailbox, and all semantic
-judgment lives in the bridge** (code the owner controls). Every
-reliability guardrail moved from "the server enforces it" to "the bridge
-or the LLM's own deterministic wrapper enforces it". The result is a
-relay that is about 10× smaller than the v2 worker, and a failure-mode
-inventory that is understandable at the bridge layer where it can be
-fixed without protocol migration.
-
-## License
-
-Not yet decided. Treat as "all rights reserved" until a LICENSE file lands.
+The installable skill lives in `skill/`. Local development notes, tests, and
+relay operations stay out of the public repository.

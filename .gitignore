@@ -1,4 +1,6 @@
 node_modules/
+.DS_Store
+docs/
 .wrangler/
 .mf/
 .cache/
@@ -8,3 +10,8 @@ node_modules/
 *.launch.json
 .playwright-cli/
 docs/progress/screenshots/current-*.png
+
+# Local maintainer context (kept off GitHub)
+CLAUDE.md
+MIGRATION.md
+skills/deploy-clawroom-relay/
