@@ -655,6 +655,44 @@ export class ThreadDurableObject {
     }, 410);
   }
 
+  private decisionCard(questionText: string): Record<string, string> {
+    const text = String(questionText || "");
+    if (/\babove your [0-9][0-9,.]* JPY ceiling\b/i.test(text)) {
+      return {
+        eyebrow: "Outside your boundary",
+        title: "This is above your ceiling",
+        recommendation: "Approve only if you want to make this exception. Otherwise reject or counter with your ceiling.",
+        counterText: "counter: stay within my ceiling",
+        placeholder: "Add a counter-instruction, for example: keep this at or below my ceiling.",
+      };
+    }
+    if (/\bbelow your [0-9][0-9,.]* JPY floor\b/i.test(text)) {
+      return {
+        eyebrow: "Outside your boundary",
+        title: "This is below your floor",
+        recommendation: "Approve only if you want to make this exception. Otherwise reject or counter with your floor.",
+        counterText: "counter: stay at or above my floor",
+        placeholder: "Add a counter-instruction, for example: stay at or above my floor.",
+      };
+    }
+    if (/\b(approve|authorization|authorize|permission|exception)\b/i.test(text)) {
+      return {
+        eyebrow: "Approval needed",
+        title: "Your agent is blocked on a decision",
+        recommendation: "Approve if the proposal matches your intent. Reject or counter if it changes the boundary you set.",
+        counterText: "counter: revise the terms and ask again if needed",
+        placeholder: "Add a counter-instruction or constraint for your agent.",
+      };
+    }
+    return {
+      eyebrow: "Decision needed",
+      title: "Your agent needs direction",
+      recommendation: "Choose the option that best matches your intent, or add a short instruction before sending.",
+      counterText: "counter: ask for a better option",
+      placeholder: "Add a short instruction for your agent.",
+    };
+  }
+
   private textOrError(rawText: string, emptyError = "text_required"): { text: string } | Response {
     const text = String(rawText || "").trim();
     if (!text) return json({ error: emptyError }, 400);
@@ -907,8 +945,11 @@ export class ThreadDurableObject {
       return this.ownerReplyHtml("Expired", "This decision link expired. Ask your agent to send a fresh question.", 410, includeBody);
     }
 
-    const questionText = escapeHtml(question.text || "");
+    const rawQuestionText = String(question.text || "");
+    const card = this.decisionCard(rawQuestionText);
+    const questionText = escapeHtml(rawQuestionText);
     const role = escapeHtml(question.role || "");
+    const roleLabel = role ? `your ${role} agent` : "your agent";
     const action = `/threads/${encodeURIComponent(id)}/owner-reply`;
     return html(`<!doctype html>
 <html lang="en">
@@ -918,32 +959,50 @@ export class ThreadDurableObject {
   <meta name="robots" content="noindex">
   <title>ClawRoom Decision</title>
   <style>
-    body { font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #17202a; background: #f6f8fb; }
-    main { max-width: 620px; margin: 8vh auto; padding: 28px; background: #fff; border: 1px solid #d7dde8; border-radius: 8px; }
-    h1 { font-size: 24px; margin: 0 0 12px; }
-    .question { padding: 16px; border: 1px solid #d7dde8; border-radius: 8px; background: #f9fbff; margin: 16px 0; }
-    textarea { box-sizing: border-box; width: 100%; min-height: 110px; padding: 12px; border: 1px solid #bac4d3; border-radius: 8px; font: inherit; }
-    button { border: 0; border-radius: 8px; padding: 10px 14px; margin: 8px 8px 0 0; font: inherit; color: #fff; background: #106b5f; cursor: pointer; }
-    button.secondary { background: #425466; }
-    .muted { color: #5f6b7a; font-size: 14px; }
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #17202a; background: #f4f6fa; }
+    main { max-width: 680px; margin: 7vh auto; padding: 30px; background: #fff; border: 1px solid #d8dee9; border-radius: 8px; box-shadow: 0 18px 42px rgba(23, 32, 42, .08); }
+    .eyebrow { color: #8a4b09; font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; margin: 0 0 8px; }
+    h1 { font-size: 26px; line-height: 1.2; margin: 0 0 10px; letter-spacing: 0; }
+    p { margin: 0 0 14px; }
+    .recommendation { border-left: 4px solid #c87918; padding: 10px 0 10px 14px; margin: 18px 0; color: #334155; background: #fff8ec; }
+    .question { padding: 16px 0; border-top: 1px solid #e1e6ef; border-bottom: 1px solid #e1e6ef; margin: 18px 0; color: #0f172a; overflow-wrap: anywhere; }
+    textarea { width: 100%; min-height: 118px; padding: 12px; border: 1px solid #b8c2d1; border-radius: 8px; font: inherit; resize: vertical; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    button { border: 0; border-radius: 8px; min-height: 42px; padding: 10px 15px; font: inherit; font-weight: 650; color: #fff; background: #0f766e; cursor: pointer; }
+    button.secondary { background: #475569; }
+    button.warning { background: #9a3412; }
+    button:hover { filter: brightness(.96); }
+    .muted { color: #64748b; font-size: 14px; }
+    @media (max-width: 720px) {
+      main { margin: 0; min-height: 100vh; border: 0; border-radius: 0; padding: 24px; box-shadow: none; }
+      h1 { font-size: 23px; }
+      .actions button { width: 100%; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>ClawRoom needs your decision</h1>
-    <p class="muted">This will be sent to your ${role} agent so it can continue the room.</p>
+    <p class="eyebrow">${escapeHtml(card.eyebrow)}</p>
+    <h1>${escapeHtml(card.title)}</h1>
+    <p class="muted">Your answer goes to ${roleLabel} so it can continue the room.</p>
+    <p class="recommendation">${escapeHtml(card.recommendation)}</p>
     <div class="question">${questionText}</div>
     <form method="post" action="${action}">
       <input type="hidden" name="code" value="${escapeHtml(code)}">
       <input type="hidden" name="source" value="owner_url">
-      <textarea name="text" placeholder="Approve, reject, or give a counter-instruction." required></textarea>
-      <button type="submit">Send Decision</button>
+      <textarea name="text" placeholder="${escapeHtml(card.placeholder)}" required></textarea>
+      <div class="actions">
+        <button type="submit">Send Instruction</button>
+      </div>
     </form>
-    <form method="post" action="${action}">
+    <form method="post" action="${action}" class="actions" aria-label="Quick decisions">
       <input type="hidden" name="code" value="${escapeHtml(code)}">
       <input type="hidden" name="source" value="owner_url">
       <button type="submit" name="text" value="approve">Approve</button>
       <button class="secondary" type="submit" name="text" value="reject">Reject</button>
+      <button class="warning" type="submit" name="text" value="${escapeHtml(card.counterText)}">Counter</button>
     </form>
   </main>
 </body>

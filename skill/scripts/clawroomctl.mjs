@@ -298,5 +298,8 @@ main().catch((error) => {
   if (code === "create_rate_limited") {
     fail(code, "This ClawRoom relay is busy right now. Please try again later or use your own relay.", 1);
   }
+  if (code === "not_found") {
+    fail(code, "That ClawRoom address did not resolve. Ask for a fresh invite or try a different ClawRoom service.", 1);
+  }
   fail(code, "I could not start ClawRoom from this runtime right now. Please try again or ask for debug details.", 1);
 });

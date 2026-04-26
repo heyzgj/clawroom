@@ -224,6 +224,34 @@ function obviousRejection(text) {
   return /\b(cannot|can't|do not|don't|not above|reject|rejected|decline|ceiling|above the ceiling|over budget)\b/i.test(String(text || ""));
 }
 
+function unsafeAgentOutputReason(value) {
+  const text = String(value || "").trim();
+  if (!text) return "empty_agent_output";
+  const firstLine = text.split("\n").map((line) => line.trim()).find(Boolean) || text;
+  const internalPlaceholders = [
+    /^\[TOOL_CALL\]$/i,
+    /^\[TOOL_RESULT\]$/i,
+    /^\[object Object\]$/i,
+    /^(undefined|null)$/i,
+  ];
+  if (internalPlaceholders.some((pattern) => pattern.test(text) || pattern.test(firstLine))) {
+    return "internal_agent_output";
+  }
+  return "";
+}
+
+function noteUnsafeAgentOutput(reason) {
+  bridgeState.blocked_agent_outputs = Number(bridgeState.blocked_agent_outputs || 0) + 1;
+  bridgeState.last_blocked_agent_output_at = new Date().toISOString();
+  bridgeState.last_blocked_agent_output_reason = reason;
+  persistState();
+  writeRuntimeState("running", {
+    blocked_agent_outputs: bridgeState.blocked_agent_outputs,
+    last_blocked_agent_output_at: bridgeState.last_blocked_agent_output_at,
+    last_blocked_agent_output_reason: reason,
+  });
+}
+
 const mandates = parseMandates(ownerCtx);
 
 let bridgeState = {
@@ -665,25 +693,62 @@ async function gatewayCall(message) {
 }
 
 function parseReply(raw) {
+  const rawReason = unsafeAgentOutputReason(raw);
+  if (rawReason) {
+    noteUnsafeAgentOutput(rawReason);
+    return { invalid: true, reason: rawReason, marker_inferred: false };
+  }
+
   const lines = String(raw || "").split("\n").map((line) => line.trim()).filter(Boolean);
   const closeMatch = lines.map((line) => line.match(/^\s*CLAWROOM[\s_]*CLOSE\s*:\s*(.*)$/i)).find(Boolean);
   if (closeMatch) {
-    return { close: true, summary: closeMatch[1].trim(), marker_inferred: false };
+    const summary = closeMatch[1].trim();
+    const reason = unsafeAgentOutputReason(summary);
+    if (reason) {
+      noteUnsafeAgentOutput(reason);
+      return { invalid: true, reason, marker_inferred: false };
+    }
+    return { close: true, summary, marker_inferred: false };
   }
   if (process.env.CLAWROOM_ALLOW_LEGACY_CLOSE === "true") {
     const legacyMatch = lines.map((line) => line.match(/^\s*CLOSE\s*:\s*(.*)$/i)).find(Boolean);
-    if (legacyMatch) return { close: true, summary: legacyMatch[1].trim(), marker_inferred: false };
+    if (legacyMatch) {
+      const summary = legacyMatch[1].trim();
+      const reason = unsafeAgentOutputReason(summary);
+      if (reason) {
+        noteUnsafeAgentOutput(reason);
+        return { invalid: true, reason, marker_inferred: false };
+      }
+      return { close: true, summary, marker_inferred: false };
+    }
   }
   const askOwnerMatch = lines.map((line) => line.match(/^\s*ASK[\s_]*OWNER\s*:\s*(.*)$/i)).find(Boolean);
   if (askOwnerMatch) {
-    return { ask_owner: true, question: askOwnerMatch[1].trim(), marker_inferred: false };
+    const question = askOwnerMatch[1].trim();
+    const reason = unsafeAgentOutputReason(question);
+    if (reason) {
+      noteUnsafeAgentOutput(reason);
+      return { invalid: true, reason, marker_inferred: false };
+    }
+    return { ask_owner: true, question, marker_inferred: false };
   }
   const replyMatch = lines.map((line) => line.match(/^\s*REPLY\s*:\s*(.*)$/i)).find(Boolean);
   if (replyMatch) {
-    return { close: false, text: replyMatch[1].trim(), marker_inferred: false };
+    const text = replyMatch[1].trim();
+    const reason = unsafeAgentOutputReason(text);
+    if (reason) {
+      noteUnsafeAgentOutput(reason);
+      return { invalid: true, reason, marker_inferred: false };
+    }
+    return { close: false, text, marker_inferred: false };
   }
 
   const text = lines[0] || String(raw || "").trim();
+  const reason = unsafeAgentOutputReason(text);
+  if (reason) {
+    noteUnsafeAgentOutput(reason);
+    return { invalid: true, reason, marker_inferred: false };
+  }
   if (text) {
     bridgeState.unmatched_marker_turns = Number(bridgeState.unmatched_marker_turns || 0) + 1;
     bridgeState.last_marker_inferred_at = new Date().toISOString();
@@ -700,6 +765,28 @@ function parseReply(raw) {
     log(`marker inferred: no REPLY/CLAWROOM_CLOSE/ASK_OWNER marker in agent output; total=${bridgeState.unmatched_marker_turns}`);
   }
   return { close: false, text, marker_inferred: Boolean(text) };
+}
+
+function retryWithoutToolsPrompt(originalPrompt) {
+  return [
+    "Your previous answer could not be sent because it was not a safe room message.",
+    "Do not use tools. Do not call functions. Return plain text only.",
+    "Follow the original task and return exactly one allowed line.",
+    "",
+    originalPrompt,
+  ].join("\n");
+}
+
+async function gatewayParsed(prompt, label) {
+  const first = parseReply(await gatewayCall(prompt));
+  if (!first.invalid) return first;
+
+  log(`blocked unsafe agent output during ${label}; retrying without tools`);
+  const second = parseReply(await gatewayCall(retryWithoutToolsPrompt(prompt)));
+  if (!second.invalid) return second;
+
+  log(`blocked unsafe agent output during ${label} after retry`);
+  return second;
 }
 
 function openingPrompt() {
@@ -719,6 +806,10 @@ function openingPrompt() {
   ].join("\n");
 }
 
+function agreementArtifactInstruction() {
+  return "When closing, format the owner-ready agreement as: Agreed terms: ...; Unresolved: ...; Assumptions: ...; Owner approvals: ...; Next steps: ...; Handoff text: ...";
+}
+
 function replyPrompt(otherRole, text, firstTurn, messageCount) {
   const canClose = !minMessages || messageCount >= minMessages;
   return [
@@ -734,7 +825,7 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
     "",
     "Reply with one concise message that moves toward the goal.",
     canClose ? "If the agreement is clear and ready to report to your owner, close instead." : "Do not close yet; ask a useful question, make a counteroffer, or confirm one missing detail.",
-    canClose ? "When closing, include all key fields explicitly requested in the goal, including the agreed next step when relevant." : "",
+    canClose ? agreementArtifactInstruction() : "",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
     "",
     "Return exactly one line, choosing one:",
@@ -775,7 +866,7 @@ function ownerReplyPrompt(waiting, ownerReplyText, messageCount) {
     "",
     "Continue the negotiation according to the owner reply.",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
-    canClose ? "When closing, include all key fields explicitly requested in the goal, including the agreed next step when relevant." : "",
+    canClose ? agreementArtifactInstruction() : "",
     "",
     "Return exactly one line, choosing one:",
     "REPLY: <short message under 30 words>",
@@ -1078,7 +1169,45 @@ async function handlePeerClose(message) {
   await maybeHeartbeat("stopped", true, { stop_reason: "peer_close" });
 }
 
+async function stopForUnsafeAgentOutput(parsed, context = {}) {
+  const summary = "I stopped this room because I could not produce a safe message for the other side. Please restart with clearer instructions.";
+  const key = idempotencyKey(
+    "unsafe-output-close",
+    threadId,
+    role,
+    context.peer_message_id || "",
+    parsed?.reason || "unsafe_agent_output",
+    sha(summary),
+  );
+
+  try {
+    const result = await closeThread(summary, key);
+    if (result?.id != null) setCursor(result.id);
+    log(`Stopped safely after unsafe agent output: ${parsed?.reason || "unknown"}`);
+  } catch (error) {
+    log(`safe stop close failed: ${error.message}`);
+  }
+
+  await notifyOwnerOnce(`unsafe-agent-output:${role}:${sha(summary)}`, [
+    "ClawRoom stopped safely",
+    "",
+    "I could not produce a safe message for the other side, so I stopped instead of continuing.",
+  ].join("\n")).catch((error) => {
+    log(`owner notify failed: ${error.message}`);
+  });
+
+  await maybeHeartbeat("stopped", true, {
+    stop_reason: "unsafe_agent_output",
+    last_blocked_agent_output_reason: parsed?.reason || null,
+  });
+  return false;
+}
+
 async function handleParsedReply(parsed, context = {}) {
+  if (parsed.invalid) {
+    return await stopForUnsafeAgentOutput(parsed, context);
+  }
+
   if (parsed.ask_owner) {
     await enterWaitingOwner(parsed, context);
     return true;
@@ -1164,14 +1293,13 @@ async function handleWaitingOwner() {
       const messageCount = negotiationMessageCount(allMessages);
       let reply;
       try {
-        reply = await gatewayCall(ownerReplyPrompt(waiting, message.text, messageCount));
+        reply = await gatewayParsed(ownerReplyPrompt(waiting, message.text, messageCount), "owner-reply");
       } catch (error) {
         log(`Gateway error after owner reply: ${error.message}`);
         await maybeHeartbeat("error", true, { last_error: error.message });
         return true;
       }
-      const parsed = parseReply(reply);
-      return await handleParsedReply(parsed, {
+      return await handleParsedReply(reply, {
         peer_message_id: waiting.peer_message_id,
         peer_text: waiting.peer_text,
       });
@@ -1230,9 +1358,18 @@ async function sendOpeningIfNeeded() {
   if (all.length > 0) return;
 
   log("Thread empty; asking OpenClaw for opening message");
-  const reply = await gatewayCall(openingPrompt());
-  const parsed = parseReply(reply);
+  const parsed = await gatewayParsed(openingPrompt(), "opening");
+  if (parsed.invalid) {
+    return await stopForUnsafeAgentOutput(parsed, { phase: "opening" });
+  }
+  if (parsed.ask_owner) {
+    await enterWaitingOwner(parsed, { phase: "opening" });
+    return true;
+  }
   const text = parsed.close ? `I am ready to coordinate this: ${goal}` : parsed.text;
+  if (!text) {
+    return await stopForUnsafeAgentOutput({ invalid: true, reason: "empty_agent_output" }, { phase: "opening" });
+  }
 
   const recheck = await getMessages(-1, 0);
   if (recheck.length > 0) {
@@ -1248,6 +1385,7 @@ async function sendOpeningIfNeeded() {
   } else {
     log(`Opening post failed: ${JSON.stringify(result)}`);
   }
+  return true;
 }
 
 async function run() {
@@ -1261,7 +1399,8 @@ async function run() {
   const otherRole = role === "host" ? "guest" : "host";
   let includeContext = true;
 
-  await sendOpeningIfNeeded();
+  const openingOk = await sendOpeningIfNeeded();
+  if (openingOk === false) return;
 
   while (true) {
     await maybeHeartbeat(bridgeState.waiting_owner?.question_id ? "waiting_owner" : "running", false, {
@@ -1325,7 +1464,7 @@ async function run() {
       const allMessages = await getMessages(-1, 0);
       const messageCount = negotiationMessageCount(allMessages);
       try {
-        reply = await gatewayCall(replyPrompt(otherRole, message.text, includeContext, messageCount));
+        reply = await gatewayParsed(replyPrompt(otherRole, message.text, includeContext, messageCount), "reply");
         includeContext = false;
       } catch (error) {
         log(`Gateway error: ${error.message}`);
@@ -1333,7 +1472,7 @@ async function run() {
         continue;
       }
 
-      let parsed = parseReply(reply);
+      let parsed = reply;
       if (parsed.close && minMessages && messageCount < minMessages) {
         bridgeState.early_close_suppressed = Number(bridgeState.early_close_suppressed || 0) + 1;
         persistState();
@@ -1344,7 +1483,7 @@ async function run() {
         });
         log(`early close suppressed at message_count=${messageCount}; min_messages=${minMessages}`);
         try {
-          parsed = parseReply(await gatewayCall(earlyClosePrompt(otherRole, message.text, parsed.summary, messageCount)));
+          parsed = await gatewayParsed(earlyClosePrompt(otherRole, message.text, parsed.summary, messageCount), "early-close");
         } catch (error) {
           log(`Gateway error after early-close suppression: ${error.message}`);
           await maybeHeartbeat("error", true, { last_error: error.message });
