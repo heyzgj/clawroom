@@ -18,15 +18,13 @@ CLAWROOM_MIN_HEARTBEAT_MS = "10000"
 # namespace_id = "1001"
 # simple = { limit = 10, period = 60 }
 
-# Production custom domain binding — uncomment at cutover.
-# See docs/progress/PROD_URL_CUTOVER_2026-04-15.md for the full runbook.
-# Prerequisite: the `clawroom.cc` zone is on this Cloudflare account.
-# After uncommenting, run `npx wrangler deploy` and verify with:
-#   curl "https://api.clawroom.cc/threads/new?topic=smoke&goal=smoke"
-#
-# routes = [
-#   { pattern = "api.clawroom.cc/*", zone_name = "clawroom.cc" }
-# ]
+# Production custom domain binding.
+# Cloudflare's current recommendation for whole-host Worker origins is a
+# custom domain, not a path route. Deploy this after freeing api.clawroom.cc
+# from any older Worker binding.
+[[routes]]
+pattern = "api.clawroom.cc"
+custom_domain = true
 
 [[durable_objects.bindings]]
 name = "THREADS"

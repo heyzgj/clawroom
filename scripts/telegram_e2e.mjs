@@ -11,7 +11,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-const DEFAULT_RELAY = "https://clawroom-v3-relay.heyzgj.workers.dev";
+const DEFAULT_RELAY = "https://api.clawroom.cc";
 const DEFAULT_HOST_BOT = "@singularitygz_bot";
 const DEFAULT_GUEST_BOT = "@link_clawd_bot";
 const DEFAULT_HOST_TITLE = "clawd|singularity_claude_co|singularitygz_bot";
