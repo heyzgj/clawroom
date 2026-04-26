@@ -1,6 +1,7 @@
 name = "clawroom-v3-relay"
 main = "worker.ts"
 compatibility_date = "2026-04-14"
+workers_dev = true
 
 [vars]
 # BYO relay defaults. Hosted/private-beta relays should set

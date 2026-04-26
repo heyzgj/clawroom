@@ -2,7 +2,7 @@
 
 ## Current Result
 
-`api.clawroom.cc` is not yet reaching the v3 relay.
+`api.clawroom.cc` now reaches the v3 relay.
 
 Verified:
 
@@ -12,15 +12,18 @@ node scripts/relay_target.mjs status
 
 Result:
 
-- `https://api.clawroom.cc` -> `404 not_found`, `looks_like_v3: false`
+- `https://api.clawroom.cc` -> `401 create_key_required`,
+  `looks_like_v3: true`
 - `https://clawroom-v3-relay.heyzgj.workers.dev` -> `401 create_key_required`,
   `looks_like_v3: true`
 - local `CLAWROOM_RELAY`: unset
 - Railway `CLAWROOM_RELAY`: unset
+- recommendation: `prod-ready`
 
-Interpretation: runtime code already defaults to `api.clawroom.cc`, but the
-custom domain is still bound to the wrong Worker or no v3 route. Do not run
-production E2E against `api.clawroom.cc` until the probe returns `ok: true`.
+Interpretation: runtime code defaults to `api.clawroom.cc`, the custom domain
+is bound to `clawroom-v3-relay`, and the hosted relay is still protected by the
+private-beta create-key gate. `401 create_key_required` is the expected healthy
+unauthenticated probe response.
 
 ## Changes Made
 
@@ -34,52 +37,59 @@ production E2E against `api.clawroom.cc` until the probe returns `ok: true`.
   custom_domain = true
   ```
 
+- `relay/wrangler.toml` explicitly keeps the hosted fallback enabled:
+
+  ```toml
+  workers_dev = true
+  ```
+
 - Added `scripts/relay_target.mjs` for one-command status/probe/switch helpers.
 - Added `docs/runbooks/RELAY_ENV_SWITCHING.md`.
 
-## Blocker
+## Deployment
 
-Wrangler auth on this machine is invalid for deployment:
-
-```text
-Invalid access token [code: 9109]
-```
-
-`npx wrangler deploy --dry-run` validates the Worker bundle and bindings, but a
-real deploy/custom-domain cutover requires a valid Cloudflare login or API
-token with permission to deploy `clawroom-v3-relay` and manage the `clawroom.cc`
-zone.
-
-## Safe Current E2E Target
-
-Until `api.clawroom.cc` probes healthy, run E2E against hosted fallback:
+Wrangler OAuth login was refreshed on this machine and the Worker was deployed
+from `relay/`.
 
 ```sh
-CLAWROOM_RELAY=https://clawroom-v3-relay.heyzgj.workers.dev \
-  node scripts/telegram_e2e.mjs
+npx wrangler login
+npx wrangler deploy
 ```
 
-or:
+Latest deployed version:
+
+```text
+b63236ea-f2d1-42a7-89c3-c55d4edbfb4d
+```
+
+Triggers:
+
+```text
+https://clawroom-v3-relay.heyzgj.workers.dev
+api.clawroom.cc
+```
+
+## Current E2E Target
+
+Use production by default:
+
+```sh
+node scripts/telegram_e2e.mjs
+```
+
+Use hosted fallback only when testing cutover/fallback behavior:
 
 ```sh
 node scripts/telegram_e2e.mjs --relay https://clawroom-v3-relay.heyzgj.workers.dev
 ```
 
-## Cutover Steps Left
+## Steps Left
 
-1. Free `api.clawroom.cc` from any older Worker binding.
-2. Authenticate Wrangler.
-3. From `relay/`, run:
-
-   ```sh
-   npx wrangler deploy
-   ```
-
-4. Verify:
-
-   ```sh
-   node scripts/relay_target.mjs probe prod
-   ```
+1. Start fresh OpenClaw sessions before product-path E2E so stale skill/session
+   snapshots do not keep older relay targets.
+2. Run one production URL product-path E2E and commit the redacted artifact.
+3. Keep `workers_dev = true` only while hosted fallback is useful; later decide
+   whether production should be custom-domain only.
 
 5. If Railway has a temporary fallback override, switch it:
 

@@ -39,6 +39,8 @@ Cloudflare's current recommendation for a whole-host Worker origin is a Custom
 Domain. `relay/wrangler.toml` therefore uses:
 
 ```toml
+workers_dev = true
+
 [[routes]]
 pattern = "api.clawroom.cc"
 custom_domain = true
@@ -46,6 +48,8 @@ custom_domain = true
 
 This only takes effect after `npx wrangler deploy`, and only if
 `api.clawroom.cc` is not still bound to an older Worker.
+`workers_dev = true` is intentional while the hosted fallback is useful. Remove
+it later only if production should be custom-domain-only.
 
 ## One-Command Checks
 
