@@ -239,6 +239,7 @@ async function openAndConfirmTelegramTarget(bot, { role, expectedTitle, confirmT
   if (!target) throw new Error("Telegram bot target is required.");
   run("open", [`tg://resolve?domain=${target}`]);
   await sleep(waitAfterOpenMs);
+  runAppleScript(['tell application "Telegram" to activate', "delay 0.3"]);
   const safeThread = threadId || "target-check";
   const screenshotPath = join(screenshotDir, `${safeThread}-${role}-before-send.png`);
   const cropPath = join(screenshotDir, `${safeThread}-${role}-title-crop.png`);
