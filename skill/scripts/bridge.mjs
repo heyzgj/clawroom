@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.3";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -539,6 +539,7 @@ async function gatewayCall(message) {
     let reqId = "";
     let runId = "";
     let lastAssistantText = "";
+    const pendingRunEvents = [];
 
     const mainTimer = setTimeout(() => {
       try { ws.close(); } catch {}
@@ -561,6 +562,14 @@ async function gatewayCall(message) {
     }
 
     function sendConnect(challengeNonce) {
+      if (ws.readyState !== globalThis.WebSocket.OPEN) {
+        if (ws.readyState === globalThis.WebSocket.CLOSING || ws.readyState === globalThis.WebSocket.CLOSED) {
+          finish(new Error(`Gateway WS closed before connect at ${wsUrl}`));
+          return;
+        }
+        setTimeout(() => sendConnect(challengeNonce), 250);
+        return;
+      }
       state = "connecting";
       clearTimeout(challengeFallback);
       connectId = randomUUID();
@@ -607,6 +616,41 @@ async function gatewayCall(message) {
       ws.send(JSON.stringify({ type: "req", id: connectId, method: "connect", params }));
     }
 
+    function handleRunEvent(msg) {
+      const payload = msg.payload || {};
+      if (!runId || payload.runId !== runId) return false;
+      if (msg.event === "agent" && payload.stream === "assistant") {
+        const text = String(payload.data?.text || "").trim();
+        if (text) lastAssistantText = text;
+        return true;
+      }
+      if (msg.event === "agent" && payload.stream === "lifecycle" && payload.data?.phase === "end") {
+        if (lastAssistantText) {
+          state = "done";
+          writeRuntimeState("running", { gateway_connected: true, last_gateway_success_at: new Date().toISOString() });
+          finish(lastAssistantText);
+        }
+        return true;
+      }
+      if (msg.event === "chat" && payload.state === "final") {
+        const text = extractChatMessageText(payload.message);
+        if (text) {
+          state = "done";
+          writeRuntimeState("running", { gateway_connected: true, last_gateway_success_at: new Date().toISOString() });
+          finish(text);
+        }
+        return true;
+      }
+      return false;
+    }
+
+    function drainPendingRunEvents() {
+      const buffered = pendingRunEvents.splice(0);
+      for (const eventMsg of buffered) {
+        if (handleRunEvent(eventMsg) && state === "done") return;
+      }
+    }
+
     ws.addEventListener("error", (event) => {
       finish(new Error(`Gateway WS error at ${wsUrl}: ${event.message || "connection failed"}`));
     });
@@ -646,28 +690,13 @@ async function gatewayCall(message) {
         return;
       }
 
-      if ((state === "requesting" || state === "accepted") && msg.type === "event" && runId) {
+      if ((state === "requesting" || state === "accepted") && msg.type === "event") {
         const payload = msg.payload || {};
-        if (msg.event === "agent" && payload.runId === runId && payload.stream === "assistant") {
-          const text = String(payload.data?.text || "").trim();
-          if (text) lastAssistantText = text;
+        if (!runId && payload.runId && (msg.event === "agent" || msg.event === "chat")) {
+          if (pendingRunEvents.length < 100) pendingRunEvents.push(msg);
           return;
         }
-        if (msg.event === "agent" && payload.runId === runId && payload.stream === "lifecycle" && payload.data?.phase === "end") {
-          if (lastAssistantText) {
-            state = "done";
-            writeRuntimeState("running", { gateway_connected: true, last_gateway_success_at: new Date().toISOString() });
-            finish(lastAssistantText);
-          }
-          return;
-        }
-        if (msg.event === "chat" && payload.runId === runId && payload.state === "final") {
-          const text = extractChatMessageText(payload.message);
-          if (text) {
-            state = "done";
-            writeRuntimeState("running", { gateway_connected: true, last_gateway_success_at: new Date().toISOString() });
-            finish(text);
-          }
+        if (handleRunEvent(msg)) {
           return;
         }
       }
@@ -678,6 +707,7 @@ async function gatewayCall(message) {
           state = "accepted";
           runId = String(payload.runId || "");
           if (runId) log(`OpenClaw accepted run ${runId.slice(0, 8)}`);
+          drainPendingRunEvents();
           return;
         }
         if (!msg.ok) {
