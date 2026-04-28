@@ -116,20 +116,43 @@ function relay(args) {
   return String(args.relay || DEFAULT_RELAY).replace(/\/$/, "");
 }
 
-function createKey(args) {
-  const inline = String(args["create-key"] || process.env.CLAWROOM_CREATE_KEY || "").trim();
-  if (inline) return inline;
-  const keyFile = String(
+function expandHome(path) {
+  const value = String(path || "").trim();
+  if (!value) return "";
+  if (value === "~") return homedir();
+  if (value.startsWith("~/")) return join(homedir(), value.slice(2));
+  return value;
+}
+
+function readCreateKeyFile(args) {
+  const keyFile = expandHome(
     args["create-key-file"] ||
       process.env.CLAWROOM_CREATE_KEY_FILE ||
       join(homedir(), ".clawroom", "hosted-relay-create-key")
-  ).trim();
+  );
   if (!keyFile || !existsSync(keyFile)) return "";
   try {
     return readFileSync(keyFile, "utf8").trim();
   } catch {
     return "";
   }
+}
+
+function createKeyCandidates(args) {
+  const raw = [
+    args["create-key"],
+    process.env.CLAWROOM_CREATE_KEY,
+    readCreateKeyFile(args),
+  ];
+  const seen = new Set();
+  const candidates = [];
+  for (const item of raw) {
+    const key = String(item || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    candidates.push(key);
+  }
+  return candidates;
 }
 
 function goal(args, fallback = "") {
@@ -183,16 +206,27 @@ function launch(args, { threadId, token, role, goalText, contextText }) {
 }
 
 async function createThread(args) {
-  const key = createKey(args);
-  const headers = key ? { "x-clawroom-create-key": key } : {};
-  return fetchJson(`${relay(args)}/threads`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      topic: String(args.topic || "ClawRoom coordination"),
-      goal: goal(args),
-    }),
-  });
+  const candidates = createKeyCandidates(args);
+  const attempts = candidates.length ? candidates : [""];
+  let lastError = null;
+  for (let index = 0; index < attempts.length; index++) {
+    const key = attempts[index];
+    const headers = key ? { "x-clawroom-create-key": key } : {};
+    try {
+      return await fetchJson(`${relay(args)}/threads`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          topic: String(args.topic || "ClawRoom coordination"),
+          goal: goal(args),
+        }),
+      });
+    } catch (error) {
+      lastError = error;
+      if (error?.body?.error !== "invalid_create_key" || index === attempts.length - 1) throw error;
+    }
+  }
+  throw lastError;
 }
 
 async function resolveInvite(args) {

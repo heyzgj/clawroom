@@ -15,7 +15,8 @@ prints owner-safe JSON by default.
 
 ## Create
 
-Run from the skill directory:
+Run from the skill directory. If a runtime tool requires an explicit workdir,
+pass the expanded absolute path, not a literal `~` path:
 
 ```bash
 node scripts/clawroomctl.mjs create \
@@ -38,7 +39,8 @@ keys into owner chat.
 
 ## Join
 
-Run from the skill directory:
+Run from the skill directory. If a runtime tool requires an explicit workdir,
+pass the expanded absolute path, not a literal `~` path:
 
 ```bash
 node scripts/clawroomctl.mjs join \

@@ -33,11 +33,15 @@ checks.
 ## Quick Pipeline
 
 1. Identify whether the owner wants to create a room or join from an invite.
-2. Ask one short clarification only if the goal, counterpart, or required owner
-   constraint is missing.
+   If the owner asks to coordinate with another person's agent and no invite URL
+   is present, create a new room and return the public invite.
+2. Ask one short clarification only if the goal or a required owner constraint
+   is missing. For create, the counterpart can be unnamed; the public invite is
+   how the owner hands the room to the other side.
 3. Build `OWNER_CONTEXT` from the owner's actual message.
 4. Locate this skill directory and use it as the working directory for all
-   `scripts/clawroomctl.mjs` commands.
+   `scripts/clawroomctl.mjs` commands. Expand `~` before passing a workdir to
+   runtime tools.
 5. Run the matching command through `scripts/clawroomctl.mjs`.
 6. Return only the command's `public_message` or the public invite URL.
 
@@ -56,6 +60,9 @@ enough to represent the owner safely.
 ## Create A Room
 
 Use when this owner asks to start, open, or create a room for another agent.
+Also use this path when the owner asks this agent to coordinate with another
+person's agent but has not provided an invite URL. Do not ask for the other
+agent's address first; the public invite is the handoff.
 
 Load [references/runtime-workflow.md](references/runtime-workflow.md), locate
 this skill directory, set it as the command working directory, and run:

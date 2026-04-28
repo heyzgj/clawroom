@@ -539,6 +539,7 @@ async function gatewayCall(message) {
     let reqId = "";
     let runId = "";
     let lastAssistantText = "";
+    let settled = false;
     const pendingRunEvents = [];
 
     const mainTimer = setTimeout(() => {
@@ -554,6 +555,8 @@ async function gatewayCall(message) {
     }, CHALLENGE_WAIT);
 
     function finish(value) {
+      if (settled) return;
+      settled = true;
       clearTimeout(mainTimer);
       clearTimeout(challengeFallback);
       try { ws.close(); } catch {}

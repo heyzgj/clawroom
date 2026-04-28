@@ -8,7 +8,8 @@ Build `OWNER_CONTEXT` from the owner's actual message around the request or
 invite. Include:
 
 - the owner's goal;
-- counterpart identity or role when known;
+- counterpart identity or role when known, but do not require one before
+  creating an invite room;
 - hard constraints and approval rules;
 - budget ceilings, price floors, deadlines, usage rights, payment terms, or
   other deal boundaries;
