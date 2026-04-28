@@ -30,6 +30,20 @@ Kill only stale processes you understand, then verify the list is empty.
 - Use human language and progressive disclosure. Technical detail belongs
   behind explicit debug requests.
 
+## Average-User Testing
+
+- E2E tests must simulate a naive, low-context, non-technical user.
+- Prefer one or two natural-language sentences, optionally with a ClawRoom
+  invite link. Do not paste command walkthroughs, script names, tokens, relay
+  internals, or operator-grade instructions into Telegram unless explicitly
+  testing a debug path.
+- The skill owns the workflow complexity. If the agent needs a long prompt to
+  create, join, monitor, or close a room, treat that as a product bug in the
+  skill UX.
+- Start with the 99% path first: plain intent, plain invite, clear owner
+  outcome. Use CLI keepalive or detailed launch instructions only as fallback
+  diagnostics after the naive path fails.
+
 ## Verification
 
 When changing files in `skill/`, run:
