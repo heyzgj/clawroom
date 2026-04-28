@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.3";
+const VERSION = "0.3.4";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -43,6 +43,7 @@ const OWNER_REPLY_TTL_SECONDS = 30 * 60;
 const FATAL_RELAY_STATUSES = new Set([401, 403, 404, 410]);
 const QUOTA_BACKOFF_MS = 60_000;
 const RELAY_ERROR_BACKOFF_MS = 10_000;
+const CLAWROOM_URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]*(?:clawroom\.cc|workers\.dev)[^\s"'<>]*/gi;
 
 function parseArgs(argv) {
   const result = {};
@@ -81,6 +82,13 @@ if (!threadId || !token || !["host", "guest"].includes(role) || !ownerCtx || !go
   );
   process.exit(1);
 }
+
+function sanitizePromptText(value) {
+  return String(value || "").replace(CLAWROOM_URL_PATTERN, "[ClawRoom invite]");
+}
+
+const promptOwnerCtx = sanitizePromptText(ownerCtx);
+const promptGoal = sanitizePromptText(goal);
 
 const statePath = join(stateDir, `${threadId}-${role}.state.json`);
 const runtimeStatePath = join(stateDir, `${threadId}-${role}.runtime-state.json`);
@@ -159,14 +167,27 @@ function parseMandates(text) {
     const floorMatch = line.match(/^\s*MANDATE\s*:\s*(?:price_floor_jpy|minimum_price_jpy|min_price_jpy|floor_jpy)\s*=\s*([0-9][0-9,]*)\s*$/i);
     if (floorMatch) mandates.price_floor_jpy = Number(floorMatch[1].replace(/,/g, ""));
 
+    const ceilingUsdMatch = line.match(/^\s*MANDATE\s*:\s*(?:budget_ceiling_usd|ceiling_usd)\s*=\s*([0-9][0-9,]*(?:\.\d+)?)\s*$/i);
+    if (ceilingUsdMatch) mandates.budget_ceiling_usd = Number(ceilingUsdMatch[1].replace(/,/g, ""));
+
+    const floorUsdMatch = line.match(/^\s*MANDATE\s*:\s*(?:price_floor_usd|minimum_price_usd|min_price_usd|floor_usd)\s*=\s*([0-9][0-9,]*(?:\.\d+)?)\s*$/i);
+    if (floorUsdMatch) mandates.price_floor_usd = Number(floorUsdMatch[1].replace(/,/g, ""));
+
     const amounts = parseJpyAmounts(line);
-    if (!amounts.length) continue;
-    if (!mandates.budget_ceiling_jpy && /ceiling|not above|do not exceed|don't exceed|max(?:imum)?/.test(line)) {
+    if (amounts.length && !mandates.budget_ceiling_jpy && /ceiling|not above|do not exceed|don't exceed|max(?:imum)?/.test(line)) {
       mandates.budget_ceiling_jpy = Math.max(...amounts);
     }
     const floorPattern = /floor|bottom|lowest|min(?:imum)?/;
-    if (!mandates.price_floor_jpy && floorPattern.test(line)) {
+    if (amounts.length && !mandates.price_floor_jpy && floorPattern.test(line)) {
       mandates.price_floor_jpy = Math.max(...amounts);
+    }
+
+    const usdAmounts = parseUsdAmounts(line);
+    if (usdAmounts.length && !mandates.budget_ceiling_usd && /ceiling|not above|do not exceed|don't exceed|max(?:imum)?/.test(line)) {
+      mandates.budget_ceiling_usd = Math.max(...usdAmounts);
+    }
+    if (usdAmounts.length && !mandates.price_floor_usd && floorPattern.test(line)) {
+      mandates.price_floor_usd = Math.max(...usdAmounts);
     }
   }
   return mandates;
@@ -190,6 +211,24 @@ function parseJpyAmounts(text) {
   return amounts;
 }
 
+function parseUsdAmounts(text) {
+  const source = String(text || "");
+  const amounts = [];
+  const patterns = [
+    /\$\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /(?:USD|usd|dollars?)\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?\s*(?:USD|usd|dollars?)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const value = Number(String(match[1] || "").replace(/,/g, ""));
+      if (!Number.isFinite(value)) continue;
+      amounts.push(value * (match[2] ? 1000 : 1));
+    }
+  }
+  return amounts;
+}
+
 function maxJpyAmount(text) {
   const amounts = parseJpyAmounts(text);
   return amounts.length ? Math.max(...amounts) : null;
@@ -200,8 +239,28 @@ function minJpyAmount(text) {
   return amounts.length ? Math.min(...amounts) : null;
 }
 
+function maxUsdAmount(text) {
+  const amounts = parseUsdAmounts(text);
+  return amounts.length ? Math.max(...amounts) : null;
+}
+
+function minUsdAmount(text) {
+  const amounts = parseUsdAmounts(text);
+  return amounts.length ? Math.min(...amounts) : null;
+}
+
 function mandatePromptLines(useAskOwner = false) {
   const lines = [];
+  if (mandates.budget_ceiling_usd) {
+    lines.push(
+      `Mandate: do not accept or propose above ${mandates.budget_ceiling_usd} USD unless the owner explicitly approves.${useAskOwner ? " Use ASK_OWNER before exceeding it." : ""}`
+    );
+  }
+  if (mandates.price_floor_usd) {
+    lines.push(
+      `Mandate: do not accept or propose below ${mandates.price_floor_usd} USD unless the owner explicitly approves.${useAskOwner ? " Use ASK_OWNER before going below it." : ""}`
+    );
+  }
   if (mandates.budget_ceiling_jpy) {
     lines.push(
       `Mandate: do not accept or propose above ${mandates.budget_ceiling_jpy} JPY unless the owner explicitly approves.${useAskOwner ? " Use ASK_OWNER before exceeding it." : ""}`
@@ -237,6 +296,12 @@ function unsafeAgentOutputReason(value) {
   if (internalPlaceholders.some((pattern) => pattern.test(text) || pattern.test(firstLine))) {
     return "internal_agent_output";
   }
+  CLAWROOM_URL_PATTERN.lastIndex = 0;
+  if (CLAWROOM_URL_PATTERN.test(text)) {
+    CLAWROOM_URL_PATTERN.lastIndex = 0;
+    return "clawroom_url_leak";
+  }
+  CLAWROOM_URL_PATTERN.lastIndex = 0;
   return "";
 }
 
@@ -804,6 +869,7 @@ function retryWithoutToolsPrompt(originalPrompt) {
   return [
     "Your previous answer could not be sent because it was not a safe room message.",
     "Do not use tools. Do not call functions. Return plain text only.",
+    "Do not include ClawRoom invite, watch, API, worker, room, or relay URLs.",
     "Follow the original task and return exactly one allowed line.",
     "",
     originalPrompt,
@@ -824,14 +890,18 @@ async function gatewayParsed(prompt, label) {
 
 function openingPrompt() {
   return [
-    "You are acting for your owner in a private two-agent coordination room.",
+    "You are acting for your owner inside an already-created private two-agent coordination room.",
+    "This is not a user request. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
+    "Only write the next room message for this existing room.",
     "",
-    `Owner context: ${ownerCtx}`,
-    `Goal: ${goal}`,
+    `Owner context: ${promptOwnerCtx}`,
+    `Goal: ${promptGoal}`,
     ...mandatePromptLines(false),
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     "",
-    "Start the conversation with one concrete proposal or the most useful context.",
+    "Start with one concrete proposal or the most useful context.",
+    "Preserve every numeric, date, deadline, budget, floor, ceiling, scope, and exclusivity constraint from Owner context exactly.",
+    "Do not invent, round, shrink, or reinterpret owner constraints.",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
     "",
     "Return exactly one line:",
@@ -846,17 +916,21 @@ function agreementArtifactInstruction() {
 function replyPrompt(otherRole, text, firstTurn, messageCount) {
   const canClose = !minMessages || messageCount >= minMessages;
   return [
-    firstTurn ? "You are acting for your owner in a private two-agent coordination room." : "",
-    firstTurn ? `Owner context: ${ownerCtx}` : "",
-    `Goal: ${goal}`,
+    firstTurn ? "You are acting for your owner inside an already-created private two-agent coordination room." : "",
+    "This is not a user request. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
+    "Only write the next room message for this existing room.",
+    firstTurn ? `Owner context: ${promptOwnerCtx}` : "",
+    `Goal: ${promptGoal}`,
     ...mandatePromptLines(true),
     minMessages ? `Negotiation messages so far, including the latest received message: ${messageCount}.` : "",
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     minMessages && !canClose ? "You MUST continue with REPLY. Do not close yet." : "",
     firstTurn ? "" : "",
-    `The other agent (${otherRole}) says: ${JSON.stringify(text)}`,
+    `The other agent (${otherRole}) says: ${JSON.stringify(sanitizePromptText(text))}`,
     "",
     "Reply with one concise message that moves toward the goal.",
+    "Preserve every numeric, date, deadline, budget, floor, ceiling, scope, and exclusivity constraint from Owner context exactly.",
+    "Do not invent, round, shrink, or reinterpret owner constraints.",
     canClose ? "If the agreement is clear and ready to report to your owner, close instead." : "Do not close yet; ask a useful question, make a counteroffer, or confirm one missing detail.",
     canClose ? agreementArtifactInstruction() : "",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
@@ -871,10 +945,11 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
 function earlyClosePrompt(otherRole, text, summary, messageCount) {
   return [
     "You attempted to close the room before the minimum negotiation length.",
+    "This is an already-created room. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
     `Negotiation messages so far: ${messageCount}.`,
     `Minimum negotiation messages before close: ${minMessages}.`,
-    `The other agent (${otherRole}) last said: ${JSON.stringify(text)}`,
-    `Your premature close summary was: ${JSON.stringify(summary)}`,
+    `The other agent (${otherRole}) last said: ${JSON.stringify(sanitizePromptText(text))}`,
+    `Your premature close summary was: ${JSON.stringify(sanitizePromptText(summary))}`,
     "",
     "Continue the negotiation with one substantive question, counteroffer, or missing-detail confirmation.",
     "Use natural language. Do not mention APIs, tokens, relays, sessions, or internal mechanics.",
@@ -888,13 +963,14 @@ function ownerReplyPrompt(waiting, ownerReplyText, messageCount) {
   const canClose = !minMessages || messageCount >= minMessages;
   return [
     "Your owner has replied to your authorization question.",
-    `Owner context: ${ownerCtx}`,
-    `Goal: ${goal}`,
+    "This is an already-created room. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
+    `Owner context: ${promptOwnerCtx}`,
+    `Goal: ${promptGoal}`,
     ...mandatePromptLines(true),
-    `Original counterpart message: ${JSON.stringify(waiting.peer_text || "")}`,
-    waiting.attempted_close_summary ? `Your blocked close summary: ${JSON.stringify(waiting.attempted_close_summary)}` : "",
-    waiting.blocked_reply_text ? `Your blocked reply: ${JSON.stringify(waiting.blocked_reply_text)}` : "",
-    `OWNER_REPLY: ${ownerReplyText}`,
+    `Original counterpart message: ${JSON.stringify(sanitizePromptText(waiting.peer_text || ""))}`,
+    waiting.attempted_close_summary ? `Your blocked close summary: ${JSON.stringify(sanitizePromptText(waiting.attempted_close_summary))}` : "",
+    waiting.blocked_reply_text ? `Your blocked reply: ${JSON.stringify(sanitizePromptText(waiting.blocked_reply_text))}` : "",
+    `OWNER_REPLY: ${sanitizePromptText(ownerReplyText)}`,
     minMessages ? `Negotiation messages so far: ${messageCount}. Minimum before close: ${minMessages}.` : "",
     "",
     "Continue the negotiation according to the owner reply.",
@@ -1019,6 +1095,34 @@ function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
 }
 
 function mandateViolation(text, action) {
+  const usdCeiling = Number(mandates.budget_ceiling_usd || 0);
+  if (usdCeiling && !bridgeState.mandate_approvals?.budget_ceiling_usd) {
+    const amount = maxUsdAmount(text);
+    if (amount && amount > usdCeiling && !(action === "reply" && obviousRejection(text))) {
+      return {
+        kind: "budget_ceiling_usd",
+        ceiling: usdCeiling,
+        amount,
+        currency: "USD",
+        action,
+      };
+    }
+  }
+
+  const usdFloor = Number(mandates.price_floor_usd || 0);
+  if (usdFloor && !bridgeState.mandate_approvals?.price_floor_usd) {
+    const amount = maxUsdAmount(text);
+    if (amount && amount < usdFloor && !(action === "reply" && obviousRejection(text))) {
+      return {
+        kind: "price_floor_usd",
+        floor: usdFloor,
+        amount,
+        currency: "USD",
+        action,
+      };
+    }
+  }
+
   const ceiling = Number(mandates.budget_ceiling_jpy || 0);
   if (ceiling && !bridgeState.mandate_approvals?.budget_ceiling_jpy) {
     const amount = maxJpyAmount(text);
@@ -1050,6 +1154,18 @@ function mandateViolation(text, action) {
 
 function ownerQuestionText(parsed, violation) {
   if (parsed.ask_owner) return parsed.question;
+  if (violation?.kind === "budget_ceiling_usd") {
+    return [
+      `The proposed ${violation.action} mentions ${violation.amount} USD, above your ${violation.ceiling} USD ceiling.`,
+      "Approve this exception, reject it, or give a counter-instruction.",
+    ].join(" ");
+  }
+  if (violation?.kind === "price_floor_usd") {
+    return [
+      `The proposed ${violation.action} mentions ${violation.amount} USD, below your ${violation.floor} USD floor.`,
+      "Approve this exception, reject it, or give a counter-instruction.",
+    ].join(" ");
+  }
   if (violation?.kind === "budget_ceiling_jpy") {
     return [
       `The proposed ${violation.action} mentions ${violation.amount} JPY, above your ${violation.ceiling} JPY ceiling.`,

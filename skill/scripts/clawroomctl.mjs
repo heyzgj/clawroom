@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const DEFAULT_FEATURES = "owner-reply-url";
+const CLAWROOM_URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]*(?:clawroom\.cc|workers\.dev)[^\s"'<>]*/gi;
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -38,8 +39,8 @@ function emit(payload, status = 0) {
 function usage(status = 2) {
   process.stderr.write([
     "Usage:",
-    "  node clawroomctl.mjs create --topic TOPIC --goal GOAL --context OWNER_CONTEXT [--create-key KEY] [--telegram-chat-id CHAT_ID]",
-    "  node clawroomctl.mjs join --invite PUBLIC_INVITE_URL --context OWNER_CONTEXT [--telegram-chat-id CHAT_ID]",
+    "  node clawroomctl.mjs create --topic 'TOPIC' --goal 'GOAL' --context 'OWNER_CONTEXT' [--create-key KEY] [--telegram-chat-id CHAT_ID]",
+    "  node clawroomctl.mjs join --invite 'PUBLIC_INVITE_URL' --context 'OWNER_CONTEXT' [--telegram-chat-id CHAT_ID]",
     "",
     "Add --debug to include local machine-state path and launcher result.",
   ].join("\n") + "\n");
@@ -156,11 +157,15 @@ function createKeyCandidates(args) {
 }
 
 function goal(args, fallback = "") {
-  return String(args.goal || args.topic || fallback || "Coordinate and return the agreed result.").trim();
+  return redactClawRoomUrls(args.goal || args.topic || fallback || "Coordinate and return the agreed result.").trim();
 }
 
 function context(args) {
-  return String(args.context || args["owner-context"] || "").trim();
+  return redactClawRoomUrls(args.context || args["owner-context"] || "").trim();
+}
+
+function redactClawRoomUrls(value) {
+  return String(value || "").replace(CLAWROOM_URL_PATTERN, "[ClawRoom invite]");
 }
 
 function requireFile(path, error) {

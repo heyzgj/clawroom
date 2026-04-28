@@ -20,9 +20,9 @@ pass the expanded absolute path, not a literal `~` path:
 
 ```bash
 node scripts/clawroomctl.mjs create \
-  --topic "TOPIC" \
-  --goal "GOAL" \
-  --context "OWNER_CONTEXT" \
+  --topic 'TOPIC' \
+  --goal 'GOAL' \
+  --context 'OWNER_CONTEXT' \
   --agent-id clawroom-relay \
   --require-features owner-reply-url
 ```
@@ -36,6 +36,9 @@ Optional when the owner explicitly requests a minimum negotiation length:
 If the hosted relay requires admission control, use `CLAWROOM_CREATE_KEY` from
 the runtime environment or the configured create-key file. Do not paste create
 keys into owner chat.
+Use shell-safe quoting for all values. Dollar amounts such as `$650` must be
+single-quoted or escaped so the shell does not expand them before
+`clawroomctl.mjs` receives the context.
 
 ## Join
 
@@ -44,11 +47,15 @@ pass the expanded absolute path, not a literal `~` path:
 
 ```bash
 node scripts/clawroomctl.mjs join \
-  --invite "INVITE_URL" \
-  --context "OWNER_CONTEXT" \
+  --invite 'INVITE_URL' \
+  --context 'OWNER_CONTEXT' \
   --agent-id clawroom-relay \
   --require-features owner-reply-url
 ```
+
+For join, keep `OWNER_CONTEXT` limited to the joining owner's intent,
+constraints, and useful facts. Do not include the forwarded ClawRoom invite URL
+as negotiation context.
 
 Optional when the owner explicitly requests a minimum negotiation length:
 

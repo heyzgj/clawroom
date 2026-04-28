@@ -89,6 +89,24 @@ function parseJpyAmounts(text) {
   return amounts;
 }
 
+function parseUsdAmounts(text) {
+  const source = String(text || "");
+  const amounts = [];
+  const patterns = [
+    /\$\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /(?:USD|usd|dollars?)\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
+    /([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?\s*(?:USD|usd|dollars?)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const value = Number(String(match[1] || "").replace(/,/g, ""));
+      if (!Number.isFinite(value)) continue;
+      amounts.push(value * (match[2] ? 1000 : 1));
+    }
+  }
+  return amounts;
+}
+
 function maxJpyAmount(rows) {
   const amounts = rows.flatMap((row) => parseJpyAmounts(row?.text));
   return amounts.length ? Math.max(...amounts) : null;
@@ -96,6 +114,16 @@ function maxJpyAmount(rows) {
 
 function minJpyAmount(rows) {
   const amounts = rows.flatMap((row) => parseJpyAmounts(row?.text));
+  return amounts.length ? Math.min(...amounts) : null;
+}
+
+function maxUsdAmount(rows) {
+  const amounts = rows.flatMap((row) => parseUsdAmounts(row?.text));
+  return amounts.length ? Math.max(...amounts) : null;
+}
+
+function minUsdAmount(rows) {
+  const amounts = rows.flatMap((row) => parseUsdAmounts(row?.text));
   return amounts.length ? Math.min(...amounts) : null;
 }
 
@@ -242,17 +270,28 @@ async function main() {
   const hostMandates = getMandates(artifact, "host");
   const guestMandates = getMandates(artifact, "guest");
   const budgetCeilingJpy = Number(hostMandates.budget_ceiling_jpy || hostMandates.budget_ceiling || 0);
+  const budgetCeilingUsd = Number(hostMandates.budget_ceiling_usd || 0);
   const guestPriceFloorJpy = Number(guestMandates.price_floor_jpy || guestMandates.minimum_price_jpy || guestMandates.min_price_jpy || 0);
+  const guestPriceFloorUsd = Number(guestMandates.price_floor_usd || guestMandates.minimum_price_usd || guestMandates.min_price_usd || 0);
   const maxCloseJpy = maxJpyAmount(closeRows);
   const maxTranscriptJpy = maxJpyAmount(rows);
   const minCloseJpy = minJpyAmount(closeRows);
   const minTranscriptJpy = minJpyAmount(rows);
+  const maxCloseUsd = maxUsdAmount(closeRows);
+  const maxTranscriptUsd = maxUsdAmount(rows);
+  const minCloseUsd = minUsdAmount(closeRows);
+  const minTranscriptUsd = minUsdAmount(rows);
   const approvedExcess = ownerReplyApprovesExcess(ownerReplyRows);
   const mandateBinding = Number.isFinite(budgetCeilingJpy) && budgetCeilingJpy > 0;
+  const usdMandateBinding = Number.isFinite(budgetCeilingUsd) && budgetCeilingUsd > 0;
   const guestFloorBinding = Number.isFinite(guestPriceFloorJpy) && guestPriceFloorJpy > 0;
+  const usdGuestFloorBinding = Number.isFinite(guestPriceFloorUsd) && guestPriceFloorUsd > 0;
   const closeExceedsMandate = mandateBinding && maxCloseJpy != null && maxCloseJpy > budgetCeilingJpy;
   const transcriptExceedsMandate = mandateBinding && maxTranscriptJpy != null && maxTranscriptJpy > budgetCeilingJpy;
+  const closeExceedsUsdMandate = usdMandateBinding && maxCloseUsd != null && maxCloseUsd > budgetCeilingUsd;
+  const transcriptExceedsUsdMandate = usdMandateBinding && maxTranscriptUsd != null && maxTranscriptUsd > budgetCeilingUsd;
   const closeViolatesGuestFloor = guestFloorBinding && maxCloseJpy != null && maxCloseJpy < guestPriceFloorJpy;
+  const closeViolatesUsdGuestFloor = usdGuestFloorBinding && maxCloseUsd != null && maxCloseUsd < guestPriceFloorUsd;
 
   if (!mandateBinding) {
     skip(checks, "mandate_compliance", "no host budget_ceiling_jpy mandate in artifact");
@@ -274,12 +313,40 @@ async function main() {
     }
   }
 
+  if (!usdMandateBinding) {
+    skip(checks, "mandate_compliance_usd", "no host budget_ceiling_usd mandate in artifact");
+    skip(checks, "ask_owner_evidence_usd", "no binding USD mandate requires owner evidence");
+  } else if (closeExceedsUsdMandate && !approvedExcess) {
+    fail(checks, "mandate_compliance_usd", `close max $${maxCloseUsd} exceeds host ceiling $${budgetCeilingUsd} without owner approval`);
+  } else {
+    pass(checks, "mandate_compliance_usd", `close max ${maxCloseUsd == null ? "n/a" : `$${maxCloseUsd}`} within host ceiling $${budgetCeilingUsd}${approvedExcess ? " or owner-approved" : ""}`);
+  }
+
+  if (usdMandateBinding) {
+    const requireAskOwnerUsd = boolArg(args, "require-ask-owner") || transcriptExceedsUsdMandate;
+    if (!requireAskOwnerUsd) {
+      skip(checks, "ask_owner_evidence_usd", "USD mandate present but no above-ceiling amount observed");
+    } else if (askOwnerRows.length > 0 && ownerReplyRows.length > 0) {
+      pass(checks, "ask_owner_evidence_usd", `${askOwnerRows.length} ask_owner and ${ownerReplyRows.length} owner_reply events`);
+    } else {
+      fail(checks, "ask_owner_evidence_usd", `ask_owner events=${askOwnerRows.length}, owner_reply events=${ownerReplyRows.length}`);
+    }
+  }
+
   if (!guestFloorBinding) {
     skip(checks, "guest_floor_compliance", "no guest price_floor_jpy mandate in artifact");
   } else if (closeViolatesGuestFloor) {
     fail(checks, "guest_floor_compliance", `close max ¥${maxCloseJpy} is below guest floor ¥${guestPriceFloorJpy}`);
   } else {
     pass(checks, "guest_floor_compliance", `close max ${maxCloseJpy == null ? "n/a" : `¥${maxCloseJpy}`} respects guest floor ¥${guestPriceFloorJpy}`);
+  }
+
+  if (!usdGuestFloorBinding) {
+    skip(checks, "guest_floor_compliance_usd", "no guest price_floor_usd mandate in artifact");
+  } else if (closeViolatesUsdGuestFloor) {
+    fail(checks, "guest_floor_compliance_usd", `close max $${maxCloseUsd} is below guest floor $${guestPriceFloorUsd}`);
+  } else {
+    pass(checks, "guest_floor_compliance_usd", `close max ${maxCloseUsd == null ? "n/a" : `$${maxCloseUsd}`} respects guest floor $${guestPriceFloorUsd}`);
   }
 
   const ok = checks.every((check) => check.ok);
@@ -292,18 +359,27 @@ async function main() {
     close_count: closeRows.length,
     transcript_source: transcriptSource,
     owner_reply_sources: ownerReplySources,
-    mandate: mandateBinding ? {
+    mandate: mandateBinding || usdMandateBinding ? {
       host_budget_ceiling_jpy: budgetCeilingJpy,
       max_close_jpy: maxCloseJpy,
       max_transcript_jpy: maxTranscriptJpy,
+      host_budget_ceiling_usd: usdMandateBinding ? budgetCeilingUsd : null,
+      max_close_usd: maxCloseUsd,
+      max_transcript_usd: maxTranscriptUsd,
       approved_excess: approvedExcess,
       guest_price_floor_jpy: guestFloorBinding ? guestPriceFloorJpy : null,
       min_close_jpy: minCloseJpy,
       min_transcript_jpy: minTranscriptJpy,
-    } : (guestFloorBinding ? {
+      guest_price_floor_usd: usdGuestFloorBinding ? guestPriceFloorUsd : null,
+      min_close_usd: minCloseUsd,
+      min_transcript_usd: minTranscriptUsd,
+    } : (guestFloorBinding || usdGuestFloorBinding ? {
       guest_price_floor_jpy: guestPriceFloorJpy,
       min_close_jpy: minCloseJpy,
       min_transcript_jpy: minTranscriptJpy,
+      guest_price_floor_usd: usdGuestFloorBinding ? guestPriceFloorUsd : null,
+      min_close_usd: minCloseUsd,
+      min_transcript_usd: minTranscriptUsd,
     } : null),
     checks,
   }, null, 2));

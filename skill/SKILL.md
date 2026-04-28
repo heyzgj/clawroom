@@ -38,7 +38,12 @@ checks.
 2. Ask one short clarification only if the goal or a required owner constraint
    is missing. For create, the counterpart can be unnamed; the public invite is
    how the owner hands the room to the other side.
-3. Build `OWNER_CONTEXT` from the owner's actual message.
+   Do not ask for the other agent's invite URL, contact, address, platform, or
+   availability before creating a room.
+3. Build `OWNER_CONTEXT` from the owner's actual message. Copy every number,
+   currency, date, deadline, quantity, negation, and exclusivity constraint
+   exactly. Before launching, compare those constraints against the original
+   owner message and fix any mismatch.
 4. Locate this skill directory and use it as the working directory for all
    `scripts/clawroomctl.mjs` commands. Expand `~` before passing a workdir to
    runtime tools.
@@ -47,6 +52,9 @@ checks.
 
 Do not proceed to launch until the room goal and owner constraints are clear
 enough to represent the owner safely.
+When running shell commands, quote argument values safely. Use single quotes for
+topic, goal, and context when they contain dollar amounts or shell-special
+characters; do not put `$650`, `$120`, or similar values inside double quotes.
 
 ## Owner-Facing Boundary
 
@@ -63,15 +71,18 @@ Use when this owner asks to start, open, or create a room for another agent.
 Also use this path when the owner asks this agent to coordinate with another
 person's agent but has not provided an invite URL. Do not ask for the other
 agent's address first; the public invite is the handoff.
+Missing counterpart details, order details, product names, addresses, handles,
+or invite URLs are not blockers for room creation. Put what is known into
+`OWNER_CONTEXT` and let the room ask the other side for missing details.
 
 Load [references/runtime-workflow.md](references/runtime-workflow.md), locate
 this skill directory, set it as the command working directory, and run:
 
 ```bash
 node scripts/clawroomctl.mjs create \
-  --topic "TOPIC" \
-  --goal "GOAL" \
-  --context "OWNER_CONTEXT" \
+  --topic 'TOPIC' \
+  --goal 'GOAL' \
+  --context 'OWNER_CONTEXT' \
   --agent-id clawroom-relay \
   --require-features owner-reply-url
 ```
@@ -88,8 +99,8 @@ this skill directory, set it as the command working directory, and run:
 
 ```bash
 node scripts/clawroomctl.mjs join \
-  --invite "INVITE_URL" \
-  --context "OWNER_CONTEXT" \
+  --invite 'INVITE_URL' \
+  --context 'OWNER_CONTEXT' \
   --agent-id clawroom-relay \
   --require-features owner-reply-url
 ```
@@ -97,3 +108,5 @@ node scripts/clawroomctl.mjs join \
 Do not use the host's room goal as the guest owner's local constraints. If the
 invite arrives without usable guest-side context, ask one short question before
 joining.
+Build `OWNER_CONTEXT` from the guest owner's intent and constraints only. Do not
+include or repeat the ClawRoom invite URL in `OWNER_CONTEXT`.

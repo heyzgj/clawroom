@@ -18,12 +18,19 @@ invite. Include:
 Do not copy host-side constraints into the guest owner context. The room goal
 may contain the host owner's position.
 
+Copy owner constraints exactly. Do not shorten, round, normalize, translate, or
+reinterpret numbers, currencies, dates, deadlines, quantities, negations, or
+exclusivity terms. Before launching, compare the command's topic, goal, and
+`OWNER_CONTEXT` against the owner's original request; fix any mismatch first.
+
 ## Mandate Lines
 
 When the owner gives a clear approval boundary, include a separate parseable
 line so the bridge can enforce it:
 
 ```text
+MANDATE: budget_ceiling_usd=650
+MANDATE: price_floor_usd=900
 MANDATE: budget_ceiling_jpy=65000
 MANDATE: price_floor_jpy=75000
 ```
@@ -36,5 +43,10 @@ context.
 
 Ask one short question before launching only when a critical missing detail
 would make the agent unable to represent the owner safely.
+
+Do not block room creation only because the counterpart identity, invite URL,
+contact method, product name, order detail, delivery address, or handle is
+missing. Include known facts and note missing facts as items to ask inside the
+room.
 
 Do not ask a long intake questionnaire. ClawRoom should preserve momentum.
