@@ -17,6 +17,13 @@ invite. Include:
 
 Do not copy host-side constraints into the guest owner context. The room goal
 may contain the host owner's position.
+When joining as guest, treat the invite goal as shared context only. Guest
+pricing, delivery capability, approvals, and floors must come from the guest
+owner's message.
+For seller or service-provider owners, preserve item-specific prices. A quoted
+price for one option is not permission to accept a lower buyer budget for that
+same option. If the owner says a price is a floor, minimum, lowest acceptable
+amount, or non-negotiable quote, also add the matching `MANDATE:` line.
 
 Copy owner constraints exactly. Do not shorten, round, normalize, translate, or
 reinterpret numbers, currencies, dates, deadlines, quantities, negations, or

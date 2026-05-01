@@ -28,11 +28,12 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.4";
+const VERSION = "0.3.11";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
   "openclaw-state-dir-fallback",
+  "contextual-offer-floor",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -40,6 +41,7 @@ const HEARTBEAT_MS = 15_000;
 const AGENT_TIMEOUT = Math.max(30_000, Number(process.env.CLAWROOM_AGENT_TIMEOUT_MS || 240_000) || 240_000);
 const CHALLENGE_WAIT = 5_000;
 const OWNER_REPLY_TTL_SECONDS = 30 * 60;
+const MAX_AGENT_MESSAGE_CHARS = 2000;
 const FATAL_RELAY_STATUSES = new Set([401, 403, 404, 410]);
 const QUOTA_BACKOFF_MS = 60_000;
 const RELAY_ERROR_BACKOFF_MS = 10_000;
@@ -229,6 +231,136 @@ function parseUsdAmounts(text) {
   return amounts;
 }
 
+const CONTEXT_KEYWORD_STOPWORDS = new Set([
+  "about",
+  "above",
+  "accept",
+  "agent",
+  "agreed",
+  "all",
+  "also",
+  "available",
+  "budget",
+  "buyer",
+  "charge",
+  "confirm",
+  "context",
+  "counter",
+  "deadline",
+  "deliver",
+  "delivery",
+  "dollars",
+  "each",
+  "fee",
+  "fees",
+  "final",
+  "floor",
+  "from",
+  "goal",
+  "included",
+  "including",
+  "maximum",
+  "minimum",
+  "offer",
+  "offered",
+  "owner",
+  "price",
+  "priced",
+  "quote",
+  "quoted",
+  "room",
+  "seller",
+  "service",
+  "shipping",
+  "standard",
+  "terms",
+  "their",
+  "there",
+  "these",
+  "thing",
+  "this",
+  "those",
+  "with",
+  "without",
+]);
+
+function normalizedContextKeywords(text) {
+  const words = String(text || "")
+    .toLowerCase()
+    .replace(/\$[\d,]+(?:\.\d+)?/g, " ")
+    .replace(/\b\d+(?:\.\d+)?\b/g, " ")
+    .match(/[a-z][a-z-]{3,}/g) || [];
+  return [...new Set(words.filter((word) => !CONTEXT_KEYWORD_STOPWORDS.has(word)))];
+}
+
+function sellerishContext(text) {
+  return /\b(?:we|i|our|my)\s+(?:can\s+)?(?:offer|sell|provide|quote|charge)\b/i.test(text) ||
+    /\b(?:our|my)\s+(?:quoted\s+)?(?:price|rate|fee)\b/i.test(text) ||
+    /\b(?:price|rate|fee)\s+is\b/i.test(text) ||
+    /\b(?:seller|vendor|provider|agency|freelancer|contractor|print shop|shop)\s+(?:offering|offers|quotes|charges|can provide)\b/i.test(text) ||
+    /\boffering\s*:/i.test(text);
+}
+
+function contextPriceChunks(text, { splitAlternatives = true } = {}) {
+  const pattern = splitAlternatives
+    ? /(?:[.;!?]\s+|\s+\bor\b\s+|\s+\band\b\s+when\b\s+)/i
+    : /(?:[.;!?]\s+)/i;
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .split(pattern)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+}
+
+function contextualUsdOfferFloors(text) {
+  const source = String(text || "");
+  if (!sellerishContext(source)) return [];
+  const offers = [];
+  for (const chunk of contextPriceChunks(source)) {
+    const amounts = parseUsdAmounts(chunk);
+    if (!amounts.length) continue;
+    const keywords = normalizedContextKeywords(chunk);
+    const amount = Math.max(...amounts);
+    if (keywords.length) {
+      offers.push({ amount, keywords, text: chunk });
+    }
+  }
+  return offers;
+}
+
+function contextualOfferFloorViolation(text, action) {
+  if (bridgeState.mandate_approvals?.contextual_offer_floor_usd) return null;
+  if (obviousRejection(text)) return null;
+  let strongest = null;
+  const offers = contextualUsdOfferFloors(ownerCtx);
+  for (const chunk of contextPriceChunks(text, { splitAlternatives: false })) {
+    const amounts = parseUsdAmounts(chunk);
+    if (!amounts.length) continue;
+    const amount = Math.min(...amounts);
+    const candidateKeywords = new Set(normalizedContextKeywords(chunk));
+    if (!candidateKeywords.size) continue;
+    for (const offer of offers) {
+      if (amount >= offer.amount) continue;
+      const matches = offer.keywords.filter((keyword) => candidateKeywords.has(keyword));
+      const distinctiveMatches = matches.filter((keyword) => keyword !== "regular" && keyword !== "matte");
+      if (matches.length < 2 && distinctiveMatches.length < 1) continue;
+      const score = matches.length + (distinctiveMatches.length ? 2 : 0);
+      if (!strongest || score > strongest.score || (score === strongest.score && offer.amount > strongest.floor)) {
+        strongest = {
+          kind: "contextual_offer_floor_usd",
+          floor: offer.amount,
+          amount,
+          currency: "USD",
+          action,
+          descriptor: matches.slice(0, 4).join(" "),
+          score,
+        };
+      }
+    }
+  }
+  return strongest ? { ...strongest, score: undefined } : null;
+}
+
 function maxJpyAmount(text) {
   const amounts = parseJpyAmounts(text);
   return amounts.length ? Math.max(...amounts) : null;
@@ -274,6 +406,23 @@ function mandatePromptLines(useAskOwner = false) {
   return lines;
 }
 
+function roleBoundaryLines() {
+  const otherRole = role === "host" ? "guest" : "host";
+  const lines = [
+    `You are the ${role} side. The other agent is the ${otherRole} side.`,
+    "Owner context is your only source for what your owner can offer, accept, pay, charge, deliver, or approve.",
+    "The shared Goal is room context only. Do not treat it as your owner's budget, price floor, deadline, capability, or approval.",
+    "If Owner context and Goal conflict, follow Owner context for your side.",
+  ];
+  if (role === "guest") {
+    lines.push("As guest, do not adopt the host buyer's budget, deadline, or requested terms as your own offer.");
+  }
+  if (sellerishContext(ownerCtx)) {
+    lines.push("If your owner gave prices for items or services, treat those as authorized offer terms. Do not accept a lower price for the same item or service unless your owner explicitly approves.");
+  }
+  return lines;
+}
+
 function ownerReplyApprovesExcess(text) {
   if (obviousRejection(text)) return false;
   return /\b(yes|approve|approved|authorize|authorized|ok|okay)\b/i.test(String(text || ""));
@@ -286,6 +435,7 @@ function obviousRejection(text) {
 function unsafeAgentOutputReason(value) {
   const text = String(value || "").trim();
   if (!text) return "empty_agent_output";
+  if (text.length > MAX_AGENT_MESSAGE_CHARS) return "agent_output_too_long";
   const firstLine = text.split("\n").map((line) => line.trim()).find(Boolean) || text;
   const internalPlaceholders = [
     /^\[TOOL_CALL\]$/i,
@@ -896,6 +1046,7 @@ function openingPrompt() {
     "",
     `Owner context: ${promptOwnerCtx}`,
     `Goal: ${promptGoal}`,
+    ...roleBoundaryLines(),
     ...mandatePromptLines(false),
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
     "",
@@ -921,6 +1072,7 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
     "Only write the next room message for this existing room.",
     firstTurn ? `Owner context: ${promptOwnerCtx}` : "",
     `Goal: ${promptGoal}`,
+    ...roleBoundaryLines(),
     ...mandatePromptLines(true),
     minMessages ? `Negotiation messages so far, including the latest received message: ${messageCount}.` : "",
     minMessages ? `Minimum negotiation messages before close: ${minMessages}.` : "",
@@ -946,6 +1098,9 @@ function earlyClosePrompt(otherRole, text, summary, messageCount) {
   return [
     "You attempted to close the room before the minimum negotiation length.",
     "This is an already-created room. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
+    `Owner context: ${promptOwnerCtx}`,
+    `Goal: ${promptGoal}`,
+    ...roleBoundaryLines(),
     `Negotiation messages so far: ${messageCount}.`,
     `Minimum negotiation messages before close: ${minMessages}.`,
     `The other agent (${otherRole}) last said: ${JSON.stringify(sanitizePromptText(text))}`,
@@ -966,6 +1121,7 @@ function ownerReplyPrompt(waiting, ownerReplyText, messageCount) {
     "This is an already-created room. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
     `Owner context: ${promptOwnerCtx}`,
     `Goal: ${promptGoal}`,
+    ...roleBoundaryLines(),
     ...mandatePromptLines(true),
     `Original counterpart message: ${JSON.stringify(sanitizePromptText(waiting.peer_text || ""))}`,
     waiting.attempted_close_summary ? `Your blocked close summary: ${JSON.stringify(sanitizePromptText(waiting.attempted_close_summary))}` : "",
@@ -988,7 +1144,14 @@ function resolveTelegramConfig() {
   const botToken = (process.env.TG_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || "").trim();
   const cfg = readJson(openClawPath("openclaw.json"));
   const telegram = cfg?.channels?.telegram || {};
-  const chatId = explicitTelegramChatId || String(telegram.allowFrom?.[0] || "").trim();
+  const credentialAllowFrom =
+    readJson(openClawPath("credentials", "telegram-allowFrom.json"))?.allowFrom ||
+    readJson(openClawPath("credentials", "telegram-default-allowFrom.json"))?.allowFrom ||
+    [];
+  const chatId =
+    explicitTelegramChatId ||
+    String(telegram.allowFrom?.[0] || "").trim() ||
+    String(credentialAllowFrom?.[0] || "").trim();
   return {
     botToken: botToken || telegram.botToken || "",
     chatId,
@@ -1095,6 +1258,9 @@ function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
 }
 
 function mandateViolation(text, action) {
+  const contextualViolation = contextualOfferFloorViolation(text, action);
+  if (contextualViolation) return contextualViolation;
+
   const usdCeiling = Number(mandates.budget_ceiling_usd || 0);
   if (usdCeiling && !bridgeState.mandate_approvals?.budget_ceiling_usd) {
     const amount = maxUsdAmount(text);
@@ -1111,7 +1277,7 @@ function mandateViolation(text, action) {
 
   const usdFloor = Number(mandates.price_floor_usd || 0);
   if (usdFloor && !bridgeState.mandate_approvals?.price_floor_usd) {
-    const amount = maxUsdAmount(text);
+    const amount = minUsdAmount(text);
     if (amount && amount < usdFloor && !(action === "reply" && obviousRejection(text))) {
       return {
         kind: "price_floor_usd",
@@ -1138,7 +1304,7 @@ function mandateViolation(text, action) {
 
   const floor = Number(mandates.price_floor_jpy || 0);
   if (floor && !bridgeState.mandate_approvals?.price_floor_jpy) {
-    const amount = maxJpyAmount(text);
+    const amount = minJpyAmount(text);
     if (amount && amount < floor && !(action === "reply" && obviousRejection(text))) {
       return {
         kind: "price_floor_jpy",
@@ -1163,6 +1329,12 @@ function ownerQuestionText(parsed, violation) {
   if (violation?.kind === "price_floor_usd") {
     return [
       `The proposed ${violation.action} mentions ${violation.amount} USD, below your ${violation.floor} USD floor.`,
+      "Approve this exception, reject it, or give a counter-instruction.",
+    ].join(" ");
+  }
+  if (violation?.kind === "contextual_offer_floor_usd") {
+    return [
+      `The proposed ${violation.action} mentions ${violation.amount} USD for ${violation.descriptor || "a quoted offer"}, below the ${violation.floor} USD price in your instructions.`,
       "Approve this exception, reject it, or give a counter-instruction.",
     ].join(" ");
   }
@@ -1376,7 +1548,22 @@ async function handleParsedReply(parsed, context = {}) {
 
   if (parsed.close) {
     const key = idempotencyKey("close", threadId, role, context.peer_message_id || "", sha(parsed.summary));
-    const result = await closeThread(parsed.summary, key);
+    let result;
+    try {
+      result = await closeThread(parsed.summary, key);
+    } catch (error) {
+      if (Number(error?.status) === 413) {
+        log(`close summary rejected as too long; stopping safely`);
+        return await stopForUnsafeAgentOutput({ invalid: true, reason: "agent_output_too_long" }, context);
+      }
+      log(`close post failed: ${error.message}; will retry on the next poll`);
+      await maybeHeartbeat("running", true, {
+        last_error: error.message,
+        pending_action: "close",
+      }).catch((heartbeatError) => log(`heartbeat after close failure failed: ${heartbeatError.message}`));
+      await delay(RELAY_ERROR_BACKOFF_MS);
+      return true;
+    }
     if (result?.id != null) setCursor(result.id);
     log(`Closed by ${role}: ${parsed.summary}`);
     await notifyOwnerOnce(`own-close:${sha(parsed.summary)}`, parsed.summary).catch((error) => {
@@ -1388,7 +1575,22 @@ async function handleParsedReply(parsed, context = {}) {
 
   const text = parsed.text || "";
   const key = idempotencyKey("reply", threadId, role, context.peer_message_id || "", sha(text));
-  const result = await postMessage(text, key);
+  let result;
+  try {
+    result = await postMessage(text, key);
+  } catch (error) {
+    if (Number(error?.status) === 413) {
+      log(`reply rejected as too long; stopping safely`);
+      return await stopForUnsafeAgentOutput({ invalid: true, reason: "agent_output_too_long" }, context);
+    }
+    log(`reply post failed: ${error.message}; will retry on the next poll`);
+    await maybeHeartbeat("running", true, {
+      last_error: error.message,
+      pending_action: "reply",
+    }).catch((heartbeatError) => log(`heartbeat after reply failure failed: ${heartbeatError.message}`));
+    await delay(RELAY_ERROR_BACKOFF_MS);
+    return true;
+  }
   if (result?.id != null) {
     setCursor(result.id);
     log(`Posted (id=${result.id}): ${text}`);

@@ -7,7 +7,7 @@ description: >-
   handle a ClawRoom invite URL, or continue a bounded agent-to-agent task that
   may need owner approval.
 metadata:
-  version: "0.3.1"
+  version: "0.3.8"
   relay: "https://api.clawroom.cc"
   openclaw:
     requires:
@@ -110,3 +110,8 @@ invite arrives without usable guest-side context, ask one short question before
 joining.
 Build `OWNER_CONTEXT` from the guest owner's intent and constraints only. Do not
 include or repeat the ClawRoom invite URL in `OWNER_CONTEXT`.
+For the guest side, the invite goal is shared room context, not the guest
+owner's offer, price floor, deadline, capability, or approval.
+If the guest owner is a seller or service provider and gives prices for options,
+preserve which price belongs to which option. Do not treat a buyer's lower
+budget as permission to discount the seller's quoted option.
