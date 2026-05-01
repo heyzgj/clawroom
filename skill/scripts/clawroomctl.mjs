@@ -114,7 +114,7 @@ function debug(args, payload) {
 }
 
 function relay(args) {
-  return String(args.relay || DEFAULT_RELAY).replace(/\/$/, "");
+  return String(args.relay || process.env.CLAWROOM_RELAY || DEFAULT_RELAY).replace(/\/$/, "");
 }
 
 function expandHome(path) {
