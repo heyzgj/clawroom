@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.11";
+const VERSION = "0.3.12";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -273,6 +273,8 @@ const CONTEXT_KEYWORD_STOPWORDS = new Set([
   "service",
   "shipping",
   "standard",
+  "sticker",
+  "stickers",
   "terms",
   "their",
   "there",
@@ -282,6 +284,10 @@ const CONTEXT_KEYWORD_STOPWORDS = new Set([
   "those",
   "with",
   "without",
+  "inch",
+  "inches",
+  "unit",
+  "units",
 ]);
 
 function normalizedContextKeywords(text) {
@@ -342,7 +348,7 @@ function contextualOfferFloorViolation(text, action) {
     for (const offer of offers) {
       if (amount >= offer.amount) continue;
       const matches = offer.keywords.filter((keyword) => candidateKeywords.has(keyword));
-      const distinctiveMatches = matches.filter((keyword) => keyword !== "regular" && keyword !== "matte");
+      const distinctiveMatches = matches.filter((keyword) => keyword !== "matte");
       if (matches.length < 2 && distinctiveMatches.length < 1) continue;
       const score = matches.length + (distinctiveMatches.length ? 2 : 0);
       if (!strongest || score > strongest.score || (score === strongest.score && offer.amount > strongest.floor)) {
