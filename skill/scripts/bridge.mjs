@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.12";
+const VERSION = "0.3.14";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -214,8 +214,12 @@ function parseJpyAmounts(text) {
 }
 
 function parseUsdAmounts(text) {
+  return parseUsdAmountMatches(text).map((match) => match.amount);
+}
+
+function parseUsdAmountMatches(text) {
   const source = String(text || "");
-  const amounts = [];
+  const matches = [];
   const patterns = [
     /\$\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
     /(?:USD|usd|dollars?)\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kK])?/g,
@@ -225,10 +229,25 @@ function parseUsdAmounts(text) {
     for (const match of source.matchAll(pattern)) {
       const value = Number(String(match[1] || "").replace(/,/g, ""));
       if (!Number.isFinite(value)) continue;
-      amounts.push(value * (match[2] ? 1000 : 1));
+      matches.push({
+        amount: value * (match[2] ? 1000 : 1),
+        start: match.index,
+        end: match.index + match[0].length,
+        raw: match[0],
+      });
     }
   }
-  return amounts;
+  const deduped = [];
+  for (const match of matches.sort((a, b) => a.start - b.start || b.end - a.end)) {
+    const overlaps = deduped.some(
+      (existing) =>
+        existing.amount === match.amount &&
+        match.start < existing.end &&
+        existing.start < match.end
+    );
+    if (!overlaps) deduped.push(match);
+  }
+  return deduped;
 }
 
 const CONTEXT_KEYWORD_STOPWORDS = new Set([
@@ -245,9 +264,11 @@ const CONTEXT_KEYWORD_STOPWORDS = new Set([
   "charge",
   "confirm",
   "context",
+  "contractor",
   "counter",
   "deadline",
   "deliver",
+  "delivered",
   "delivery",
   "dollars",
   "each",
@@ -255,6 +276,7 @@ const CONTEXT_KEYWORD_STOPWORDS = new Set([
   "fees",
   "final",
   "floor",
+  "firm",
   "from",
   "goal",
   "included",
@@ -266,15 +288,21 @@ const CONTEXT_KEYWORD_STOPWORDS = new Set([
   "owner",
   "price",
   "priced",
+  "print",
+  "provider",
   "quote",
   "quoted",
   "room",
   "seller",
   "service",
+  "ship",
+  "shipment",
+  "shipped",
   "shipping",
   "standard",
   "sticker",
   "stickers",
+  "shop",
   "terms",
   "their",
   "there",
@@ -282,13 +310,19 @@ const CONTEXT_KEYWORD_STOPWORDS = new Set([
   "thing",
   "this",
   "those",
+  "total",
   "with",
   "without",
   "inch",
   "inches",
   "unit",
   "units",
+  "vendor",
 ]);
+
+function distinctiveContextMatches(matches) {
+  return matches.filter((keyword) => keyword !== "matte");
+}
 
 function normalizedContextKeywords(text) {
   const words = String(text || "")
@@ -301,35 +335,62 @@ function normalizedContextKeywords(text) {
 
 function sellerishContext(text) {
   return /\b(?:we|i|our|my)\s+(?:can\s+)?(?:offer|sell|provide|quote|charge)\b/i.test(text) ||
+    (/\b(?:i am|i'm|we are|we're)\s+(?:the\s+)?(?:[a-z]+\s+){0,3}(?:seller|vendor|provider|contractor|print shop|shop)\b/i.test(text) && parseUsdAmounts(text).length) ||
     /\b(?:our|my)\s+(?:quoted\s+)?(?:price|rate|fee)\b/i.test(text) ||
     /\b(?:price|rate|fee)\s+is\b/i.test(text) ||
     /\b(?:seller|vendor|provider|agency|freelancer|contractor|print shop|shop)\s+(?:offering|offers|quotes|charges|can provide)\b/i.test(text) ||
     /\boffering\s*:/i.test(text);
 }
 
-function contextPriceChunks(text, { splitAlternatives = true } = {}) {
-  const pattern = splitAlternatives
-    ? /(?:[.;!?]\s+|\s+\bor\b\s+|\s+\band\b\s+when\b\s+)/i
-    : /(?:[.;!?]\s+)/i;
-  return String(text || "")
-    .replace(/\s+/g, " ")
-    .split(pattern)
-    .map((chunk) => chunk.trim())
-    .filter(Boolean);
+function nearestBoundaryBefore(source, index, boundaries) {
+  for (let cursor = Math.max(0, index - 1); cursor >= 0; cursor -= 1) {
+    if (boundaries.has(source[cursor])) return cursor;
+  }
+  return -1;
+}
+
+function nearestBoundaryAfter(source, index, boundaries) {
+  for (let cursor = Math.max(0, index); cursor < source.length; cursor += 1) {
+    if (boundaries.has(source[cursor])) return cursor;
+  }
+  return -1;
+}
+
+function boundedPriceText(source, match, boundaries) {
+  const startBoundary = nearestBoundaryBefore(source, match.start, boundaries);
+  const endBoundary = nearestBoundaryAfter(source, match.end, boundaries);
+  const start = startBoundary < 0 ? 0 : startBoundary + 1;
+  const end = endBoundary < 0 ? source.length : endBoundary;
+  return source.slice(start, end).replace(/\s+/g, " ").trim();
+}
+
+function pricedContextClauses(text) {
+  const source = String(text || "");
+  const localBoundaries = new Set([".", ";", "!", "?", "\n", ","]);
+  const sentenceBoundaries = new Set([".", ";", "!", "?", "\n"]);
+  return parseUsdAmountMatches(source)
+    .map((match) => {
+      let clauseText = boundedPriceText(source, match, localBoundaries);
+      let keywords = normalizedContextKeywords(clauseText);
+      if (!keywords.length) {
+        clauseText = boundedPriceText(source, match, sentenceBoundaries);
+        keywords = normalizedContextKeywords(clauseText);
+      }
+      return { amount: match.amount, keywords, text: clauseText };
+    })
+    .filter((clause) => clause.keywords.length);
 }
 
 function contextualUsdOfferFloors(text) {
   const source = String(text || "");
   if (!sellerishContext(source)) return [];
   const offers = [];
-  for (const chunk of contextPriceChunks(source)) {
-    const amounts = parseUsdAmounts(chunk);
-    if (!amounts.length) continue;
-    const keywords = normalizedContextKeywords(chunk);
-    const amount = Math.max(...amounts);
-    if (keywords.length) {
-      offers.push({ amount, keywords, text: chunk });
-    }
+  const seen = new Set();
+  for (const clause of pricedContextClauses(source)) {
+    const key = `${clause.amount}:${clause.keywords.join(",")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    offers.push(clause);
   }
   return offers;
 }
@@ -339,16 +400,21 @@ function contextualOfferFloorViolation(text, action) {
   if (obviousRejection(text)) return null;
   let strongest = null;
   const offers = contextualUsdOfferFloors(ownerCtx);
-  for (const chunk of contextPriceChunks(text, { splitAlternatives: false })) {
-    const amounts = parseUsdAmounts(chunk);
-    if (!amounts.length) continue;
-    const amount = Math.min(...amounts);
-    const candidateKeywords = new Set(normalizedContextKeywords(chunk));
+  for (const candidate of pricedContextClauses(text)) {
+    const amount = candidate.amount;
+    const candidateKeywords = new Set(candidate.keywords);
     if (!candidateKeywords.size) continue;
+    const authorizedLowerOffer = offers.some((offer) => {
+      if (offer.amount > amount) return false;
+      const matches = offer.keywords.filter((keyword) => candidateKeywords.has(keyword));
+      const distinctiveMatches = distinctiveContextMatches(matches);
+      return matches.length >= 2 || distinctiveMatches.length >= 1;
+    });
+    if (authorizedLowerOffer) continue;
     for (const offer of offers) {
       if (amount >= offer.amount) continue;
       const matches = offer.keywords.filter((keyword) => candidateKeywords.has(keyword));
-      const distinctiveMatches = matches.filter((keyword) => keyword !== "matte");
+      const distinctiveMatches = distinctiveContextMatches(matches);
       if (matches.length < 2 && distinctiveMatches.length < 1) continue;
       const score = matches.length + (distinctiveMatches.length ? 2 : 0);
       if (!strongest || score > strongest.score || (score === strongest.score && offer.amount > strongest.floor)) {
