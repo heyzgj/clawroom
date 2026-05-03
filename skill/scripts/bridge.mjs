@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.16";
+const VERSION = "0.3.17";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -36,6 +36,7 @@ const FEATURES = [
   "contextual-offer-floor",
   "unsupported-date-commitment",
   "approval-context-carryover",
+  "deterministic-date-confirmation",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -488,6 +489,7 @@ function roleBoundaryLines() {
     "The shared Goal is room context only. Do not treat it as your owner's budget, price floor, deadline, capability, or approval.",
     "If Owner context and Goal conflict, follow Owner context for your side.",
     "ClawRoom negotiates terms only. Do not imply payment was authorized, finalized, charged, or processed; use invoice or next-step language unless the owner explicitly gave a payment instruction.",
+    "If the counterpart says a required term is unconfirmed or needs their owner, ask the counterpart to confirm it instead of asking your owner to approve it.",
   ];
   if (role === "guest") {
     lines.push("As guest, do not adopt the host buyer's budget, deadline, or requested terms as your own offer.");
@@ -602,6 +604,57 @@ function unsupportedDateCommitmentViolation(text, action) {
     };
   }
   return null;
+}
+
+function peerRequestsUnsupportedDateConfirmation(text) {
+  if (role !== "guest") return null;
+  const source = String(text || "");
+  if (!/\b(?:confirm|guarantee|need|needs|require|requires|arrival|deliver(?:y|ed)?|ship(?:ping|ped)?|by)\b/i.test(source)) {
+    return null;
+  }
+  for (const claim of dateClaims(source)) {
+    if (containsDateClaim(ownerCtx, claim)) continue;
+    if (isDateClaimApproved(claim)) continue;
+    const window = dateClaimWindow(source, claim);
+    if (!/\b(?:confirm|guarantee|need|needs|require|requires|can you|could you|please|must|arrival|deliver(?:y|ed)?|ship(?:ping|ped)?)\b/i.test(window)) {
+      continue;
+    }
+    return {
+      kind: "unsupported_date_commitment",
+      date: claim.raw,
+      normalized_date: claim.normalized,
+      action: "reply",
+    };
+  }
+  return null;
+}
+
+function peerDateConfirmationQuestion(violation) {
+  return [
+    `The buyer needs ${violation.date} delivery confirmed, but your instructions did not confirm that date.`,
+    "Approve that date, reject it, or give the date you can actually support.",
+  ].join(" ");
+}
+
+function peerNeedsOwnOwnerConfirmation(text) {
+  const source = String(text || "");
+  if (!/\b(?:owner|boss|client|manager)\b/i.test(source)) return false;
+  if (!/\b(?:confirm|check|ask|approve|approval|before|pending|need|needs)\b/i.test(source)) return false;
+  return dateClaims(source).some((claim) => !containsDateClaim(ownerCtx, claim));
+}
+
+function asksOurOwnerToProceedDespitePeerUnconfirmed(parsed, peerText) {
+  if (!parsed?.ask_owner) return false;
+  if (!peerNeedsOwnOwnerConfirmation(peerText)) return false;
+  return /\b(?:approve|proceed|accept|finali[sz]e|go ahead|within budget|fits|works)\b/i.test(String(parsed.question || ""));
+}
+
+function counterpartConfirmationReply(peerText) {
+  const claim = dateClaims(peerText).find((item) => !containsDateClaim(ownerCtx, item));
+  if (claim) {
+    return `Please confirm ${claim.raw} with your owner before we proceed.`;
+  }
+  return "Please confirm that with your owner before we proceed.";
 }
 
 function ownerSafeQuestionText(text) {
@@ -1804,6 +1857,14 @@ async function handleParsedReply(parsed, context = {}) {
     return await stopForUnsafeAgentOutput(parsed, context);
   }
 
+  if (asksOurOwnerToProceedDespitePeerUnconfirmed(parsed, context.peer_text || "")) {
+    return await handleParsedReply({
+      close: false,
+      text: counterpartConfirmationReply(context.peer_text || ""),
+      marker_inferred: true,
+    }, context);
+  }
+
   if (parsed.ask_owner) {
     await enterWaitingOwner(parsed, context);
     return true;
@@ -2080,6 +2141,20 @@ async function run() {
       }
 
       log(`New from ${otherRole} (id=${message.id}): ${message.text}`);
+      const peerDateViolation = peerRequestsUnsupportedDateConfirmation(message.text);
+      if (peerDateViolation) {
+        await enterWaitingOwner({
+          ask_owner: true,
+          question: peerDateConfirmationQuestion(peerDateViolation),
+          marker_inferred: true,
+        }, {
+          peer_message_id: message.id,
+          peer_text: message.text,
+          violation: peerDateViolation,
+        });
+        break;
+      }
+
       let reply;
       const allMessages = await getMessages(-1, 0);
       const messageCount = negotiationMessageCount(allMessages);
