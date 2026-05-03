@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.18";
+const VERSION = "0.3.19";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -38,6 +38,7 @@ const FEATURES = [
   "approval-context-carryover",
   "deterministic-date-confirmation",
   "mixed-approval-parser",
+  "required-interaction-guard",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -499,6 +500,9 @@ function roleBoundaryLines() {
   if (sellerishContext(ownerCtx)) {
     lines.push("If your owner gave prices for items or services, treat those as authorized offer terms. Do not accept a lower price for the same item or service unless your owner explicitly approves.");
   }
+  if (requiredInteractionTerm()) {
+    lines.push("If your owner requires a call, meeting, or kickoff step, do not waive, omit, or mark it optional unless your owner explicitly approves.");
+  }
   return lines;
 }
 
@@ -661,6 +665,49 @@ function counterpartConfirmationReply(peerText) {
   return "Please confirm that with your owner before we proceed.";
 }
 
+function requiredInteractionTerm() {
+  const source = String(ownerCtx || "");
+  if (!/\b(?:require|requires|required|must|need|needs)\b/i.test(source)) return null;
+  if (!/\b(?:call|meeting|kickoff)\b/i.test(source)) return null;
+  const amounts = parseUsdAmounts(source);
+  const total = amounts.length >= 2 ? amounts.reduce((sum, amount) => sum + amount, 0) : 0;
+  const label = /\bkickoff\b/i.test(source)
+    ? "kickoff call"
+    : /\bmeeting\b/i.test(source)
+      ? "meeting"
+      : "call";
+  return { label, total };
+}
+
+function requiredInteractionViolation(text, action) {
+  if (bridgeState.mandate_approvals?.required_interaction_removed) return null;
+  const term = requiredInteractionTerm();
+  if (!term) return null;
+  const source = String(text || "");
+  const removesInteraction =
+    /\bno\b.{0,40}\b(?:call|meeting|kickoff)\b/i.test(source) ||
+    /\b(?:without|skip|waive|drop)\b.{0,40}\b(?:call|meeting|kickoff)\b/i.test(source) ||
+    /\b(?:call|meeting|kickoff)\b.{0,40}\b(?:not needed|not required|optional|waived|skipped|dropped)\b/i.test(source);
+  if (removesInteraction) {
+    return {
+      kind: "required_interaction_removed",
+      label: term.label,
+      action,
+    };
+  }
+  const amount = maxUsdAmount(source);
+  if (term.total && amount && amount < term.total && /\btotal\b/i.test(source)) {
+    return {
+      kind: "required_interaction_removed",
+      label: term.label,
+      amount,
+      required_total: term.total,
+      action,
+    };
+  }
+  return null;
+}
+
 function ownerSafeQuestionText(text) {
   return String(text || "")
     .replace(/\bauthori[sz]e payment\b/gi, "confirm whether to proceed with these terms")
@@ -678,6 +725,9 @@ function approvedContextLines() {
   }
   if (bridgeState.mandate_approvals?.contextual_offer_floor_usd) {
     lines.push("Owner-approved exception: the owner approved the quoted price exception for this room.");
+  }
+  if (bridgeState.mandate_approvals?.required_interaction_removed) {
+    lines.push("Owner-approved exception: the owner approved removing the required call, meeting, or kickoff step for this room.");
   }
   if (bridgeState.mandate_approvals?.budget_ceiling_usd) {
     lines.push("Owner-approved exception: the owner approved the USD budget exception for this room.");
@@ -1583,6 +1633,9 @@ function mandateViolation(text, action) {
   const unsupportedDateViolation = unsupportedDateCommitmentViolation(text, action);
   if (unsupportedDateViolation) return unsupportedDateViolation;
 
+  const requiredInteraction = requiredInteractionViolation(text, action);
+  if (requiredInteraction) return requiredInteraction;
+
   const contextualViolation = contextualOfferFloorViolation(text, action);
   if (contextualViolation) return contextualViolation;
 
@@ -1668,6 +1721,13 @@ function ownerQuestionText(parsed, violation) {
       `The proposed ${violation.action} commits to ${violation.date}, but your instructions did not confirm that date.`,
       "Approve that date, reject it, or give the date you can actually support.",
     ].join(" ");
+  }
+  if (violation?.kind === "required_interaction_removed") {
+    return [
+      `The proposed ${violation.action} removes your required ${violation.label}.`,
+      violation.required_total ? `It also appears below your required total of ${violation.required_total} USD.` : "",
+      "Approve dropping that requirement, reject it, or give the terms you actually support.",
+    ].filter(Boolean).join(" ");
   }
   if (violation?.kind === "budget_ceiling_jpy") {
     return [
