@@ -28,12 +28,14 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.14";
+const VERSION = "0.3.16";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
   "openclaw-state-dir-fallback",
   "contextual-offer-floor",
+  "unsupported-date-commitment",
+  "approval-context-carryover",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -485,9 +487,11 @@ function roleBoundaryLines() {
     "Owner context is your only source for what your owner can offer, accept, pay, charge, deliver, or approve.",
     "The shared Goal is room context only. Do not treat it as your owner's budget, price floor, deadline, capability, or approval.",
     "If Owner context and Goal conflict, follow Owner context for your side.",
+    "ClawRoom negotiates terms only. Do not imply payment was authorized, finalized, charged, or processed; use invoice or next-step language unless the owner explicitly gave a payment instruction.",
   ];
   if (role === "guest") {
     lines.push("As guest, do not adopt the host buyer's budget, deadline, or requested terms as your own offer.");
+    lines.push("As guest, never promise the host's requested deadline, delivery date, or shipping date unless Owner context explicitly includes that date. If the date is missing, say you need to confirm it first.");
   }
   if (sellerishContext(ownerCtx)) {
     lines.push("If your owner gave prices for items or services, treat those as authorized offer terms. Do not accept a lower price for the same item or service unless your owner explicitly approves.");
@@ -502,6 +506,191 @@ function ownerReplyApprovesExcess(text) {
 
 function obviousRejection(text) {
   return /\b(cannot|can't|do not|don't|not above|reject|rejected|decline|ceiling|above the ceiling|over budget)\b/i.test(String(text || ""));
+}
+
+const DATE_CLAIM_PATTERNS = [
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
+  /\b\d{4}-\d{1,2}-\d{1,2}\b/g,
+  /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g,
+];
+
+function normalizedDateClaim(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dateClaims(text) {
+  const source = String(text || "");
+  const claims = [];
+  for (const pattern of DATE_CLAIM_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      claims.push({
+        raw: match[0],
+        normalized: normalizedDateClaim(match[0]),
+        start: match.index,
+        end: match.index + match[0].length,
+      });
+    }
+  }
+  const seen = new Set();
+  return claims.filter((claim) => {
+    if (seen.has(claim.normalized)) return false;
+    seen.add(claim.normalized);
+    return true;
+  });
+}
+
+function containsDateClaim(text, claim) {
+  return normalizedDateClaim(text).includes(claim.normalized);
+}
+
+function approvedUnsupportedDateClaims() {
+  const approval = bridgeState.mandate_approvals?.unsupported_date_commitment;
+  if (!approval) return [];
+  if (approval === true) return [{ raw: "", normalized: "*" }];
+  if (Array.isArray(approval.dates)) {
+    return approval.dates
+      .map((date) => ({
+        raw: String(date?.raw || date || ""),
+        normalized: normalizedDateClaim(date?.normalized || date?.raw || date || ""),
+      }))
+      .filter((date) => date.normalized);
+  }
+  if (approval.date) {
+    return [{
+      raw: String(approval.date || ""),
+      normalized: normalizedDateClaim(approval.normalized || approval.date || ""),
+    }].filter((date) => date.normalized);
+  }
+  return [];
+}
+
+function isDateClaimApproved(claim) {
+  return approvedUnsupportedDateClaims().some((date) => date.normalized === "*" || date.normalized === claim.normalized);
+}
+
+function dateClaimWindow(text, claim) {
+  const source = String(text || "");
+  const start = Math.max(0, claim.start - 40);
+  const end = Math.min(source.length, claim.end + 40);
+  return source.slice(start, end);
+}
+
+function commitsToDate(text, claim) {
+  const window = dateClaimWindow(text, claim);
+  if (/\?/.test(window) && /\b(?:can|could|would|is|does|will)\b/i.test(window)) return false;
+  if (/\b(?:need|needs|have|has)\s+to\s+(?:confirm|check|ask|verify)\b/i.test(window)) return false;
+  if (/\b(?:not\s+sure|cannot\s+confirm|can't\s+confirm|unconfirmed|tentative)\b/i.test(window)) return false;
+  return /\b(?:by|before|on|delivered|delivery|ship|ships|shipped|arrive|arrives|ready|complete|completed|finish|finished|works|can\s+do)\b/i.test(window);
+}
+
+function unsupportedDateCommitmentViolation(text, action) {
+  if (role !== "guest") return null;
+  for (const claim of dateClaims(text)) {
+    if (containsDateClaim(ownerCtx, claim)) continue;
+    if (isDateClaimApproved(claim)) continue;
+    if (!commitsToDate(text, claim)) continue;
+    return {
+      kind: "unsupported_date_commitment",
+      date: claim.raw,
+      normalized_date: claim.normalized,
+      action,
+    };
+  }
+  return null;
+}
+
+function ownerSafeQuestionText(text) {
+  return String(text || "")
+    .replace(/\bauthori[sz]e payment\b/gi, "confirm whether to proceed with these terms")
+    .replace(/\bfinali[sz]e payment\b/gi, "finalize next steps")
+    .replace(/\bproceed with payment\b/gi, "proceed with the next step")
+    .replace(/\bpayment details\b/gi, "invoice or next-step details")
+    .trim();
+}
+
+function approvedContextLines() {
+  const lines = [];
+  const dateApprovals = approvedUnsupportedDateClaims().filter((date) => date.normalized !== "*");
+  for (const date of dateApprovals) {
+    lines.push(`Owner-approved exception: ${date.raw} is authorized for this room. You may confirm this date without asking again.`);
+  }
+  if (bridgeState.mandate_approvals?.contextual_offer_floor_usd) {
+    lines.push("Owner-approved exception: the owner approved the quoted price exception for this room.");
+  }
+  if (bridgeState.mandate_approvals?.budget_ceiling_usd) {
+    lines.push("Owner-approved exception: the owner approved the USD budget exception for this room.");
+  }
+  if (bridgeState.mandate_approvals?.price_floor_usd) {
+    lines.push("Owner-approved exception: the owner approved the USD price-floor exception for this room.");
+  }
+  if (bridgeState.mandate_approvals?.budget_ceiling_jpy) {
+    lines.push("Owner-approved exception: the owner approved the JPY budget exception for this room.");
+  }
+  if (bridgeState.mandate_approvals?.price_floor_jpy) {
+    lines.push("Owner-approved exception: the owner approved the JPY price-floor exception for this room.");
+  }
+  const latestOwnerReply = String(bridgeState.latest_owner_reply_text || "").trim();
+  if (latestOwnerReply) {
+    lines.push(`Latest owner instruction: ${sanitizePromptText(latestOwnerReply)}`);
+  }
+  return lines;
+}
+
+function uniqueDateClaims(...texts) {
+  const byNormalized = new Map();
+  for (const text of texts) {
+    for (const claim of dateClaims(text)) {
+      if (!containsDateClaim(ownerCtx, claim) && !byNormalized.has(claim.normalized)) {
+        byNormalized.set(claim.normalized, { raw: claim.raw, normalized: claim.normalized });
+      }
+    }
+  }
+  return [...byNormalized.values()];
+}
+
+function approvedMandateFromOwnerReply(waiting, ownerReplyText) {
+  const violation = waiting?.mandate_violation || null;
+  if (violation?.kind) return violation.kind;
+
+  const approvedDates = uniqueDateClaims(
+    ownerReplyText,
+    waiting?.question_text || "",
+    waiting?.blocked_reply_text || "",
+  );
+  if (role === "guest" && approvedDates.length) return "unsupported_date_commitment";
+
+  return null;
+}
+
+function recordMandateApproval(waiting, ownerReplyText) {
+  if (!ownerReplyApprovesExcess(ownerReplyText)) return;
+  const approvedMandate = approvedMandateFromOwnerReply(waiting, ownerReplyText);
+  if (!approvedMandate) return;
+
+  bridgeState.mandate_approvals ||= {};
+  const approval = {
+    question_id: waiting.question_id,
+    approved_at: new Date().toISOString(),
+  };
+  if (approvedMandate === "unsupported_date_commitment") {
+    const dates = uniqueDateClaims(
+      waiting?.mandate_violation?.date || "",
+      ownerReplyText,
+      waiting?.question_text || "",
+      waiting?.blocked_reply_text || "",
+    );
+    bridgeState.mandate_approvals[approvedMandate] = {
+      ...approval,
+      dates,
+    };
+    return;
+  }
+  bridgeState.mandate_approvals[approvedMandate] = approval;
 }
 
 function unsafeAgentOutputReason(value) {
@@ -1117,6 +1306,7 @@ function openingPrompt() {
     "Only write the next room message for this existing room.",
     "",
     `Owner context: ${promptOwnerCtx}`,
+    ...approvedContextLines(),
     `Goal: ${promptGoal}`,
     ...roleBoundaryLines(),
     ...mandatePromptLines(false),
@@ -1133,7 +1323,7 @@ function openingPrompt() {
 }
 
 function agreementArtifactInstruction() {
-  return "When closing, format the owner-ready agreement as: Agreed terms: ...; Unresolved: ...; Assumptions: ...; Owner approvals: ...; Next steps: ...; Handoff text: ...";
+  return "When closing, format the owner-ready agreement as: Agreed terms: ...; Unresolved: ...; Assumptions: ...; Owner approvals: ...; Next steps: ...; Handoff text: ... Do not say ClawRoom processed payment or that owner approval is still needed after the room closes.";
 }
 
 function replyPrompt(otherRole, text, firstTurn, messageCount) {
@@ -1143,6 +1333,7 @@ function replyPrompt(otherRole, text, firstTurn, messageCount) {
     "This is not a user request. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
     "Only write the next room message for this existing room.",
     firstTurn ? `Owner context: ${promptOwnerCtx}` : "",
+    ...approvedContextLines(),
     `Goal: ${promptGoal}`,
     ...roleBoundaryLines(),
     ...mandatePromptLines(true),
@@ -1171,6 +1362,7 @@ function earlyClosePrompt(otherRole, text, summary, messageCount) {
     "You attempted to close the room before the minimum negotiation length.",
     "This is an already-created room. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
     `Owner context: ${promptOwnerCtx}`,
+    ...approvedContextLines(),
     `Goal: ${promptGoal}`,
     ...roleBoundaryLines(),
     `Negotiation messages so far: ${messageCount}.`,
@@ -1192,6 +1384,7 @@ function ownerReplyPrompt(waiting, ownerReplyText, messageCount) {
     "Your owner has replied to your authorization question.",
     "This is an already-created room. Do not use tools, call skills, create rooms, join rooms, generate invites, or mention invite URLs.",
     `Owner context: ${promptOwnerCtx}`,
+    ...approvedContextLines(),
     `Goal: ${promptGoal}`,
     ...roleBoundaryLines(),
     ...mandatePromptLines(true),
@@ -1330,6 +1523,9 @@ function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
 }
 
 function mandateViolation(text, action) {
+  const unsupportedDateViolation = unsupportedDateCommitmentViolation(text, action);
+  if (unsupportedDateViolation) return unsupportedDateViolation;
+
   const contextualViolation = contextualOfferFloorViolation(text, action);
   if (contextualViolation) return contextualViolation;
 
@@ -1391,7 +1587,7 @@ function mandateViolation(text, action) {
 }
 
 function ownerQuestionText(parsed, violation) {
-  if (parsed.ask_owner) return parsed.question;
+  if (parsed.ask_owner) return ownerSafeQuestionText(parsed.question);
   if (violation?.kind === "budget_ceiling_usd") {
     return [
       `The proposed ${violation.action} mentions ${violation.amount} USD, above your ${violation.ceiling} USD ceiling.`,
@@ -1408,6 +1604,12 @@ function ownerQuestionText(parsed, violation) {
     return [
       `The proposed ${violation.action} mentions ${violation.amount} USD for ${violation.descriptor || "a quoted offer"}, below the ${violation.floor} USD price in your instructions.`,
       "Approve this exception, reject it, or give a counter-instruction.",
+    ].join(" ");
+  }
+  if (violation?.kind === "unsupported_date_commitment") {
+    return [
+      `The proposed ${violation.action} commits to ${violation.date}, but your instructions did not confirm that date.`,
+      "Approve that date, reject it, or give the date you can actually support.",
     ].join(" ");
   }
   if (violation?.kind === "budget_ceiling_jpy") {
@@ -1479,6 +1681,7 @@ async function enterWaitingOwner(parsed, context = {}) {
     question_id: question.question_id,
     owner_reply_token: question.owner_reply_token,
     ask_event_id: question.id,
+    question_text: questionText,
     asked_at: new Date().toISOString(),
     expires_at: question.expires_at || null,
     peer_message_id: context.peer_message_id ?? null,
@@ -1701,14 +1904,8 @@ async function handleWaitingOwner() {
     if (message.kind === "owner_reply" && message.from === role && message.question_id === waiting.question_id) {
       setCursor(message.id);
       log(`Owner reply observed for question_id=${waiting.question_id}`);
-      if (ownerReplyApprovesExcess(message.text)) {
-        bridgeState.mandate_approvals ||= {};
-        const approvedMandate = waiting.mandate_violation?.kind || "budget_ceiling_jpy";
-        bridgeState.mandate_approvals[approvedMandate] = {
-          question_id: waiting.question_id,
-          approved_at: new Date().toISOString(),
-        };
-      }
+      bridgeState.latest_owner_reply_text = message.text || "";
+      recordMandateApproval(waiting, message.text);
       delete bridgeState.waiting_owner;
       persistState();
 
