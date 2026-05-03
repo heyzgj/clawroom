@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.17";
+const VERSION = "0.3.18";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -37,6 +37,7 @@ const FEATURES = [
   "unsupported-date-commitment",
   "approval-context-carryover",
   "deterministic-date-confirmation",
+  "mixed-approval-parser",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -502,8 +503,11 @@ function roleBoundaryLines() {
 }
 
 function ownerReplyApprovesExcess(text) {
-  if (obviousRejection(text)) return false;
-  return /\b(yes|approve|approved|authorize|authorized|ok|okay)\b/i.test(String(text || ""));
+  const source = String(text || "");
+  if (/\b(?:reject|rejected|decline|declined|do not approve|don't approve|not approved|cannot approve|can't approve)\b/i.test(source)) {
+    return false;
+  }
+  return /\b(yes|approve|approved|authorize|authorized|ok|okay)\b/i.test(source);
 }
 
 function obviousRejection(text) {
