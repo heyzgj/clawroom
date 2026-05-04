@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.26";
+const VERSION = "0.3.27";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -44,6 +44,7 @@ const FEATURES = [
   "no-deal-close-guard",
   "no-deal-mandate-close",
   "no-deal-mandate-reply",
+  "peer-date-close-guard",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -625,7 +626,7 @@ function commitsToDate(text, claim) {
   if (/\?/.test(window) && /\b(?:can|could|would|is|does|will)\b/i.test(window)) return false;
   if (/\b(?:need|needs|have|has)\s+to\s+(?:confirm|check|ask|verify)\b/i.test(window)) return false;
   if (/\b(?:not\s+sure|cannot\s+confirm|can't\s+confirm|unconfirmed|tentative)\b/i.test(window)) return false;
-  return /\b(?:by|before|on|delivered|delivery|ship|ships|shipped|arrive|arrives|ready|complete|completed|finish|finished|works|can\s+do)\b/i.test(window);
+  return /\b(?:by|before|on|delivered|delivery|ship|ships|shipped|arrive|arrives|ready|complete|completed|finish|finished|works|can\s+do|ok|okay|confirm(?:ed)?|accept(?:ed)?|agree(?:d)?)\b/i.test(window);
 }
 
 function unsupportedDateCommitmentViolation(text, action) {
@@ -891,6 +892,41 @@ let bridgeState = {
 
 function persistState() {
   writeJsonAtomic(statePath, bridgeState);
+}
+
+function rememberPeerRoomMessage(message) {
+  if (!message?.text) return;
+  const previous = String(bridgeState.peer_room_text || "");
+  const next = `${previous}\n${message.text}`.slice(-6000);
+  bridgeState.peer_room_text = next;
+  persistState();
+}
+
+function peerDateIsConfirmed(claim, extraPeerText = "") {
+  const peerText = [bridgeState.peer_room_text || "", extraPeerText || ""].join("\n");
+  if (!containsDateClaim(peerText, claim)) return false;
+  return dateClaims(peerText).some((peerClaim) => peerClaim.normalized === claim.normalized && commitsToDate(peerText, peerClaim));
+}
+
+function closeNeedsPeerDateConfirmation(summary) {
+  if (role !== "host") return null;
+  if (!agreedCloseWithNoUnresolvedItems(summary)) return null;
+  const ownerSideText = [ownerCtx, bridgeState.latest_owner_reply_text || ""].join("\n");
+  for (const claim of dateClaims(summary)) {
+    if (!containsDateClaim(ownerSideText, claim)) continue;
+    if (peerDateIsConfirmed(claim)) continue;
+    return {
+      kind: "peer_date_confirmation_needed",
+      date: claim.raw,
+      normalized_date: claim.normalized,
+      action: "close",
+    };
+  }
+  return null;
+}
+
+function peerDateConfirmationRequest(violation) {
+  return `Please confirm ${violation.date} turnaround or delivery before we close.`;
 }
 
 function writeRuntimeState(status, extra = {}) {
@@ -2009,6 +2045,20 @@ async function handleParsedReply(parsed, context = {}) {
     return true;
   }
 
+  if (parsed.close) {
+    const peerDateViolation = closeNeedsPeerDateConfirmation(parsed.summary);
+    if (peerDateViolation) {
+      return await handleParsedReply({
+        close: false,
+        text: peerDateConfirmationRequest(peerDateViolation),
+        marker_inferred: true,
+      }, {
+        ...context,
+        violation: peerDateViolation,
+      });
+    }
+  }
+
   const textForGuard = parsed.close ? parsed.summary : parsed.text;
   const violation = mandateViolation(textForGuard, parsed.close ? "close" : "reply");
   if (violation) {
@@ -2280,6 +2330,7 @@ async function run() {
         continue;
       }
 
+      rememberPeerRoomMessage(message);
       log(`New from ${otherRole} (id=${message.id}): ${message.text}`);
       const peerDateViolation = peerRequestsUnsupportedDateConfirmation(message.text);
       if (peerDateViolation) {
