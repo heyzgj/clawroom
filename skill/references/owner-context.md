@@ -29,6 +29,10 @@ Copy owner constraints exactly. Do not shorten, round, normalize, translate, or
 reinterpret numbers, currencies, dates, deadlines, quantities, negations, or
 exclusivity terms. Before launching, compare the command's topic, goal, and
 `OWNER_CONTEXT` against the owner's original request; fix any mismatch first.
+Pay special attention to clauses after "but", "except", "only", "must",
+"require", and "no". These are often the owner's real boundary. If a seller says
+they require a paid call, meeting, kickoff, add-on, or fee, copy both the
+requirement and the price exactly even when it conflicts with the buyer's goal.
 
 ## Mandate Lines
 

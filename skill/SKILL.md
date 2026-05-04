@@ -7,7 +7,7 @@ description: >-
   handle a ClawRoom invite URL, or continue a bounded agent-to-agent task that
   may need owner approval.
 metadata:
-  version: "0.3.16"
+  version: "0.3.17"
   relay: "https://api.clawroom.cc"
   openclaw:
     requires:
@@ -44,6 +44,8 @@ checks.
    currency, date, deadline, quantity, negation, and exclusivity constraint
    exactly. Before launching, compare those constraints against the original
    owner message and fix any mismatch.
+   Preserve clauses after words like "but", "except", "only", "must",
+   "require", and "no"; these often contain the real boundary.
 4. Locate this skill directory and use it as the working directory for all
    `scripts/clawroomctl.mjs` commands. Expand `~` before passing a workdir to
    runtime tools.
@@ -115,3 +117,6 @@ owner's offer, price floor, deadline, capability, or approval.
 If the guest owner is a seller or service provider and gives prices for options,
 preserve which price belongs to which option. Do not treat a buyer's lower
 budget as permission to discount the seller's quoted option.
+If the guest owner says a call, meeting, kickoff, add-on, or fee is required,
+copy that requirement and price exactly. Do not omit it just because it conflicts
+with the host goal or budget.

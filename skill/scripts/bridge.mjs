@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.19";
+const VERSION = "0.3.20";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -39,6 +39,7 @@ const FEATURES = [
   "deterministic-date-confirmation",
   "mixed-approval-parser",
   "required-interaction-guard",
+  "paid-interaction-guard",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -667,8 +668,11 @@ function counterpartConfirmationReply(peerText) {
 
 function requiredInteractionTerm() {
   const source = String(ownerCtx || "");
-  if (!/\b(?:require|requires|required|must|need|needs)\b/i.test(source)) return null;
   if (!/\b(?:call|meeting|kickoff)\b/i.test(source)) return null;
+  if (/\b(?:optional|free|no charge|included at no extra)\b/i.test(source)) return null;
+  const explicitRequirement = /\b(?:require|requires|required|must|need|needs)\b/i.test(source);
+  const paidInteraction = /\b(?:call|meeting|kickoff)\b[\s\S]{0,80}\b(?:USD|\$|dollars?)\b|\b(?:USD|\$|dollars?)\b[\s\S]{0,80}\b(?:call|meeting|kickoff)\b/i.test(source);
+  if (!explicitRequirement && !paidInteraction) return null;
   const amounts = parseUsdAmounts(source);
   const total = amounts.length >= 2 ? amounts.reduce((sum, amount) => sum + amount, 0) : 0;
   const label = /\bkickoff\b/i.test(source)
@@ -696,7 +700,10 @@ function requiredInteractionViolation(text, action) {
     };
   }
   const amount = maxUsdAmount(source);
-  if (term.total && amount && amount < term.total && /\btotal\b/i.test(source)) {
+  const mentionsInteraction = /\b(?:call|meeting|kickoff)\b/i.test(source);
+  const acceptsLowerAmount =
+    /\b(?:confirm|confirmed|accept|accepted|agree|agreed|works|ready|close|deal|total)\b/i.test(source);
+  if (term.total && amount && amount < term.total && (!mentionsInteraction || acceptsLowerAmount)) {
     return {
       kind: "required_interaction_removed",
       label: term.label,
