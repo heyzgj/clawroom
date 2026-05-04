@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.27";
+const VERSION = "0.3.28";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -45,6 +45,7 @@ const FEATURES = [
   "no-deal-mandate-close",
   "no-deal-mandate-reply",
   "peer-date-close-guard",
+  "buyer-role-guard",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -353,6 +354,35 @@ function sellerishContext(text) {
     /\boffering\s*:/i.test(text);
 }
 
+function buyerishContext(text) {
+  const source = String(text || "");
+  if (sellerishContext(source)) return false;
+  return /\b(?:want|wants|wanted|looking\s+for|need|needs|seeking|trying\s+to\s+get|get\s+a|buy|purchase|quote|under|budget|max(?:imum)?)\b/i.test(source);
+}
+
+function buyerRoleInversionViolation(text, action) {
+  if (!buyerishContext(ownerCtx)) return null;
+  const source = String(text || "");
+  if (
+    /\b(?:i|we)\s+(?:can|will|would|could)\s+(?:print|ship|deliver|provide|offer|sell|make|supply|do)\b/i.test(source) ||
+    /\b(?:i|we)(?:'ll| will)\s+invoice\b/i.test(source) ||
+    /\b(?:my|our)\s+(?:quote|price|rate|fee|cost floor)\b/i.test(source)
+  ) {
+    return { kind: "buyer_role_inversion", action };
+  }
+  return null;
+}
+
+function buyerSafeOpeningText() {
+  const cleanedGoal = sanitizePromptText(goal).replace(/\s+/g, " ").trim();
+  if (cleanedGoal) return `I'm looking to ${cleanedGoal}. Please share your offer and any missing details.`;
+  return "I'm the buyer side. Please share your offer, included terms, and any missing details.";
+}
+
+function buyerRoleCorrectionText() {
+  return "I'm the buyer side. Please confirm your quote, included terms, and any missing details before we close.";
+}
+
 function nearestBoundaryBefore(source, index, boundaries) {
   for (let cursor = Math.max(0, index - 1); cursor >= 0; cursor -= 1) {
     if (boundaries.has(source[cursor])) return cursor;
@@ -530,6 +560,9 @@ function roleBoundaryLines() {
   }
   if (sellerishContext(ownerCtx)) {
     lines.push("If your owner gave prices for items or services, treat those as authorized offer terms. Do not accept a lower price for the same item or service unless your owner explicitly approves.");
+  }
+  if (buyerishContext(ownerCtx)) {
+    lines.push("You represent the buyer or requester side. Do not claim you can supply, sell, print, ship, invoice, or deliver unless Owner context explicitly says your owner provides that service.");
   }
   if (requiredInteractionTerm()) {
     lines.push("If your owner requires a call, meeting, or kickoff step, do not waive, omit, or mark it optional unless your owner explicitly approves.");
@@ -2045,6 +2078,18 @@ async function handleParsedReply(parsed, context = {}) {
     return true;
   }
 
+  const roleInversion = buyerRoleInversionViolation(parsed.close ? parsed.summary : parsed.text, parsed.close ? "close" : "reply");
+  if (roleInversion) {
+    return await handleParsedReply({
+      close: false,
+      text: buyerRoleCorrectionText(),
+      marker_inferred: true,
+    }, {
+      ...context,
+      violation: roleInversion,
+    });
+  }
+
   if (parsed.close) {
     const peerDateViolation = closeNeedsPeerDateConfirmation(parsed.summary);
     if (peerDateViolation) {
@@ -2237,7 +2282,11 @@ async function sendOpeningIfNeeded() {
     await enterWaitingOwner(parsed, { phase: "opening" });
     return true;
   }
-  const text = parsed.close ? `I am ready to coordinate this: ${goal}` : parsed.text;
+  let text = parsed.close ? `I am ready to coordinate this: ${goal}` : parsed.text;
+  if (buyerRoleInversionViolation(text, "opening")) {
+    text = buyerSafeOpeningText();
+    log("buyer role inversion blocked during opening");
+  }
   if (!text) {
     return await stopForUnsafeAgentOutput({ invalid: true, reason: "empty_agent_output" }, { phase: "opening" });
   }
