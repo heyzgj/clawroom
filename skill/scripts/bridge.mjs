@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.25";
+const VERSION = "0.3.26";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -1497,8 +1497,11 @@ function ownerSafeCloseSummary(summary) {
     text = text
       .replace(/\bNext steps\s*:\s*(?:the\s+)?(?:host|buyer|owner|client)\s+to\s+confirm\s+acceptance\s*,?\s*(?:then\s+)?/gi, "Next steps: ")
       .replace(/\bNext steps\s*:\s*(?:the\s+)?(?:host|buyer|owner|client)\s+to\s+(?:approve|accept|confirm)\s+(?:these\s+)?terms\.?/gi, "Next steps: proceed with the agreed operational handoff.")
+      .replace(/\bNext steps\s*:\s*(?:the\s+)?(?:host|buyer|owner|client)\s+confirms\s+(?:and\s+)?/gi, "Next steps: ")
       .replace(/\b(?:on|upon|after)\s+(?:your|the\s+owner'?s|owner|host|buyer|client)\s+(?:approval|acceptance|confirmation)\b/gi, "with the agreed terms")
-      .replace(/\b(?:pending|awaiting)\s+(?:your|the\s+owner'?s|owner|host|buyer|client)\s+(?:approval|acceptance|confirmation)\b/gi, "ready under the agreed terms");
+      .replace(/\b(?:pending|awaiting)\s+(?:your|the\s+owner'?s|owner|host|buyer|client)\s+(?:approval|acceptance|confirmation)\b/gi, "ready under the agreed terms")
+      .replace(/\bReady for (?:the\s+)?(?:host|buyer|owner|client) to (?:confirm|approve|accept)\s+and\s+/gi, "Ready to ")
+      .replace(/\bReady for (?:the\s+)?(?:host|buyer|owner|client) to (?:confirm|approve|accept)\b/gi, "Ready under the agreed terms");
   }
   return text.replace(/\s+/g, " ").trim();
 }
