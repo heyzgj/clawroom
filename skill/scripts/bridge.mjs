@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.20";
+const VERSION = "0.3.21";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -40,6 +40,7 @@ const FEATURES = [
   "mixed-approval-parser",
   "required-interaction-guard",
   "paid-interaction-guard",
+  "price-floor-component-amounts",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -454,9 +455,34 @@ function maxUsdAmount(text) {
   return amounts.length ? Math.max(...amounts) : null;
 }
 
-function minUsdAmount(text) {
-  const amounts = parseUsdAmounts(text);
-  return amounts.length ? Math.min(...amounts) : null;
+function textWindow(source, start, end, before = 80, after = 100) {
+  return source.slice(Math.max(0, start - before), Math.min(source.length, end + after));
+}
+
+function totalUsdAmountAtOrAbove(text, floor) {
+  const source = String(text || "");
+  return parseUsdAmountMatches(source).some((match) => {
+    if (match.amount < floor) return false;
+    return /\btotal\b/i.test(textWindow(source, match.start, match.end, 80, 80));
+  });
+}
+
+function usdFloorViolationAmount(text, floor) {
+  const source = String(text || "");
+  const matches = parseUsdAmountMatches(source);
+  if (!matches.length) return null;
+  if (totalUsdAmountAtOrAbove(source, floor)) return null;
+  const hasMainAmountAtOrAboveFloor = matches.some((match) => match.amount >= floor);
+  const componentPattern =
+    /\b(?:plus|add-?on|additional|extra|fee|meeting|call|kickoff|deposit|shipping|tax|included|includes)\b/i;
+  const lower = matches.find((match) => {
+    if (match.amount >= floor) return false;
+    if (hasMainAmountAtOrAboveFloor && componentPattern.test(textWindow(source, match.start, match.end))) {
+      return false;
+    }
+    return true;
+  });
+  return lower?.amount || null;
 }
 
 function mandatePromptLines(useAskOwner = false) {
@@ -1662,7 +1688,7 @@ function mandateViolation(text, action) {
 
   const usdFloor = Number(mandates.price_floor_usd || 0);
   if (usdFloor && !bridgeState.mandate_approvals?.price_floor_usd) {
-    const amount = minUsdAmount(text);
+    const amount = usdFloorViolationAmount(text, usdFloor);
     if (amount && amount < usdFloor && !(action === "reply" && obviousRejection(text))) {
       return {
         kind: "price_floor_usd",
