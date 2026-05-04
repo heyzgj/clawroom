@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.21";
+const VERSION = "0.3.22";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -41,6 +41,7 @@ const FEATURES = [
   "required-interaction-guard",
   "paid-interaction-guard",
   "price-floor-component-amounts",
+  "no-deal-close-guard",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -714,8 +715,14 @@ function requiredInteractionViolation(text, action) {
   const term = requiredInteractionTerm();
   if (!term) return null;
   const source = String(text || "");
+  if (
+    action === "close" &&
+    /\b(?:no agreement|no deal|cannot align|incompatible|walk away|not proceed|terms change)\b/i.test(source)
+  ) {
+    return null;
+  }
   const removesInteraction =
-    /\bno\b.{0,40}\b(?:call|meeting|kickoff)\b/i.test(source) ||
+    /\bno\s+(?:extra\s+)?(?:calls?|meetings?|kickoffs?)\b/i.test(source) ||
     /\b(?:without|skip|waive|drop)\b.{0,40}\b(?:call|meeting|kickoff)\b/i.test(source) ||
     /\b(?:call|meeting|kickoff)\b.{0,40}\b(?:not needed|not required|optional|waived|skipped|dropped)\b/i.test(source);
   if (removesInteraction) {
