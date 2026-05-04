@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.28";
+const VERSION = "0.3.29";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -46,6 +46,7 @@ const FEATURES = [
   "no-deal-mandate-reply",
   "peer-date-close-guard",
   "buyer-role-guard",
+  "scope-close-guard",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -960,6 +961,31 @@ function closeNeedsPeerDateConfirmation(summary) {
 
 function peerDateConfirmationRequest(violation) {
   return `Please confirm ${violation.date} turnaround or delivery before we close.`;
+}
+
+function printQuoteLikeContext(text) {
+  return /\b(?:print|printing|print-shop|print shop|stickers?|labels?|cards?|flyers?|posters?|copies|paper|stock)\b/i.test(String(text || ""));
+}
+
+function hasConcretePrintScope(text) {
+  const withoutMoney = String(text || "").replace(/\$?\b\d+(?:\.\d+)?\s*(?:usd|dollars?)?\b/gi, "");
+  return /\b\d+\s*(?:x|×|by)\s*\d+\b/i.test(withoutMoney) ||
+    /\b\d+\s*(?:stickers?|labels?|prints?|cards?|copies|pcs|pieces|units?|flyers?|posters?)\b/i.test(withoutMoney) ||
+    /\b(?:qty|quantity|size|paper\s+stock|stock|matte|glossy|turnaround|deliver(?:y)?\s+by|deadline)\b/i.test(withoutMoney);
+}
+
+function closeNeedsScopeConfirmation(summary) {
+  if (role !== "host") return null;
+  if (!buyerishContext(ownerCtx)) return null;
+  if (!agreedCloseWithNoUnresolvedItems(summary)) return null;
+  const roomText = [ownerCtx, goal, bridgeState.latest_owner_reply_text || "", bridgeState.peer_room_text || "", summary].join("\n");
+  if (!printQuoteLikeContext(roomText)) return null;
+  if (hasConcretePrintScope(summary)) return null;
+  return { kind: "missing_scope_details", action: "close" };
+}
+
+function missingScopeQuestion() {
+  return "What exact item, quantity, size or paper/specs, and needed timing should this quote cover before I close it?";
 }
 
 function writeRuntimeState(status, extra = {}) {
@@ -2088,6 +2114,22 @@ async function handleParsedReply(parsed, context = {}) {
       ...context,
       violation: roleInversion,
     });
+  }
+
+  if (parsed.close) {
+    const scopeViolation = closeNeedsScopeConfirmation(parsed.summary);
+    if (scopeViolation) {
+      await enterWaitingOwner({
+        ask_owner: true,
+        question: missingScopeQuestion(),
+        marker_inferred: true,
+      }, {
+        ...context,
+        violation: scopeViolation,
+        attempted_close_summary: parsed.summary,
+      });
+      return true;
+    }
   }
 
   if (parsed.close) {
