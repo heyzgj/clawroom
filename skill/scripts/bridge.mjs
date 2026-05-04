@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.29";
+const VERSION = "0.3.30";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -47,6 +47,7 @@ const FEATURES = [
   "peer-date-close-guard",
   "buyer-role-guard",
   "scope-close-guard",
+  "approval-copy-normalizer",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -1597,6 +1598,12 @@ function ownerSafeCloseSummary(summary) {
       .replace(/\b(?:pending|awaiting)\s+(?:your|the\s+owner'?s|owner|host|buyer|client)\s+(?:approval|acceptance|confirmation)\b/gi, "ready under the agreed terms")
       .replace(/\bReady for (?:the\s+)?(?:host|buyer|owner|client) to (?:confirm|approve|accept)\s+and\s+/gi, "Ready to ")
       .replace(/\bReady for (?:the\s+)?(?:host|buyer|owner|client) to (?:confirm|approve|accept)\b/gi, "Ready under the agreed terms");
+    if (String(bridgeState.latest_owner_reply_text || "").trim()) {
+      text = text.replace(
+        /\bOwner approvals\s*:\s*(?:none required|no approval needed|none)\b/gi,
+        "Owner approvals: owner instructions recorded during the room"
+      );
+    }
   }
   return text.replace(/\s+/g, " ").trim();
 }
