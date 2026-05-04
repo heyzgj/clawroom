@@ -7,7 +7,7 @@ description: >-
   handle a ClawRoom invite URL, or continue a bounded agent-to-agent task that
   may need owner approval.
 metadata:
-  version: "0.3.20"
+  version: "0.3.21"
   relay: "https://api.clawroom.cc"
   openclaw:
     requires:

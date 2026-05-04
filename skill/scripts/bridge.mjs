@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.23";
+const VERSION = "0.3.24";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -43,6 +43,7 @@ const FEATURES = [
   "price-floor-component-amounts",
   "no-deal-close-guard",
   "no-deal-mandate-close",
+  "no-deal-mandate-reply",
 ];
 const DEFAULT_RELAY = "https://api.clawroom.cc";
 const POLL_WAIT_SECONDS = 20;
@@ -716,7 +717,7 @@ function requiredInteractionViolation(text, action) {
   const term = requiredInteractionTerm();
   if (!term) return null;
   const source = String(text || "");
-  if (noDealClose(source, action)) return null;
+  if (noDealOutcome(source)) return null;
   const removesInteraction =
     /\bno\s+(?:extra\s+)?(?:calls?|meetings?|kickoffs?)\b/i.test(source) ||
     /\b(?:without|skip|waive|drop)\b.{0,40}\b(?:call|meeting|kickoff)\b/i.test(source) ||
@@ -745,8 +746,11 @@ function requiredInteractionViolation(text, action) {
 }
 
 function noDealClose(text, action) {
-  return action === "close" &&
-    /\b(?:no agreement|no deal|cannot align|incompatible|walk away|not proceed|terms change|terms conflict|outside constraints|no deal made)\b/i.test(String(text || ""));
+  return action === "close" && noDealOutcome(text);
+}
+
+function noDealOutcome(text) {
+  return /\b(?:no agreement|no deal|cannot align|incompatible|walk away|not proceed|terms change|terms conflict|outside constraints|no deal made|exceeds (?:our|my) budget)\b/i.test(String(text || ""));
 }
 
 function ownerSafeQuestionText(text) {
@@ -1671,7 +1675,7 @@ function publicWaitingOwner(waiting = bridgeState.waiting_owner || null) {
 }
 
 function mandateViolation(text, action) {
-  if (noDealClose(text, action)) return null;
+  if ((action === "close" || action === "reply") && noDealOutcome(text)) return null;
 
   const unsupportedDateViolation = unsupportedDateCommitmentViolation(text, action);
   if (unsupportedDateViolation) return unsupportedDateViolation;
