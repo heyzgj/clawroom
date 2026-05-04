@@ -28,7 +28,7 @@ import {
   sign as cryptoSign,
 } from "node:crypto";
 
-const VERSION = "0.3.24";
+const VERSION = "0.3.25";
 const FEATURES = [
   "owner-reply-url",
   "telegram-force-reply",
@@ -1475,7 +1475,32 @@ function openingPrompt() {
 }
 
 function agreementArtifactInstruction() {
-  return "When closing, format the owner-ready agreement as: Agreed terms: ...; Unresolved: ...; Assumptions: ...; Owner approvals: ...; Next steps: ...; Handoff text: ... Do not say ClawRoom processed payment or that owner approval is still needed after the room closes.";
+  return [
+    "When closing, format the owner-ready agreement as: Agreed terms: ...; Unresolved: ...; Assumptions: ...; Owner approvals: ...; Next steps: ...; Handoff text: ...",
+    "Next steps and Handoff text must agree.",
+    "If all constraints are satisfied and Unresolved is none, do not say owner, host, buyer, or client acceptance is still needed after the room closes.",
+    "If a human still must accept the negotiated terms, do not close as an agreement; keep that item unresolved or ask the owner.",
+    "Do not say ClawRoom processed payment or that payment is authorized.",
+  ].join(" ");
+}
+
+function agreedCloseWithNoUnresolvedItems(summary) {
+  const source = String(summary || "");
+  if (!/\bAgreed terms\s*:/i.test(source)) return false;
+  if (/\bAgreed terms\s*:\s*(?:none|no agreement|no deal)\b/i.test(source)) return false;
+  return /\bUnresolved\s*:\s*(?:none|nothing|no unresolved items)\b/i.test(source);
+}
+
+function ownerSafeCloseSummary(summary) {
+  let text = ownerSafeQuestionText(summary);
+  if (agreedCloseWithNoUnresolvedItems(text)) {
+    text = text
+      .replace(/\bNext steps\s*:\s*(?:the\s+)?(?:host|buyer|owner|client)\s+to\s+confirm\s+acceptance\s*,?\s*(?:then\s+)?/gi, "Next steps: ")
+      .replace(/\bNext steps\s*:\s*(?:the\s+)?(?:host|buyer|owner|client)\s+to\s+(?:approve|accept|confirm)\s+(?:these\s+)?terms\.?/gi, "Next steps: proceed with the agreed operational handoff.")
+      .replace(/\b(?:on|upon|after)\s+(?:your|the\s+owner'?s|owner|host|buyer|client)\s+(?:approval|acceptance|confirmation)\b/gi, "with the agreed terms")
+      .replace(/\b(?:pending|awaiting)\s+(?:your|the\s+owner'?s|owner|host|buyer|client)\s+(?:approval|acceptance|confirmation)\b/gi, "ready under the agreed terms");
+  }
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function replyPrompt(otherRole, text, firstTurn, messageCount) {
@@ -1994,10 +2019,11 @@ async function handleParsedReply(parsed, context = {}) {
   }
 
   if (parsed.close) {
-    const key = idempotencyKey("close", threadId, role, context.peer_message_id || "", sha(parsed.summary));
+    const summary = ownerSafeCloseSummary(parsed.summary);
+    const key = idempotencyKey("close", threadId, role, context.peer_message_id || "", sha(summary));
     let result;
     try {
-      result = await closeThread(parsed.summary, key);
+      result = await closeThread(summary, key);
     } catch (error) {
       if (Number(error?.status) === 413) {
         log(`close summary rejected as too long; stopping safely`);
@@ -2012,8 +2038,8 @@ async function handleParsedReply(parsed, context = {}) {
       return true;
     }
     if (result?.id != null) setCursor(result.id);
-    log(`Closed by ${role}: ${parsed.summary}`);
-    await notifyOwnerOnce(`own-close:${sha(parsed.summary)}`, parsed.summary).catch((error) => {
+    log(`Closed by ${role}: ${summary}`);
+    await notifyOwnerOnce(`own-close:${sha(summary)}`, summary).catch((error) => {
       log(`owner notify failed: ${error.message}`);
     });
     await maybeHeartbeat("stopped", true, { stop_reason: "own_close" });
