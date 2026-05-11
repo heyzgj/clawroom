@@ -2,6 +2,14 @@
 
 This repository publishes one installable agent skill: `skill/`.
 
+## Local Environment
+
+- The current migrated macOS environment lives under `/Users/SingularityGZ_1`.
+- Treat `/Users/supergeorge` paths as legacy references unless `pwd` or
+  `realpath` proves the active checkout is still there.
+- When adding new local paths, prefer `/Users/SingularityGZ_1` and avoid
+  hard-coding `/Users/supergeorge`.
+
 Before ClawRoom work, check for leftover bridge processes:
 
 ```sh

@@ -1,0 +1,617 @@
+#!/usr/bin/env node
+// skill/cli/clawroom — v4 Direct Mode bash entrypoint over skill/lib/*.
+//
+// Subcommands (each = single deterministic action, no LLM):
+//   create        --topic --goal [--create-key] [--relay] [--debug]
+//   resolve       --invite
+//   join          --invite [--relay] [--debug]
+//   post          --room --role --text [--logical-post-id] [--allow-pending-owner-ask]
+//   poll          --room --role [--after N] [--wait S] [--no-state]
+//   watch         --room --role [--include-self]
+//   close         --room --role --draft-file PATH
+//   resume        --room --role [--debug]
+//   lint          --room --role (--text TEXT | --before-close --draft-file PATH)
+//   ask-owner     --room --role --question-id --question-text [--timeout-seconds] [--context-json]
+//   owner-reply   --room --role --question-id --decision approve|reject --evidence [--source]
+//   readiness     [--relay] [--thread-id --role] [--allow-tentative]
+//   probe-limits  [--relay] [--create-key]
+//
+// Tokens are read from the local state file written by create/join.
+// Override with --token if needed.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  RelayClient,
+  RelayError,
+  createRoom,
+  joinRoom,
+  resolveInvite,
+} from '../lib/relay-client.mjs';
+import {
+  initState,
+  readState,
+  writeState,
+  resumeRoom,
+  setCursor,
+  setPendingOwnerAsk,
+  resolveOwnerAsk,
+  pendingAskTimedOut,
+  stateFingerprint,
+} from '../lib/state.mjs';
+import { validateAndPrepareClose, validateCloseDraft, validateCloseAgainstState } from '../lib/close.mjs';
+import { lintBeforeSend, lintBeforeClose } from '../lib/lint/index.mjs';
+import { watchEvents } from '../lib/watch.mjs';
+import {
+  DEFAULT_RELAY_URL,
+  MAX_MESSAGE_TEXT_CHARS,
+  MAX_CLOSE_SUMMARY_CHARS,
+  STATE_DIR,
+} from '../lib/types.mjs';
+
+const VERSION = '0.4.0';
+
+const argv = process.argv.slice(2);
+const command = argv[0];
+const flags = parseFlags(argv.slice(1));
+
+main().catch((err) => {
+  if (err instanceof RelayError && err.fatal) {
+    process.stderr.write(`fatal ${err.status} ${err.message}\n`);
+    process.exit(2);
+  }
+  process.stderr.write(`${err?.message || err}\n`);
+  process.exit(1);
+});
+
+async function main() {
+  switch (command) {
+    case 'create':       return cmdCreate();
+    case 'resolve':      return cmdResolve();
+    case 'join':         return cmdJoin();
+    case 'post':         return cmdPost();
+    case 'poll':         return cmdPoll();
+    case 'watch':        return cmdWatch();
+    case 'close':        return cmdClose();
+    case 'resume':       return cmdResume();
+    case 'lint':         return cmdLint();
+    case 'ask-owner':    return cmdAskOwner();
+    case 'owner-reply':  return cmdOwnerReply();
+    case 'readiness':    return cmdReadiness();
+    case 'probe-limits': return cmdProbeLimits();
+    case 'version':      return printJson({ version: VERSION });
+    case 'help':
+    case undefined:
+      return printHelp();
+    default:
+      process.stderr.write(`unknown command: ${command}\nrun: clawroom help\n`);
+      process.exit(2);
+  }
+}
+
+// ---------- subcommands ----------
+
+async function cmdCreate() {
+  const topic = required('topic');
+  const goal = flags.goal || '';
+  const relay = flags.relay || DEFAULT_RELAY_URL;
+  const create_key = flags['create-key'] || process.env.CLAWROOM_CREATE_KEY;
+  const result = await createRoom({ topic, goal, relay, create_key });
+  const room_id = result.thread_id;
+  const host_token = result.host_token;
+  // Codex P1.B + invariant 17: host state stores ONLY host_token. The guest
+  // token from the relay response lives in the invite URL only; we hand it
+  // off and forget it. Persisting it here would let the host accidentally
+  // post as guest, which invariant 17 forbids.
+  initState({
+    room_id,
+    role: 'host',
+    host_token,
+    topic,
+    goal,
+  });
+  // Output redacted by default (Codex P2.2). state_file path can leak via
+  // owner-facing surfaces, so behind --debug.
+  const debug = Boolean(flags.debug);
+  const out = {
+    ok: true,
+    role: 'host',
+    room_id,
+    invite_url: result.public_invite_url,
+    public_message: result.public_message,
+  };
+  if (debug) out.state_file = `${STATE_DIR}/${room_id}-host.state.json`;
+  printJson(out);
+}
+
+async function cmdResolve() {
+  const invite = required('invite');
+  printJson(resolveInvite(invite));
+}
+
+async function cmdJoin() {
+  const invite = required('invite');
+  const parsed = resolveInvite(invite);
+  // Codex P1: public invites must carry their relay origin so BYO / hosted
+  // fallback joins go to the right relay. Precedence: explicit --relay flag
+  // (caller override) > invite origin > DEFAULT_RELAY_URL.
+  const relay = flags.relay || parsed.relay || DEFAULT_RELAY_URL;
+  const joined = await joinRoom({ relay, thread_id: parsed.thread_id, invite_code: parsed.invite_code });
+  const room_id = parsed.thread_id;
+  const guest_token = joined.token || joined.guest_token;
+  if (!guest_token) throw new Error('join: relay did not return a guest token');
+  initState({
+    room_id,
+    role: 'guest',
+    guest_token,
+    topic: joined.topic,
+    goal: joined.goal,
+  });
+  // Output redacted by default (Codex P2.2): callers may relay output to
+  // owners verbatim. --debug shows state_file path.
+  const debug = Boolean(flags.debug);
+  const out = { ok: true, role: 'guest', room_id, relay };
+  if (debug) out.state_file = `${STATE_DIR}/${room_id}-guest.state.json`;
+  printJson(out);
+}
+
+async function cmdPost() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const text = required('text');
+  if (text.length > MAX_MESSAGE_TEXT_CHARS) {
+    throw new Error(`post: text exceeds MAX_MESSAGE_TEXT_CHARS=${MAX_MESSAGE_TEXT_CHARS}`);
+  }
+  const state = mustReadState(room_id, role);
+  // Codex pass 4 P1: pending_owner_ask MUST hard-block posting past the
+  // mandate boundary (invariant 13). A warning on stderr is too soft; the
+  // primary agent can ignore it. Fail closed unless caller explicitly opts
+  // out with --allow-pending-owner-ask (only for known-safe status updates
+  // that don't touch the mandate).
+  if (state.pending_owner_ask && !flags['allow-pending-owner-ask']) {
+    process.stderr.write(
+      `post: blocked — pending_owner_ask "${state.pending_owner_ask.question_id}" is unresolved. ` +
+      `Resolve via clawroom owner-reply, or pass --allow-pending-owner-ask for a status-only message ` +
+      `that does NOT touch the mandate boundary.\n`
+    );
+    process.exit(5);
+  }
+  // Pre-send lint runs but does not block; surface findings to stderr.
+  const lint = lintBeforeSend({ text, state });
+  for (const f of lint.findings) {
+    if (f.severity === 'error') {
+      process.stderr.write(`lint error ${f.code}: ${f.message}\n`);
+      process.exit(2);
+    }
+    process.stderr.write(`lint ${f.severity} ${f.code}: ${f.message}\n`);
+  }
+  const token = mustToken(state);
+  const client = new RelayClient({ relay: relayUrl(), room_id, role, token });
+  const result = await client.postMessage({
+    text,
+    previous_cursor_or_parent_id: state.last_event_cursor,
+    logical_post_id: flags['logical-post-id'],
+  });
+  // Codex pass 3 P2: advance cursor to our own posted id so future posts
+  // see the right parent and resume sees the right starting point.
+  const postedId = Number(/** @type {any} */ (result.body)?.id);
+  if (Number.isFinite(postedId) && postedId > state.last_event_cursor) {
+    setCursor(state, postedId);
+  }
+  printJson({ ok: true, id: postedId, attempts: result.attempts });
+}
+
+async function cmdPoll() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const wait = Number(flags.wait ?? '0');
+  const state = mustReadState(room_id, role);
+  const token = mustToken(state);
+  // Default --after = state.last_event_cursor so callers don't have to
+  // track cursor manually. Explicit --after overrides.
+  const after = flags.after !== undefined ? Number(flags.after) : state.last_event_cursor;
+  const client = new RelayClient({ relay: relayUrl(), room_id, role, token });
+  const result = await client.pollMessages({ after, waitSeconds: wait });
+  // Codex P2.1: persist cursor so idempotency keys / resume see the right
+  // parent_id. Use --no-state to opt out (e.g. read-only inspection).
+  const rows = Array.isArray(result.body) ? result.body : [];
+  if (rows.length && !flags['no-state']) {
+    const maxId = rows.reduce((m, r) => (typeof r?.id === 'number' && r.id > m ? r.id : m), state.last_event_cursor);
+    if (maxId > state.last_event_cursor) setCursor(state, maxId);
+  }
+  printJson(result.body);
+}
+
+async function cmdWatch() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const include_self = Boolean(flags['include-self']);
+  const state = mustReadState(room_id, role);
+  const token = mustToken(state);
+  // watchEvents emits its own lines to stdout; this returns when room mutually closes.
+  const result = await watchEvents({
+    relay: relayUrl(),
+    room_id,
+    role,
+    token,
+    include_self,
+  });
+  process.stderr.write(JSON.stringify(result) + '\n');
+  if (result.exit_reason !== 'mutual_close' && result.exit_reason !== 'ok') {
+    process.exit(1);
+  }
+}
+
+async function cmdClose() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const draftPath = required('draft-file');
+  const draftRaw = fs.readFileSync(draftPath, 'utf8');
+  let draft;
+  try { draft = JSON.parse(draftRaw); } catch { throw new Error(`close: ${draftPath} is not valid JSON`); }
+  const state = mustReadState(room_id, role);
+  const prepared = validateAndPrepareClose({ draft, state });
+  if (!prepared.ok) {
+    process.stderr.write(`close: rejected, ${prepared.issues.length} issue(s):\n`);
+    for (const it of prepared.issues) {
+      process.stderr.write(`  ${it.code}${it.path ? ` @ ${it.path}` : ''}: ${it.message}\n`);
+    }
+    process.exit(3);
+  }
+  if (prepared.summary.length > MAX_CLOSE_SUMMARY_CHARS) {
+    throw new Error(`close: canonical summary exceeds MAX_CLOSE_SUMMARY_CHARS=${MAX_CLOSE_SUMMARY_CHARS}`);
+  }
+  const token = mustToken(state);
+  const client = new RelayClient({ relay: relayUrl(), room_id, role, token });
+  const result = await client.closeSide({
+    summary: prepared.summary,
+    closedraft_canonical: prepared.canonical,
+  });
+  printJson({ ok: true, id: /** @type {any} */ (result.body)?.id, attempts: result.attempts });
+}
+
+async function cmdResume() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const state = resumeRoom(room_id, role);
+  const fingerprint = await stateFingerprint(room_id, role);
+  // Codex P2.2: tokens are sensitive. Default output redacts host_token /
+  // guest_token and the state_file path (so the redacted output is safe to
+  // relay to the owner). Use --debug for the unredacted form.
+  const debug = Boolean(flags.debug);
+  if (debug) {
+    printJson({
+      ok: true,
+      state,
+      fingerprint,
+      state_file: `${STATE_DIR}/${room_id}-${role}.state.json`,
+    });
+    return;
+  }
+  const safe = { ...state };
+  if (typeof safe.host_token === 'string') safe.host_token = '[redacted]';
+  if (typeof safe.guest_token === 'string') safe.guest_token = '[redacted]';
+  printJson({
+    ok: true,
+    state: safe,
+    fingerprint,
+    redacted: true,
+    note: 'tokens redacted by default; use --debug for raw',
+  });
+}
+
+async function cmdLint() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const state = mustReadState(room_id, role);
+  if (flags['before-close']) {
+    const draftPath = required('draft-file');
+    const draft = JSON.parse(fs.readFileSync(draftPath, 'utf8'));
+    const out = lintBeforeClose({ draft, state });
+    printJson(out);
+    if (out.findings.some((f) => f.severity === 'error')) process.exit(3);
+    return;
+  }
+  if (flags.text !== undefined) {
+    const out = lintBeforeSend({ text: String(flags.text), state });
+    printJson(out);
+    if (out.findings.some((f) => f.severity === 'error')) process.exit(3);
+    return;
+  }
+  throw new Error('lint: specify --text TEXT or --before-close --draft-file PATH');
+}
+
+// Codex pass 3 P1: deterministic CLI affordances for the
+// primary-agent-conversation owner approval flow (invariant 13). Without
+// these, SKILL.md would have to tell users to hand-edit state JSON.
+//
+// Default v4 path is state-only (no relay round-trip). The async/cross-runtime
+// fallback via relay /ask-owner + /owner-reply is OUT of Phase 1 scope; the
+// lib has RelayClient.askOwner / RelayClient.postOwnerReply for that path
+// when needed, but the CLI subcommands here only touch local state.
+
+async function cmdAskOwner() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const question_id = required('question-id');
+  const question_text = required('question-text');
+  // Codex pass 4 P2: validate timeout_seconds is finite + positive before
+  // writing state. Default 30 minutes.
+  const timeoutRaw = flags['timeout-seconds'] ?? '1800';
+  const timeout_seconds = Number(timeoutRaw);
+  if (!Number.isFinite(timeout_seconds) || timeout_seconds <= 0) {
+    throw new Error(`ask-owner: --timeout-seconds must be a positive number, got "${timeoutRaw}"`);
+  }
+  let context_snapshot = {};
+  if (flags['context-json']) {
+    try { context_snapshot = JSON.parse(String(flags['context-json'])); }
+    catch { throw new Error('ask-owner: --context-json must be valid JSON'); }
+  }
+  const state = mustReadState(room_id, role);
+  setPendingOwnerAsk(state, {
+    question_id,
+    question_text,
+    asked_at: new Date().toISOString(),
+    timeout_at: new Date(Date.now() + timeout_seconds * 1000).toISOString(),
+    blocks_until: 'answered',
+    context_snapshot,
+  });
+  printJson({
+    ok: true,
+    pending_owner_ask: { question_id, timeout_at: state.pending_owner_ask?.timeout_at },
+    note: 'state-only: posts and agreement closes are now blocked until owner-reply or timeout',
+  });
+}
+
+async function cmdOwnerReply() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const question_id = required('question-id');
+  const decision = required('decision');
+  if (decision !== 'approve' && decision !== 'reject') {
+    throw new Error(`owner-reply: --decision must be approve or reject, got ${decision}`);
+  }
+  const evidence = required('evidence');
+  // Codex pass 4 P2: validate source against the declared enum BEFORE
+  // mutating state. APPROVAL_SOURCES is the v4 contract.
+  const APPROVAL_SOURCES = ['primary_agent_conversation', 'owner_url', 'telegram_inbound'];
+  const source = String(flags.source || 'primary_agent_conversation');
+  if (!APPROVAL_SOURCES.includes(source)) {
+    throw new Error(`owner-reply: --source must be one of ${APPROVAL_SOURCES.join('|')}, got "${source}"`);
+  }
+  const state = mustReadState(room_id, role);
+  if (!state.pending_owner_ask || state.pending_owner_ask.question_id !== question_id) {
+    throw new Error(`owner-reply: no pending_owner_ask matching question_id "${question_id}"`);
+  }
+  // Codex pass 4 P1: timed-out ask + decision=approve must FAIL CLOSED.
+  // The previous warning-then-resolve path cleared pending_owner_ask, which
+  // bypassed close.mjs's approval_after_timeout check (that check only fires
+  // while pending is still set). Reject after timeout is allowed because it
+  // cannot unblock an agreement; approve after timeout must be blocked.
+  if (pendingAskTimedOut(state) && decision === 'approve') {
+    process.stderr.write(
+      `owner-reply: blocked — pending_owner_ask "${question_id}" timed out at ` +
+      `${state.pending_owner_ask.timeout_at}. Approve after timeout is not allowed. ` +
+      `Re-ask the owner (clawroom ask-owner with a new question_id) or record a reject instead.\n`
+    );
+    process.exit(6);
+  }
+  resolveOwnerAsk(state, {
+    question_id,
+    decision,
+    source: /** @type {any} */ (source),
+    ts: new Date().toISOString(),
+    evidence,
+  });
+  printJson({
+    ok: true,
+    recorded: { question_id, decision, source },
+    owner_approvals_count: state.owner_approvals.length,
+    note: 'state-backed approval; close validator will now accept (or reject) based on this record',
+  });
+}
+
+async function cmdReadiness() {
+  const relay = relayUrl();
+  /** @type {Record<string, unknown>} */
+  const report = {
+    version: VERSION,
+    relay,
+    state_dir: STATE_DIR,
+    node: process.version,
+  };
+  // 1. State dir writable
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    const probe = path.join(STATE_DIR, `.readiness-${process.pid}`);
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    report.state_dir_writable = true;
+  } catch (err) {
+    report.state_dir_writable = false;
+    report.state_dir_error = String(err?.message || err);
+  }
+  // 2. Relay reachable
+  try {
+    const res = await fetch(`${relay}/threads/__readiness__/join`, { method: 'GET' });
+    report.relay_reachable = true;
+    report.relay_status = res.status;
+  } catch (err) {
+    report.relay_reachable = false;
+    report.relay_error = String(err?.message || err);
+  }
+  // 3. Admission key available (invariant 12)
+  report.create_key_present = Boolean(process.env.CLAWROOM_CREATE_KEY);
+  // 4. No legacy bridge processes
+  try {
+    const out = await execStr('pgrep -fl "bridge.mjs --thread" || true');
+    report.legacy_bridge_processes = String(out).trim() ? out.trim().split('\n') : [];
+  } catch {
+    report.legacy_bridge_processes = [];
+  }
+  // 5. /events endpoint check.
+  // The relay's threadExists check fires BEFORE action matching, so a
+  // request against an unknown thread always returns "thread not found"
+  // regardless of whether /events is deployed. To distinguish, we need
+  // a known thread. If the caller passed --thread-id + --role, probe via
+  // that state file's token; else skip with a tentative marker.
+  const probeThread = flags['thread-id'];
+  const probeRole = flags['role'];
+  if (probeThread && probeRole) {
+    try {
+      const state = readState(probeThread, probeRole);
+      const token = state ? (state.role === 'host' ? state.host_token : state.guest_token) : null;
+      if (!token) throw new Error(`no state file for ${probeThread}-${probeRole}`);
+      const res = await fetch(`${relay}/threads/${probeThread}/events?after=-1`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const body = await res.text();
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = {}; }
+      report.events_endpoint_status = res.status;
+      // /events deployed + valid auth = 200 array. Not deployed = 404 with error "not found" (action fallthrough).
+      report.events_endpoint_present = res.status === 200 || (res.status === 404 && parsed?.error !== 'not found' && parsed?.error !== undefined);
+      report.events_endpoint_probe_body_excerpt = body.slice(0, 200);
+    } catch (err) {
+      report.events_endpoint_present = false;
+      report.events_endpoint_error = String(err?.message || err);
+    }
+  } else {
+    report.events_endpoint_present = 'tentative_pass_relay_deploy_needed_to_verify';
+    report.events_endpoint_note = 'pass --thread-id X --role Y to a known room for a real probe';
+  }
+  // Codex P2.3: tentative pass is NOT ok by default. Machine gates upstream
+  // could read ok=true and assume Phase 2-ready while /events isn't deployed.
+  // Pass --allow-tentative to override for local pre-deploy checks.
+  const allowTentative = Boolean(flags['allow-tentative']);
+  const eventsVerified = report.events_endpoint_present === true;
+  const eventsTentative = report.events_endpoint_present === 'tentative_pass_relay_deploy_needed_to_verify';
+  const eventsOk = eventsVerified || (eventsTentative && allowTentative);
+  const ok =
+    report.state_dir_writable === true &&
+    report.relay_reachable === true &&
+    eventsOk &&
+    Array.isArray(report.legacy_bridge_processes) && report.legacy_bridge_processes.length === 0;
+  printJson({ ok, report, allow_tentative: allowTentative });
+  if (!ok) process.exit(4);
+}
+
+async function cmdProbeLimits() {
+  // Phase 1 task N6: discover relay's actual text/summary char limits by
+  // creating a throwaway room and probing. Does not require a real
+  // counterpart; aborts before mutual close.
+  const relay = relayUrl();
+  const create_key = flags['create-key'] || process.env.CLAWROOM_CREATE_KEY;
+  if (!create_key) throw new Error('probe-limits: need --create-key (or CLAWROOM_CREATE_KEY env)');
+  const probe = await createRoom({ topic: 'probe-limits', goal: 'discover relay text/summary char limits', relay, create_key });
+  const room_id = probe.thread_id;
+  const client = new RelayClient({ relay, room_id, role: 'host', token: probe.host_token });
+  const sizes = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000];
+  /** @type {Record<string, unknown>} */
+  const result = { room_id, message_limit_chars: null, message_limit_evidence: [] };
+  for (const n of sizes) {
+    const text = 'X'.repeat(n);
+    try {
+      await client.postMessage({ text, previous_cursor_or_parent_id: -1, logical_post_id: `probe-${n}` });
+      /** @type {any[]} */ (result.message_limit_evidence).push({ n, ok: true });
+    } catch (err) {
+      /** @type {any[]} */ (result.message_limit_evidence).push({ n, ok: false, status: err?.status, message: String(err?.message || err).slice(0, 200) });
+      if (err?.status === 413 || /too large|payload|413/i.test(String(err?.message || ''))) {
+        result.message_limit_chars = n;
+        break;
+      }
+      // Other errors are noise; record and continue.
+    }
+  }
+  printJson(result);
+}
+
+// ---------- helpers ----------
+
+function parseFlags(args) {
+  /** @type {Record<string, string | boolean>} */
+  const out = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith('--')) {
+      const key = a.slice(2);
+      const next = args[i + 1];
+      if (next === undefined || next.startsWith('--')) {
+        out[key] = true;
+      } else {
+        out[key] = next;
+        i++;
+      }
+    }
+  }
+  return out;
+}
+
+function required(name) {
+  const v = flags[name];
+  if (v === undefined || v === '' || v === true) {
+    throw new Error(`missing required --${name}`);
+  }
+  return String(v);
+}
+
+function requiredRole() {
+  const r = required('role');
+  if (r !== 'host' && r !== 'guest') throw new Error(`--role must be host or guest, got ${r}`);
+  return /** @type {'host' | 'guest'} */ (r);
+}
+
+function mustReadState(room_id, role) {
+  const s = readState(room_id, role);
+  if (!s) throw new Error(`no state for ${room_id}-${role}; run clawroom create or join first`);
+  return s;
+}
+
+function mustToken(state) {
+  const t = state.role === 'host' ? state.host_token : state.guest_token;
+  if (!t) throw new Error(`state for ${state.room_id}-${state.role} has no token`);
+  return t;
+}
+
+function relayUrl() {
+  return flags.relay || process.env.CLAWROOM_RELAY || DEFAULT_RELAY_URL;
+}
+
+function printJson(obj) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+}
+
+function printHelp() {
+  process.stdout.write(`clawroom v${VERSION} — v4 Direct Mode CLI
+
+Subcommands:
+  create        --topic --goal [--create-key] [--relay]
+  resolve       --invite
+  join          --invite [--relay]
+  post          --room --role --text [--logical-post-id]
+  poll          --room --role [--after N] [--wait S] [--no-state]
+  watch         --room --role [--include-self]
+  close         --room --role --draft-file PATH
+  resume        --room --role [--debug]
+  lint          --room --role (--text TEXT | --before-close --draft-file PATH)
+  ask-owner     --room --role --question-id --question-text [--timeout-seconds] [--context-json]
+  owner-reply   --room --role --question-id --decision approve|reject --evidence [--source]
+  readiness     [--relay] [--thread-id --role] [--allow-tentative]
+  probe-limits  [--relay] [--create-key]
+  version
+  help
+
+Env vars: CLAWROOM_RELAY, CLAWROOM_CREATE_KEY, CLAWROOM_STATE_DIR
+State files: ${STATE_DIR}/<room_id>-<role>.state.json
+`);
+}
+
+async function execStr(cmd) {
+  const { exec } = await import('node:child_process');
+  return new Promise((resolve, reject) => {
+    exec(cmd, (err, stdout) => {
+      if (err) reject(err); else resolve(stdout);
+    });
+  });
+}

@@ -72,6 +72,32 @@ const DEFAULT_MAX_MESSAGES = 120;
 const DEFAULT_MAX_TEXT_CHARS = 8000;
 const DEFAULT_MIN_HEARTBEAT_MS = 10_000;
 
+// v4: create idempotency cache (Codex pass 2 P1.5). Per-isolate in-memory.
+// Covers transient retry within a single CF isolate (~minutes, single edge POP).
+// Does NOT cover retry across DC failover or isolate recycle. Phase 1.5 upgrade
+// path: replace with a Durable-Object-backed registry for full durability.
+const CREATE_IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
+const CREATE_IDEMPOTENCY_MAX_ENTRIES = 1000;
+const CREATE_IDEMPOTENCY_CACHE: Map<string, { body: string; expires: number }> = new Map();
+
+function getCachedCreate(key: string): string | null {
+  const entry = CREATE_IDEMPOTENCY_CACHE.get(key);
+  if (!entry) return null;
+  if (entry.expires < Date.now()) {
+    CREATE_IDEMPOTENCY_CACHE.delete(key);
+    return null;
+  }
+  return entry.body;
+}
+
+function cacheCreate(key: string, body: string): void {
+  if (CREATE_IDEMPOTENCY_CACHE.size >= CREATE_IDEMPOTENCY_MAX_ENTRIES) {
+    const oldest = CREATE_IDEMPOTENCY_CACHE.keys().next().value;
+    if (oldest) CREATE_IDEMPOTENCY_CACHE.delete(oldest);
+  }
+  CREATE_IDEMPOTENCY_CACHE.set(key, { body, expires: Date.now() + CREATE_IDEMPOTENCY_TTL_MS });
+}
+
 function boolEnv(value: unknown): boolean {
   return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
 }
@@ -201,6 +227,22 @@ function threadStub(env: Env, id: string): DurableObjectStub {
 }
 
 async function createThread(request: Request, env: Env, topic: string, goal: string): Promise<Response> {
+  // v4 create idempotency (Codex pass 2 P1.5). If the caller supplies an
+  // X-Idempotency-Key header and we've seen this key recently in this isolate,
+  // return the cached creation response instead of creating a duplicate room.
+  // This makes internal retry safe for transient TLS / 5xx without changing
+  // the success contract. See CREATE_IDEMPOTENCY_* constants at top of file.
+  const idempKey = request.headers.get("x-idempotency-key");
+  if (idempKey) {
+    const cached = getCachedCreate(idempKey);
+    if (cached) {
+      return new Response(cached, {
+        status: 200,
+        headers: { "content-type": "application/json", "x-idempotent-replay": "true" },
+      });
+    }
+  }
+
   const url = new URL(request.url);
   const id = threadId();
   const init: InitPayload = {
@@ -212,11 +254,18 @@ async function createThread(request: Request, env: Env, topic: string, goal: str
     guest_invite_code: randomInviteCode(),
     origin: url.origin,
   };
-  return await threadStub(env, id).fetch("https://thread/init", {
+  const response = await threadStub(env, id).fetch("https://thread/init", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(init),
   });
+
+  if (idempKey && response.ok) {
+    const body = await response.clone().text();
+    cacheCreate(idempKey, body);
+  }
+
+  return response;
 }
 
 function routeHelp(): Response {
@@ -229,6 +278,7 @@ function routeHelp(): Response {
       "POST /threads/:id/messages",
       "GET /threads/:id/msgs?token=...&after=N&wait=20",
       "GET /threads/:id/messages?token=...&after=N&wait=20",
+      "GET /threads/:id/events?token=...&after=N&wait=20",
       "GET /threads/:id/post?token=...&text=...",
       "POST /threads/:id/ask-owner",
       "GET /threads/:id/owner-reply?code=...",
@@ -351,6 +401,9 @@ export class ThreadDurableObject {
 
       if (request.method === "GET" && (action === "msgs" || action === "messages")) {
         return await this.handleMessages(url);
+      }
+      if (request.method === "GET" && action === "events") {
+        return await this.handleEvents(url);
       }
       if (request.method === "GET" && action === "post") {
         const text = url.searchParams.get("text") || "";
@@ -737,6 +790,35 @@ export class ThreadDurableObject {
       .toArray()
       .map((row: any) => ({
         ...this.publicMessageRow(row),
+      }));
+  }
+
+  // v4 invariant 9: /events returns only metadata. NO text, NO metadata_json.
+  // The SELECT itself excludes the text column so accidental .text references
+  // in future edits cannot leak body content. See ADR 0001.
+  private async handleEvents(url: URL): Promise<Response> {
+    const after = parseInt(url.searchParams.get("after") || "-1", 10);
+    const waitSeconds = Math.max(0, Math.min(MAX_WAIT_SECONDS, parseInt(url.searchParams.get("wait") || "0", 10) || 0));
+    let rows = this.eventsAfter(after);
+    const row = this.threadRow();
+    const closed = Boolean(Number(row?.closed || 0));
+
+    if (!rows.length && waitSeconds > 0 && !closed) {
+      await this.waitForEvent(waitSeconds * 1000);
+      rows = this.eventsAfter(after);
+    }
+    return json(rows);
+  }
+
+  private eventsAfter(after: number): Array<{ id: number; from: string; kind: MessageRow["kind"]; ts: number }> {
+    return this.state.storage.sql
+      .exec("SELECT id, role AS sender, ts, kind FROM messages WHERE id>? ORDER BY id ASC", Number.isFinite(after) ? after : -1)
+      .toArray()
+      .map((row: any) => ({
+        id: Number(row.id),
+        from: String(row.sender || row.role || ""),
+        kind: this.normalizeKind(String(row.kind || "message")),
+        ts: Number(row.ts || 0),
       }));
   }
 

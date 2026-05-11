@@ -1,6 +1,16 @@
 node_modules/
 .DS_Store
-docs/
+# v4 Phase 0: canonical decision records (ADRs) are committed even though
+# docs/ is otherwise ignored. Pattern: ignore docs/ contents but not the
+# directory itself, then re-include docs/decisions/. (`docs/` alone would
+# exclude the directory so the `!docs/decisions/` exception couldn't work.)
+docs/*
+!docs/decisions/
+!docs/decisions/**
+# v4 (alignment room t_f20af1fd-a1e, Codex pass 1 P1-process): keep
+# LESSONS_LEARNED.md committable too — it's the project's canonical
+# institutional memory, equally important to track as ADRs.
+!docs/LESSONS_LEARNED.md
 .wrangler/
 .mf/
 .cache/
