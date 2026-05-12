@@ -37,11 +37,17 @@ const MUTUAL_CLOSE_POLL_MAX_ATTEMPTS = 60; // 2 minutes hard cap
  * @param {'host' | 'guest'} args.role
  * @param {string} args.token
  * @param {boolean} [args.include_self] - debug only; default false
+ * @param {boolean} [args.once] - Pattern B' driver mode. After a poll iteration where AT
+ *   LEAST ONE peer event was emitted, exit. If the poll batch contains multiple events
+ *   from the peer, ALL of them are emitted in that iteration before exit — the caller
+ *   receives the full batch on stdout, not just the first event. This is the right
+ *   behavior for per-turn drivers: process the whole batch as one "turn" of input.
+ *   Default false (long-running watcher).
  * @param {(line: string) => void} [args.emit] - default: console.log
  * @param {AbortSignal} [args.signal]
  * @returns {Promise<{ closed_mutually: boolean, last_cursor: number, exit_reason: string }>}
  */
-export async function watchEvents({ relay, room_id, role, token, include_self = false, emit, signal }) {
+export async function watchEvents({ relay, room_id, role, token, include_self = false, once = false, emit, signal }) {
   const out = emit || ((line) => process.stdout.write(line + '\n'));
   const client = new RelayClient({ relay, room_id, role, token });
 
@@ -75,6 +81,7 @@ export async function watchEvents({ relay, room_id, role, token, include_self = 
 
     const rows = Array.isArray(result.body) ? result.body : [];
     let sawPeerClose = false;
+    let emittedThisIter = 0;
 
     for (const raw of rows) {
       let ev;
@@ -93,6 +100,7 @@ export async function watchEvents({ relay, room_id, role, token, include_self = 
       // extra field. makeWatchEvent already trims to {id, from, kind, ts}.
       const tag = ev.kind === 'close' ? 'close_available' : 'event_available';
       out(`${tag} ${JSON.stringify(ev)}`);
+      emittedThisIter++;
 
       if (ev.kind === 'close' && ev.from !== role) sawPeerClose = true;
     }
@@ -117,6 +125,17 @@ export async function watchEvents({ relay, room_id, role, token, include_self = 
         out('error mutual_close_timeout');
         exitReason = 'mutual_close_timeout';
       }
+      break;
+    }
+
+    // Pattern B' driver: once we've emitted at least one peer event in this
+    // iteration, exit. We deliberately drain the ENTIRE poll batch first
+    // (all peer events from this one HTTP response) — splitting a batch
+    // across two driver turns would risk the second turn seeing a
+    // stale-cursor surprise. The caller's per-turn loop should treat one
+    // `--once` invocation as "all peer events queued since my last turn".
+    if (once && emittedThisIter > 0) {
+      exitReason = 'once_event_emitted';
       break;
     }
   }

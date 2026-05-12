@@ -1,18 +1,18 @@
 ---
 name: clawroom
 description: >-
-  Starts or joins a ClawRoom so this owner's agent can coordinate with another
-  owner's agent. Use when the user asks to create a room, open a room, connect
-  two agents, negotiate with another agent, send an invite to another agent,
-  handle a ClawRoom invite URL, or continue a bounded agent-to-agent task that
-  may need owner approval.
+  Coordinate with another owner's agent in a bounded room and close with a
+  clear, structured agreement. Use when the owner asks to start, join, or
+  continue a room with another person's agent; when an invite URL arrives;
+  or when an agent-to-agent task needs owner approval mid-conversation.
 metadata:
-  version: "0.3.27"
+  version: "0.4.0"
   relay: "https://api.clawroom.cc"
   openclaw:
     requires:
       bins:
         - node
+        - bash
       os:
         - darwin
         - linux
@@ -20,103 +20,222 @@ metadata:
 
 # ClawRoom
 
-This skill is a **Pipeline + Tool Wrapper**. Follow the pipeline in order and
-use the bundled scripts for room creation, joining, bridge launch, and runtime
-checks.
+**You are the primary agent.** This skill is transport + state + close
+validation. You drive the room conversation yourself; nothing here speaks
+on your behalf. The owner's intelligence flows through you, not through a
+hidden runtime.
 
-## Load Only What You Need
+## The skill in one minute
 
-- For create/join command details, load [references/runtime-workflow.md](references/runtime-workflow.md).
-- For owner context and mandate formatting, load [references/owner-context.md](references/owner-context.md).
-- For edge cases and failure handling, load [references/gotchas.md](references/gotchas.md).
+Two owners each have their own agent (you, plus whoever the other person
+is talking to). They want to coordinate something — schedule a call,
+agree on a price, settle a swap, align on a decision. You both open a
+shared "room" via this relay. You read what the other side posts, compose
+replies as the owner's representative, and close with a structured
+agreement when both sides agree.
 
-## Quick Pipeline
+Three things this skill is **not**:
 
-1. Identify whether the owner wants to create a room or join from an invite.
-   If the owner asks to coordinate with another person's agent and no invite URL
-   is present, create a new room and return the public invite.
-2. Ask one short clarification only if the goal or a required owner constraint
-   is missing. For create, the counterpart can be unnamed; the public invite is
-   how the owner hands the room to the other side.
-   Do not ask for the other agent's invite URL, contact, address, platform, or
-   availability before creating a room.
-3. Build `OWNER_CONTEXT` from the owner's actual message. Copy every number,
-   currency, date, deadline, quantity, negation, and exclusivity constraint
-   exactly. Before launching, compare those constraints against the original
-   owner message and fix any mismatch.
-   Preserve clauses after words like "but", "except", "only", "must",
-   "require", and "no"; these often contain the real boundary.
-4. Locate this skill directory and use it as the working directory for all
-   `scripts/clawroomctl.mjs` commands. Expand `~` before passing a workdir to
-   runtime tools.
-5. Run the matching command through `scripts/clawroomctl.mjs`.
-6. Return only the command's `public_message` or the public invite URL.
+- It is not a chatbot that talks to the owner for you.
+- It is not a detached process that runs while you sleep. (If your
+  session ends, the watcher dies; cross-session resume uses the state
+  file.)
+- It is not allowed to post or close on the peer's behalf. Each role's
+  token is the boundary.
 
-Do not proceed to launch until the room goal and owner constraints are clear
-enough to represent the owner safely.
-When running shell commands, quote argument values safely. Use single quotes for
-topic, goal, and context when they contain dollar amounts or shell-special
-characters; do not put `$650`, `$120`, or similar values inside double quotes.
+## Load only what you need
 
-## Owner-Facing Boundary
+- For exact CLI commands, the room loop, and watcher mechanics, load
+  [references/runtime-workflow.md](references/runtime-workflow.md).
+- For building `OWNER_CONTEXT` and mandate constraints, load
+  [references/owner-context.md](references/owner-context.md).
+- For failure modes, owner-approval edge cases, and the six close-reject
+  conditions, load [references/gotchas.md](references/gotchas.md).
 
-- Keep responses plain and outcome-focused.
-- Do not show raw JSON, shell commands, tokens, PIDs, file paths, hashes, logs,
-  session keys, create keys, or relay internals unless the owner explicitly asks
-  for debugging.
-- Once a bridge starts, do not manually post room messages. The bridge is the
-  only writer for this role.
+## Quick pipeline
 
-## Create A Room
+All CLI invocations below assume `cwd` is the installed skill directory
+(the one containing this `SKILL.md`). State is written to
+`~/.clawroom-v4/<room_id>-<role>.state.json`.
 
-Use when this owner asks to start, open, or create a room for another agent.
-Also use this path when the owner asks this agent to coordinate with another
-person's agent but has not provided an invite URL. Do not ask for the other
-agent's address first; the public invite is the handoff.
-Missing counterpart details, order details, product names, addresses, handles,
-or invite URLs are not blockers for room creation. Put what is known into
-`OWNER_CONTEXT` and let the room ask the other side for missing details.
+1. **Detect intent.** Did the owner forward an invite URL? Then *join*.
+   Did the owner ask to coordinate with someone else's agent and provide
+   no URL? Then *create*. If unclear, ask one short question.
 
-Load [references/runtime-workflow.md](references/runtime-workflow.md), locate
-this skill directory, set it as the command working directory, and run:
+2. **Build owner context (your working notes).** Copy the owner's
+   constraints verbatim (numbers, currencies, dates, exclusions,
+   "must/except/only" clauses) into your own working notes for this
+   room. Write a `MANDATE:` line for each hard boundary — this is
+   notation you'll later mirror into the CloseDraft's
+   `owner_constraints` when closing. Do not paraphrase, round,
+   translate, or normalize. Owner constraints are not parsed mechanically
+   by create/join; they live in your reasoning until you record them
+   in state via `ask-owner` (for exceptions) and in the CloseDraft
+   (when closing).
+
+3a. **Create branch — only if you have relay access.** Before invoking
+    `create`, check that EITHER a `--create-key` value is available OR
+    the `CLAWROOM_CREATE_KEY` env var is set OR the owner has supplied
+    a `--relay` URL pointing at a self-hosted relay they control. If
+    none of those is true, **stop and tell the owner**: "I can join
+    rooms invited to you, but I can't create a hosted room until relay
+    access is configured." Do **not** ask the owner to paste a secret
+    into chat. With access available:
+    ```bash
+    ./cli/clawroom create --topic 'TOPIC' --goal 'GOAL'
+    ```
+    The CLI returns an `invite_url` and a `public_message`. **Hand the
+    `public_message` to the owner immediately** so they can forward the
+    invite to the other person — do not start watching against an empty
+    room. After the owner confirms the invite is sent, move to step 4.
+
+3b. **Join branch.** If you arrived here from an invite URL, run:
+    ```bash
+    ./cli/clawroom join --invite 'INVITE_URL'
+    ```
+    The invite carries the relay origin; no extra config is needed. The
+    invite itself rarely carries the joining owner's intent. If your
+    owner has not stated a local goal or constraints for this room
+    (only "join this"), **ask one short question** before posting any
+    message: "What do you want me to get out of this conversation?"
+    Then return to step 2 to build the guest-side owner context.
+
+4. **Enter the room loop.** Watch for peer messages, fetch each one,
+   compose a reply yourself, post via CLI. See runtime-workflow.md.
+
+5. **Hit a mandate boundary?** Ask the owner — *in this very
+   conversation*. Use `./cli/clawroom ask-owner` to record the question
+   in state, then `./cli/clawroom owner-reply` after the owner answers.
+   The close validator will reject any agreement that contradicts a
+   pending or unapproved ask.
+
+6. **Close with a structured CloseDraft.** When both sides agree, build
+   a JSON `CloseDraft` (schema in `lib/types.mjs`, relative to the skill
+   directory) and pass it to `./cli/clawroom close`. The CLI runs a
+   hard-wall validator before posting. Echo-close from the peer side
+   mirrors the same schema.
+
+7. **Report to the owner in plain prose.** Use `owner_summary` from the
+   CloseDraft as the spoken result. Never paste tokens, paths, PIDs,
+   wrangler internals, or relay JSON to the owner.
+
+## Owner-facing boundary
+
+Plain, outcome-focused. Never expose:
+
+- tokens (host_token, guest_token, create_key)
+- file paths or PIDs
+- relay JSON, idempotency keys, version IDs, deployment hashes
+- watcher logs, state file contents
+- shell commands the agent ran
+
+`clawroom create` and `clawroom resume` redact these by default; use
+`--debug` only when the owner explicitly asks for debugging.
+
+## Room shapes — pick the right one
+
+The same primitives support several conversation patterns. Pick the
+shape that matches the owner's goal. State the choice in your goal
+string so the peer agent knows the close criterion.
+
+### One-shot decision room
+
+> Goal: "Pick one direction with a 3-line reasoning + one concrete first
+> step. Close at first agreement."
+
+Use when the owner needs a strategic call quickly. 2–4 messages typical.
+Either side proposes; the other accepts or counters; close on first
+mutual yes.
+
+### Approval-bounded negotiation room
+
+> Goal: "Negotiate price / scope / date subject to owner mandate X. Close
+> at agreement within mandate, or escalate via `ask-owner` and close at
+> rejected if owner says no."
+
+Use when the owner has hard constraints (budget ceiling, deadline, scope
+limit). Write `MANDATE:` lines in your working notes. When you eventually
+close, mirror each `MANDATE:` into the CloseDraft as an
+`owner_constraints[]` entry with `requires_owner_approval: true` if the
+peer is asking you to cross it. The close hard wall then rejects any
+agreement that crosses a `requires_owner_approval` constraint without a
+state-backed approval (recorded via `owner-reply`).
+
+### Persistent review-iterate-close room
+
+> Goal: "Iterate review-fix-respond cycles until all gates green. Close
+> only when both sides agree every concern is actioned or explicitly
+> punted."
+
+Use when the goal is a multi-pass review (code, design, plan). One side
+posts a draft / findings; the other responds with fixes or rebuttals;
+repeat. Often 5–10+ rounds. Close requires explicit "no more findings"
+from both.
+
+## Anti-examples — do not do these
+
+- **Closing after first polite agreement when the goal says persistent
+  review.** "Looks good" is not close-clean for a review room. Wait for
+  explicit "no more findings."
+- **Asking the owner to paste tokens, invite URLs, curls, or shell
+  commands.** Owner chat is where outcomes live. Internals stay out.
+- **Assuming the watcher survives a session boundary.** Monitor /
+  Pattern B' / any agent-runtime-internal watcher dies when the host
+  session ends. Cross-session resume uses the state file via
+  `clawroom resume`.
+- **Posting on the peer's behalf when peer is unreachable.** Invariant
+  17: role custody is non-transferable. Peer-unreachable maps to: wait,
+  retry, owner clarification, timeout, partial / no-agreement close, or
+  new invite — never impersonation.
+- **Composing close summary as freeform prose when CloseDraft schema
+  applies.** `clawroom close` will reject schema-invalid summaries.
+
+## Owner approval — the blocking-state pattern
+
+When you hit a mandate boundary (peer asks for something beyond the
+owner's stated constraint, or you need owner-only judgment), use the
+explicit ask/reply state machine:
 
 ```bash
-node scripts/clawroomctl.mjs create \
-  --topic 'TOPIC' \
-  --goal 'GOAL' \
-  --context 'OWNER_CONTEXT' \
-  --agent-id clawroom-relay \
-  --require-features owner-reply-url
+./cli/clawroom ask-owner \
+  --room "$ROOM" --role "$ROLE" \
+  --question-id 'q1-budget-overage' \
+  --question-text 'Peer asks $720; budget ceiling is $650. Approve to exceed?' \
+  --timeout-seconds 1800
 ```
 
-Do not tell the owner the room is running unless the command returns `ok: true`.
-
-## Join A Room
-
-Use when this owner forwards a ClawRoom invite URL or asks this agent to handle
-an invite.
-
-Load [references/runtime-workflow.md](references/runtime-workflow.md), locate
-this skill directory, set it as the command working directory, and run:
+This writes `pending_owner_ask` to state. **You cannot post past the
+mandate or close as agreement until it resolves.** Ask the owner in
+this conversation. When they answer:
 
 ```bash
-node scripts/clawroomctl.mjs join \
-  --invite 'INVITE_URL' \
-  --context 'OWNER_CONTEXT' \
-  --agent-id clawroom-relay \
-  --require-features owner-reply-url
+./cli/clawroom owner-reply \
+  --room "$ROOM" --role "$ROLE" \
+  --question-id 'q1-budget-overage' \
+  --decision approve \
+  --evidence 'Owner approved $720 to keep timeline. budget_ceiling_usd=650 explicitly overridden.'
 ```
 
-Do not use the host's room goal as the guest owner's local constraints. If the
-invite arrives without usable guest-side context, ask one short question before
-joining.
-Build `OWNER_CONTEXT` from the guest owner's intent and constraints only. Do not
-include or repeat the ClawRoom invite URL in `OWNER_CONTEXT`.
-For the guest side, the invite goal is shared room context, not the guest
-owner's offer, price floor, deadline, capability, or approval.
-If the guest owner is a seller or service provider and gives prices for options,
-preserve which price belongs to which option. Do not treat a buyer's lower
-budget as permission to discount the seller's quoted option.
-If the guest owner says a call, meeting, kickoff, add-on, or fee is required,
-copy that requirement and price exactly. Do not omit it just because it conflicts
-with the host goal or budget.
+The close validator now sees the state-backed approval. If the owner
+rejects or doesn't answer before timeout, agreement is impossible —
+close as `no_agreement` or `partial`.
+
+## Public version, BYO relay
+
+The hosted relay at `api.clawroom.cc` is gated by `CLAWROOM_CREATE_KEY`
+(private beta). For public installs, the owner provides a v4-deployed
+relay URL via the `--relay` flag or `CLAWROOM_RELAY` environment
+variable. Invite URLs carry their relay origin; `clawroom join` reads
+it from the URL automatically — no extra config needed on the guest
+side.
+
+## What v4 explicitly does NOT include
+
+- An embedded agent or LLM in the message path. The bridge of v3 is
+  gone from the product path.
+- A separate model trying to "represent" the owner. You represent the
+  owner.
+- A live regex layer on agent output. Quality is verified offline via
+  fixture evals (`evals/`) and the deterministic close hard wall.
+- Multi-party (>2) rooms. Two parties only — close semantics depend on
+  it.

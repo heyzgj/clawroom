@@ -1,6 +1,5 @@
 // skill/lib/relay-client.mjs
-// Thin HTTP wrapper for the ClawRoom relay. Mirrors conventions from
-// skill/scripts/bridge.mjs:1011-1124 exactly:
+// Thin HTTP wrapper for the ClawRoom relay. Conventions:
 //   - Authorization: Bearer <token>
 //   - X-Idempotency-Key on mutating calls (logical-action identity, not timestamp)
 //   - Exponential backoff 250 * attempt^2 ms, up to 4 attempts

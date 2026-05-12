@@ -7,7 +7,7 @@
 //   join          --invite [--relay] [--debug]
 //   post          --room --role --text [--logical-post-id] [--allow-pending-owner-ask]
 //   poll          --room --role [--after N] [--wait S] [--no-state]
-//   watch         --room --role [--include-self]
+//   watch         --room --role [--include-self] [--once]
 //   close         --room --role --draft-file PATH
 //   resume        --room --role [--debug]
 //   lint          --room --role (--text TEXT | --before-close --draft-file PATH)
@@ -227,18 +227,25 @@ async function cmdWatch() {
   const room_id = required('room');
   const role = requiredRole();
   const include_self = Boolean(flags['include-self']);
+  // --once: Pattern B' driver. Exit after the first peer event (any kind).
+  // Lets cross-runtime callers like Codex re-invoke watch per turn instead
+  // of forking a long-running background process.
+  const once = Boolean(flags.once);
   const state = mustReadState(room_id, role);
   const token = mustToken(state);
-  // watchEvents emits its own lines to stdout; this returns when room mutually closes.
+  // watchEvents emits its own lines to stdout; this returns when room mutually closes,
+  // or when --once and the first peer event has been emitted.
   const result = await watchEvents({
     relay: relayUrl(),
     room_id,
     role,
     token,
     include_self,
+    once,
   });
   process.stderr.write(JSON.stringify(result) + '\n');
-  if (result.exit_reason !== 'mutual_close' && result.exit_reason !== 'ok') {
+  const okReasons = new Set(['mutual_close', 'ok', 'once_event_emitted']);
+  if (!okReasons.has(result.exit_reason)) {
     process.exit(1);
   }
 }
@@ -591,7 +598,7 @@ Subcommands:
   join          --invite [--relay]
   post          --room --role --text [--logical-post-id]
   poll          --room --role [--after N] [--wait S] [--no-state]
-  watch         --room --role [--include-self]
+  watch         --room --role [--include-self] [--once]
   close         --room --role --draft-file PATH
   resume        --room --role [--debug]
   lint          --room --role (--text TEXT | --before-close --draft-file PATH)
