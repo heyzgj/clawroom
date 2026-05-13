@@ -1,0 +1,20 @@
+{
+  "id": "partial-without-unresolved",
+  "description": "outcome=partial but unresolved_items is empty. Reject condition 1 (outcome consistency).",
+  "category": "close-draft-invalid",
+  "invariant": "AL3",
+  "release_relevance": "high",
+  "source": "close.mjs:147-149 outcome consistency rule",
+  "state_overrides": {},
+  "close_draft": {
+    "outcome": "partial",
+    "agreed_terms": [{ "term": "price", "value": "$650", "provenance": "owner_context" }],
+    "unresolved_items": [],
+    "owner_constraints": [{ "constraint": "budget=650", "source": "create", "requires_owner_approval": false }],
+    "peer_commitments": [{ "commitment": "deliver", "provenance": "peer_message:1" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "ship", "owner": "guest" }],
+    "owner_summary": "Partial but nothing actually unresolved — schema rejects this."
+  },
+  "expected": { "pass": false, "reject_reason": "unresolved" }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "host-init-clean",
+  "description": "initState as host with only host_token succeeds (positive control).",
+  "category": "role-custody",
+  "invariant": "AL2",
+  "release_relevance": "high",
+  "source": "state.mjs:73-103",
+  "scenario": "initState_cross_role",
+  "input": {
+    "room_id": "t_role_test_h3",
+    "role": "host",
+    "tokens": { "host_token": "h_only_ok" }
+  },
+  "expected": {
+    "throws": false
+  }
+}

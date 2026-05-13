@@ -1,0 +1,20 @@
+{
+  "id": "bad-outcome-enum",
+  "description": "outcome value not in CLOSE_OUTCOMES enum. Reject condition 1 (schema).",
+  "category": "close-draft-invalid",
+  "invariant": "AL3",
+  "release_relevance": "medium",
+  "source": "close.mjs:79-81 schema validator",
+  "state_overrides": {},
+  "close_draft": {
+    "outcome": "kinda_agreed",
+    "agreed_terms": [],
+    "unresolved_items": [],
+    "owner_constraints": [],
+    "peer_commitments": [],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "test fixture"
+  },
+  "expected": { "pass": false, "reject_reason": "outcome" }
+}

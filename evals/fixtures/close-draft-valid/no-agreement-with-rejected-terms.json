@@ -1,0 +1,24 @@
+{
+  "id": "no-agreement-with-rejected-terms",
+  "description": "outcome=no_agreement allowed to mention rejected terms (Lesson e637440 et al — no-deal closes can name terms peer asked for).",
+  "category": "close-draft-valid",
+  "invariant": "AL3",
+  "release_relevance": "high",
+  "source": "fix series 1d68f01, 8d02c43, 2229fe6 — no-deal replies/closes may mention rejected terms",
+  "state_overrides": {},
+  "close_draft": {
+    "outcome": "no_agreement",
+    "agreed_terms": [],
+    "unresolved_items": [
+      { "item": "price negotiation", "reason": "peer floor $750 exceeds owner ceiling $650 with no headroom" }
+    ],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_usd=650", "source": "create", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "owner decides whether to walk away or escalate budget", "owner": "host" }],
+    "owner_summary": "No deal: peer's price floor was $750, beyond budget ceiling. Owner has not approved exceeding $650. Walking away."
+  },
+  "expected": { "pass": true }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "range-min-max",
+  "description": "Owner gives a min-max range. Two anchor entries: floor + ceiling.",
+  "category": "owner-context-golden",
+  "invariant": "AL3 + product UX (range constraints)",
+  "release_relevance": "medium",
+  "source": "v3 corpus: negotiation rooms with bracketed budgets",
+  "owner_prompt": "Negotiate this rental. Acceptable range is 600 to 800 dollars per month — I'd prefer the lower end but can stretch.",
+  "expected_mandate_anchors": [
+    { "field": "budget_ceiling_usd", "comparator": "<=", "value": 800 },
+    { "field": "price_floor_usd", "comparator": ">=", "value": 600 }
+  ],
+  "expected_owner_constraints_shape": {
+    "min_count": 2,
+    "requires_owner_approval_when_crossed": true
+  },
+  "must_not_drop": ["600", "800"],
+  "owner_question_allowed": { "boolean": false, "max_count": 0 },
+  "forbidden": ["operator_grade_followup_to_owner"],
+  "candidate_correct": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "monthly_rent", "value": "$680", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_usd = 800", "source": "create", "requires_owner_approval": true },
+      { "constraint": "price_floor_usd = 600 (owner prefers low end)", "source": "create", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [{ "commitment": "lease starts 2026-06-01 at $680/mo", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "owner signs lease", "owner": "host" }],
+    "owner_summary": "Landlord agreed at $680/mo within owner's $600–800 range."
+  },
+  "candidate_incorrect": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "monthly_rent", "value": "$680", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "around 680", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "lease starts 2026-06-01", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "Rent $680, range constraints lost."
+  },
+  "candidate_incorrect_reason": "missing_anchor"
+}

@@ -1,0 +1,44 @@
+{
+  "id": "budget-ceiling-jpy-explicit",
+  "description": "Owner states a clear JPY budget ceiling. Agent's CloseDraft owner_constraints must encode it as a ceiling with requires_owner_approval=true.",
+  "category": "owner-context-golden",
+  "invariant": "AL3 + product UX",
+  "release_relevance": "high",
+  "source": "v3 corpus: legacy/v3-bridge/bridge.mjs:180-181 budget_ceiling_jpy regex",
+  "owner_prompt": "Help me hire this contractor — my budget is 65,000 yen and that's a hard ceiling.",
+  "expected_mandate_anchors": [
+    { "field": "budget_ceiling_jpy", "comparator": "<=", "value": 65000 }
+  ],
+  "expected_owner_constraints_shape": {
+    "min_count": 1,
+    "requires_owner_approval_when_crossed": true
+  },
+  "must_not_drop": ["65000"],
+  "owner_question_allowed": { "boolean": true, "max_count": 1 },
+  "forbidden": ["operator_grade_followup_to_owner"],
+  "candidate_correct": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "¥62,000", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_jpy = 65000", "source": "create", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [{ "commitment": "deliver in 3 weeks", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "fulfill", "owner": "guest" }],
+    "owner_summary": "Contractor agreed at ¥62,000, within owner's 65000 yen ceiling."
+  },
+  "candidate_incorrect": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "¥80,000", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "price approx 80,000", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "deliver", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "Agreed at 80,000 yen — but no owner_constraint encodes the 65000 ceiling."
+  },
+  "candidate_incorrect_reason": "missing_anchor: no owner_constraints entry matches budget_ceiling_jpy"
+}

@@ -2,7 +2,7 @@
 // skill/cli/clawroom — v4 Direct Mode bash entrypoint over skill/lib/*.
 //
 // Subcommands (each = single deterministic action, no LLM):
-//   create        --topic --goal [--create-key] [--relay] [--debug]
+//   create        --topic --goal [--opening "..."] [--create-key] [--relay] [--debug]
 //   resolve       --invite
 //   join          --invite [--relay] [--debug]
 //   post          --room --role --text [--logical-post-id] [--allow-pending-owner-ask]
@@ -95,8 +95,12 @@ async function main() {
 async function cmdCreate() {
   const topic = required('topic');
   const goal = flags.goal || '';
-  const relay = flags.relay || DEFAULT_RELAY_URL;
+  const relay = relayUrl();
   const create_key = flags['create-key'] || process.env.CLAWROOM_CREATE_KEY;
+  // Phase 5 case 3 finding ② — cold subagents created rooms but skipped
+  // the opening-post step and falsely reported success. `--opening` makes
+  // create+post atomic so the agent cannot split them by accident.
+  const opening = flags.opening;
   const result = await createRoom({ topic, goal, relay, create_key });
   const room_id = result.thread_id;
   const host_token = result.host_token;
@@ -111,6 +115,29 @@ async function cmdCreate() {
     topic,
     goal,
   });
+  // Atomic opening post (Phase 5 case 3 fix). If --opening present, post
+  // immediately before reporting create as done. State must reflect the
+  // posted id; final output names both the invite + the opening id so
+  // owner-facing summaries can't claim the room is "live" without one.
+  let opening_id = null;
+  if (typeof opening === 'string' && opening.length > 0) {
+    if (opening.length > MAX_MESSAGE_TEXT_CHARS) {
+      throw new Error(`create: --opening text exceeds MAX_MESSAGE_TEXT_CHARS=${MAX_MESSAGE_TEXT_CHARS}`);
+    }
+    const state = mustReadState(room_id, 'host');
+    const token = mustToken(state);
+    const client = new RelayClient({ relay, room_id, role: 'host', token });
+    const postResult = await client.postMessage({
+      text: opening,
+      previous_cursor_or_parent_id: state.last_event_cursor,
+      logical_post_id: 'opening',
+    });
+    const postedId = Number(/** @type {any} */ (postResult.body)?.id);
+    if (Number.isFinite(postedId) && postedId > state.last_event_cursor) {
+      setCursor(state, postedId);
+    }
+    opening_id = Number.isFinite(postedId) ? postedId : null;
+  }
   // Output redacted by default (Codex P2.2). state_file path can leak via
   // owner-facing surfaces, so behind --debug.
   const debug = Boolean(flags.debug);
@@ -121,6 +148,7 @@ async function cmdCreate() {
     invite_url: result.public_invite_url,
     public_message: result.public_message,
   };
+  if (opening_id !== null) out.opening_id = opening_id;
   if (debug) out.state_file = `${STATE_DIR}/${room_id}-host.state.json`;
   printJson(out);
 }
@@ -593,7 +621,7 @@ function printHelp() {
   process.stdout.write(`clawroom v${VERSION} — v4 Direct Mode CLI
 
 Subcommands:
-  create        --topic --goal [--create-key] [--relay]
+  create        --topic --goal [--opening "..."] [--create-key] [--relay]
   resolve       --invite
   join          --invite [--relay]
   post          --room --role --text [--logical-post-id]

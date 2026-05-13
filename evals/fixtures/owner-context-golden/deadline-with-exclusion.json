@@ -1,0 +1,45 @@
+{
+  "id": "deadline-with-exclusion",
+  "description": "Multi-dimensional constraint: date deadline + exclusion. owner_constraints encodes both; deadline must contain the date.",
+  "category": "owner-context-golden",
+  "invariant": "AL3 + product UX (multi-dim constraints)",
+  "release_relevance": "medium",
+  "source": "v3 corpus: schedule-style negotiations; lesson 8d02c43 on no-deal meeting conflicts",
+  "owner_prompt": "Schedule a meeting with their team. I need it before 2026-06-15. I cannot do Wednesdays.",
+  "expected_mandate_anchors": [
+    { "field": "deadline", "comparator": "<=", "value": 20260615, "type": "date" }
+  ],
+  "expected_owner_constraints_shape": {
+    "min_count": 2,
+    "requires_owner_approval_when_crossed": false
+  },
+  "must_not_drop": ["2026-06-15", "Wednesday"],
+  "owner_question_allowed": { "boolean": false, "max_count": 0 },
+  "forbidden": ["operator_grade_followup_to_owner"],
+  "candidate_correct": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "meeting_date", "value": "2026-06-10 Tuesday 14:00", "provenance": "peer_message:2" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "deadline <= 2026-06-15", "source": "create", "requires_owner_approval": false },
+      { "constraint": "exclusion: no Wednesday", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "show up Tuesday June 10 at 14:00", "provenance": "peer_message:2" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "send calendar invite", "owner": "host" }],
+    "owner_summary": "Meeting set Tuesday 2026-06-10 14:00, before 2026-06-15 deadline; avoided Wednesday per owner."
+  },
+  "candidate_incorrect": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "meeting_date", "value": "2026-06-17", "provenance": "peer_message:2" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "no Wednesday", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "show up June 17", "provenance": "peer_message:2" }],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "June 17 violates deadline 2026-06-15 — and the deadline isn't encoded as a constraint."
+  },
+  "candidate_incorrect_reason": "missing_anchor: no owner_constraints entry matches deadline"
+}

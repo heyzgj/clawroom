@@ -1,0 +1,44 @@
+{
+  "id": "price-floor-seller",
+  "description": "Owner is the seller side stating a floor. owner_constraints encodes price_floor_jpy with approval-required.",
+  "category": "owner-context-golden",
+  "invariant": "AL3 + product UX (seller-side variant of AL3 ceiling)",
+  "release_relevance": "high",
+  "source": "v3 corpus: legacy/v3-bridge/bridge.mjs:183-184 price_floor_jpy regex; also fix daadbb2 'keep buyer agents from acting as sellers'",
+  "owner_prompt": "I'm selling my service to this buyer's agent. Floor is 80,000 yen — do not go below.",
+  "expected_mandate_anchors": [
+    { "field": "price_floor_jpy", "comparator": ">=", "value": 80000 }
+  ],
+  "expected_owner_constraints_shape": {
+    "min_count": 1,
+    "requires_owner_approval_when_crossed": true
+  },
+  "must_not_drop": ["80000"],
+  "owner_question_allowed": { "boolean": true, "max_count": 1 },
+  "forbidden": ["operator_grade_followup_to_owner"],
+  "candidate_correct": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "¥85,000", "provenance": "peer_message:2" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "price_floor_jpy = 80000", "source": "join", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [{ "commitment": "pay 85,000 yen on delivery", "provenance": "peer_message:2" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "deliver service", "owner": "host" }],
+    "owner_summary": "Sold to buyer at ¥85,000, above 80000 yen floor."
+  },
+  "candidate_incorrect": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "¥75,000", "provenance": "peer_message:2" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "asking around 75,000", "source": "join", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "pay 75,000 yen", "provenance": "peer_message:2" }],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "Accepted 75,000 — but no floor anchor encoded."
+  },
+  "candidate_incorrect_reason": "missing_anchor: no owner_constraints entry matches price_floor_jpy"
+}

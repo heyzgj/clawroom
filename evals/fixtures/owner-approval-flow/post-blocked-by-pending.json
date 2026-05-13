@@ -1,0 +1,19 @@
+{
+  "id": "post-blocked-by-pending",
+  "description": "Posting while pending_owner_ask is set must be rejected by cmdPost. Fixture asserts the state-shape contract that the CLI checks.",
+  "category": "owner-approval-flow",
+  "invariant": "AL8",
+  "release_relevance": "high",
+  "source": "skill/cli/clawroom cmdPost; owner-flow.test.mjs covers CLI integration",
+  "scenario": "cmdPost_blocked_by_pending",
+  "state_overrides": {
+    "pending_owner_ask": {
+      "question_id": "q1-budget",
+      "question_text": "Approve exceeding $650 to $720?",
+      "asked_at": "2026-05-13T09:00:00Z",
+      "timeout_at": "2026-05-13T09:30:00Z"
+    }
+  },
+  "input": { "text": "Counter-offer $720 with delivery in 1 week." },
+  "expected": { "exit_code": 5, "reason_substring": "pending_owner_ask" }
+}

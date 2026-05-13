@@ -1,0 +1,44 @@
+{
+  "id": "agreement-with-owner-approval",
+  "description": "Agreement that crosses a requires_owner_approval constraint AND has matching state-backed approval.",
+  "category": "close-draft-valid",
+  "invariant": "AL3",
+  "release_relevance": "high",
+  "source": "T3 ASK_OWNER round-trip pattern from t_fb3fda2d-563 (v3.1 evidence); ported to v4 schema",
+  "state_overrides": {
+    "owner_approvals": [
+      {
+        "question_id": "q1-budget-overage",
+        "decision": "approve",
+        "source": "primary_agent_conversation",
+        "evidence": "Owner approved $720 exceeding budget_ceiling_usd=650 ceiling to keep timeline.",
+        "ts": "2026-05-13T10:00:00Z"
+      }
+    ]
+  },
+  "close_draft": {
+    "outcome": "agreement",
+    "agreed_terms": [
+      { "term": "price", "value": "$720", "provenance": "peer_message:4; owner_approval:q1-budget-overage" }
+    ],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_usd=650", "source": "create", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [
+      { "commitment": "deliver by 2026-06-08 (accelerated)", "provenance": "peer_message:4" }
+    ],
+    "owner_approvals": [
+      {
+        "question_id": "q1-budget-overage",
+        "decision": "approve",
+        "source": "primary_agent_conversation",
+        "evidence": "Owner approved $720 exceeding budget_ceiling_usd=650 ceiling to keep timeline.",
+        "ts": "2026-05-13T10:00:00Z"
+      }
+    ],
+    "next_steps": [{ "step": "owner confirms final invoice with peer", "owner": "host" }],
+    "owner_summary": "Buyer approved $720 (above $650 ceiling) to accelerate delivery to June 8. Approval logged with explicit override."
+  },
+  "expected": { "pass": true }
+}

@@ -80,14 +80,27 @@ All CLI invocations below assume `cwd` is the installed skill directory
     none of those is true, **stop and tell the owner**: "I can join
     rooms invited to you, but I can't create a hosted room until relay
     access is configured." Do **not** ask the owner to paste a secret
-    into chat. With access available:
+    into chat.
+
+    With access available, use the **atomic create+opening form** so
+    you cannot leave the room empty:
     ```bash
-    ./cli/clawroom create --topic 'TOPIC' --goal 'GOAL'
+    ./cli/clawroom create \
+      --topic 'TOPIC' \
+      --goal  'GOAL' \
+      --opening 'Your first message to the peer here — natural language stating the owner mandate'
     ```
-    The CLI returns an `invite_url` and a `public_message`. **Hand the
-    `public_message` to the owner immediately** so they can forward the
-    invite to the other person — do not start watching against an empty
-    room. After the owner confirms the invite is sent, move to step 4.
+    The CLI returns `invite_url`, `public_message`, and `opening_id`.
+    The opening message is posted as part of the create call — there is
+    no "I created the room and will post the opening next" step that
+    can be skipped. **Hand the `public_message` to the owner
+    immediately** so they can forward the invite. After the owner
+    confirms the invite is sent, move to step 4.
+
+    *(The earlier two-step form — `create` then a separate `post` for
+    the opening — was retired after Phase 5 case 3 found that cold
+    agents skipped the second step ~half the time and falsely reported
+    success.)*
 
 3b. **Join branch.** If you arrived here from an invite URL, run:
     ```bash
@@ -118,6 +131,15 @@ All CLI invocations below assume `cwd` is the installed skill directory
 7. **Report to the owner in plain prose.** Use `owner_summary` from the
    CloseDraft as the spoken result. Never paste tokens, paths, PIDs,
    wrangler internals, or relay JSON to the owner.
+
+   **Your final response must match what you actually did.** If you
+   posted a message, the owner-facing summary names that it was sent.
+   If you ran ask-owner, the summary names the pending question. If
+   you closed, the summary names the outcome. Do not claim actions you
+   did not take, do not omit actions you did take. Phase 5 case 3
+   found that cold agents sometimes report "no progress" while having
+   already posted, or report "I told the room X" without actually
+   posting X — both are owner-deceiving and unacceptable.
 
 ## Owner-facing boundary
 

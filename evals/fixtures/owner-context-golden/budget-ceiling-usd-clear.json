@@ -1,0 +1,44 @@
+{
+  "id": "budget-ceiling-usd-clear",
+  "description": "USD ceiling stated in plain words. owner_constraints must encode the ceiling with requires_owner_approval=true.",
+  "category": "owner-context-golden",
+  "invariant": "AL3 + product UX",
+  "release_relevance": "high",
+  "source": "v3 corpus: legacy/v3-bridge/bridge.mjs:186-187 budget_ceiling_usd regex",
+  "owner_prompt": "I want to negotiate a price with this freelancer. My ceiling is 650 dollars, do not exceed without asking me first.",
+  "expected_mandate_anchors": [
+    { "field": "budget_ceiling_usd", "comparator": "<=", "value": 650 }
+  ],
+  "expected_owner_constraints_shape": {
+    "min_count": 1,
+    "requires_owner_approval_when_crossed": true
+  },
+  "must_not_drop": ["650"],
+  "owner_question_allowed": { "boolean": true, "max_count": 1 },
+  "forbidden": ["operator_grade_followup_to_owner"],
+  "candidate_correct": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "$620", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_usd = 650", "source": "create", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [{ "commitment": "deliver in 2 weeks", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "fulfill", "owner": "guest" }],
+    "owner_summary": "Freelancer agreed at $620 within $650 ceiling. Owner approval not required since under cap."
+  },
+  "candidate_incorrect": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "$620", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_usd = 650", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "deliver", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "Owner said do not exceed without asking — but constraint marks requires_owner_approval=false."
+  },
+  "candidate_incorrect_reason": "shape_violation"
+}

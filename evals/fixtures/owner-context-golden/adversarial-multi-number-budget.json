@@ -1,0 +1,44 @@
+{
+  "id": "adversarial-multi-number-budget",
+  "description": "Adversarial: constraint string contains historical numeric AFTER the ceiling. The matcher must NOT pick the trailing 650 from \"was 650\" to fake-satisfy <= 65000. Tests Phase 4 review P1 anchor-matcher fix.",
+  "category": "owner-context-golden",
+  "invariant": "AL3 + anchor-match correctness",
+  "release_relevance": "high",
+  "source": "Phase 4 review t_2b22838a-7de Codex P1 — last-numeric heuristic exploit",
+  "owner_prompt": "Help me hire this contractor. My budget is 65,000 yen — and that's a hard ceiling. (Previous quote was 50,000 yen but they came back higher; I'll go up to 65,000.)",
+  "expected_mandate_anchors": [
+    { "field": "budget_ceiling_jpy", "comparator": "<=", "value": 65000, "type": "number" }
+  ],
+  "expected_owner_constraints_shape": {
+    "min_count": 1,
+    "requires_owner_approval_when_crossed": true
+  },
+  "must_not_drop": ["65000"],
+  "owner_question_allowed": { "boolean": false, "max_count": 0 },
+  "forbidden": ["operator_grade_followup_to_owner"],
+  "candidate_correct": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "¥60,000", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_jpy = 65000 (owner mentioned previous quote was 50000)", "source": "create", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [{ "commitment": "deliver in 4 weeks", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "fulfill", "owner": "guest" }],
+    "owner_summary": "Contractor agreed at ¥60,000, within 65000 yen ceiling. Owner's prior 50,000 anchor noted."
+  },
+  "candidate_incorrect": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "¥80,000", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_jpy = 80000 (was 65000)", "source": "create", "requires_owner_approval": true }
+    ],
+    "peer_commitments": [{ "commitment": "deliver", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "Ceiling silently moved from 65000 to 80000 — older anchor in parens does NOT make this match the original anchor."
+  },
+  "candidate_incorrect_reason": "missing_anchor: no owner_constraints entry matches budget_ceiling_jpy"
+}

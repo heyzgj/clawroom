@@ -1,0 +1,18 @@
+{
+  "id": "guest-rejects-host-token",
+  "description": "initState as guest with host_token throws.",
+  "category": "role-custody",
+  "invariant": "AL2",
+  "release_relevance": "high",
+  "source": "state.mjs:77-79 cross-role fence",
+  "scenario": "initState_cross_role",
+  "input": {
+    "room_id": "t_role_test_g1",
+    "role": "guest",
+    "tokens": { "host_token": "h_forbidden", "guest_token": "g_ok" }
+  },
+  "expected": {
+    "throws": true,
+    "error_substring": "guest state cannot persist host_token"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "metadata-only-passes",
+  "description": "Pure 4-field metadata event passes through makeWatchEvent.",
+  "category": "watch-events",
+  "invariant": "AL1",
+  "release_relevance": "high",
+  "source": "types.mjs:146-169 makeWatchEvent",
+  "raw_event": { "id": 1, "from": "guest", "kind": "message", "ts": 1778000000000 },
+  "expected_event": { "id": 1, "from": "guest", "kind": "message", "ts": 1778000000000 }
+}

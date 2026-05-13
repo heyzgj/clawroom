@@ -1,0 +1,18 @@
+{
+  "id": "host-without-token-fails",
+  "description": "initState as host with no host_token throws.",
+  "category": "role-custody",
+  "invariant": "AL2",
+  "release_relevance": "medium",
+  "source": "state.mjs:80-82",
+  "scenario": "initState_cross_role",
+  "input": {
+    "room_id": "t_role_test_h2",
+    "role": "host",
+    "tokens": {}
+  },
+  "expected": {
+    "throws": true,
+    "error_substring": "host state requires host_token"
+  }
+}

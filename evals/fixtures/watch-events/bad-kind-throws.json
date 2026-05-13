@@ -1,0 +1,11 @@
+{
+  "id": "bad-kind-throws",
+  "description": "kind outside MESSAGE_KINDS enum throws.",
+  "category": "watch-events",
+  "invariant": "AL1",
+  "release_relevance": "medium",
+  "source": "types.mjs:166",
+  "raw_event": { "id": 5, "from": "guest", "kind": "broadcast", "ts": 1778000000000 },
+  "expected_event": "__throws__",
+  "expected_error_substring": "bad kind"
+}

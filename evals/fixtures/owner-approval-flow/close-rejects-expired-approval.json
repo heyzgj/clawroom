@@ -1,0 +1,47 @@
+{
+  "id": "close-rejects-expired-approval",
+  "description": "Reject condition 4 (approval_after_timeout): state.pending_owner_ask still set with past timeout_at, and a matching approve record exists in state.owner_approvals (inconsistent state — owner-reply was never called to resolve). Outcome=partial so reject #2 (agreement-while-pending) does not fire first; the timeout check must still catch this approval-after-timeout bypass.",
+  "category": "owner-approval-flow",
+  "invariant": "AL3 + AL8 (approval_after_timeout)",
+  "release_relevance": "high",
+  "source": "close.mjs:213-223 approval_after_timeout; t_d8681c69-e79 Phase 4 planning agreed reject condition 4 coverage",
+  "scenario": "cmdClose_rejects_expired_approval",
+  "state_overrides": {
+    "pending_owner_ask": {
+      "question_id": "q-expired",
+      "question_text": "Approve overage?",
+      "asked_at": "2024-01-01T08:00:00Z",
+      "timeout_at": "2024-01-01T08:01:00Z"
+    },
+    "owner_approvals": [
+      {
+        "question_id": "q-expired",
+        "decision": "approve",
+        "source": "primary_agent_conversation",
+        "evidence": "Owner approved exceeding budget_ceiling_usd=650 after timeout window.",
+        "ts": "2024-01-01T12:00:00Z"
+      }
+    ]
+  },
+  "close_draft": {
+    "outcome": "partial",
+    "agreed_terms": [{ "term": "price", "value": "$720", "provenance": "peer_message:4; owner_approval:q-expired" }],
+    "unresolved_items": [
+      { "item": "approval_window_lapsed", "reason": "ask q-expired timed out before owner reply was recorded — present approval is post-window and must not bypass timeout gate" }
+    ],
+    "owner_constraints": [{ "constraint": "budget_ceiling_usd=650", "source": "create", "requires_owner_approval": true }],
+    "peer_commitments": [{ "commitment": "deliver", "provenance": "peer_message:4" }],
+    "owner_approvals": [
+      {
+        "question_id": "q-expired",
+        "decision": "approve",
+        "source": "primary_agent_conversation",
+        "evidence": "Owner approved exceeding budget_ceiling_usd=650 after timeout window.",
+        "ts": "2024-01-01T12:00:00Z"
+      }
+    ],
+    "next_steps": [{ "step": "owner re-asks if still wants to proceed", "owner": "host" }],
+    "owner_summary": "Partial: approval claim is post-timeout; validator must reject the approve presentation."
+  },
+  "expected": { "exit_code": 5, "reason_substring": "timed out" }
+}

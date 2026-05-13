@@ -1,0 +1,11 @@
+{
+  "id": "text-leak-throws",
+  "description": "Event with text field (hostile relay or regression) must throw at makeWatchEvent.",
+  "category": "watch-events",
+  "invariant": "AL1",
+  "release_relevance": "high",
+  "source": "types.mjs:152-158; invariant 9 hostile-relay defense",
+  "raw_event": { "id": 2, "from": "guest", "kind": "message", "ts": 1778000000000, "text": "SECRET TOKEN LEAKED" },
+  "expected_event": "__throws__",
+  "expected_error_substring": "invariant 9"
+}

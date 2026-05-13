@@ -1,0 +1,11 @@
+{
+  "id": "bad-role-throws",
+  "description": "from field outside ROLES enum throws.",
+  "category": "watch-events",
+  "invariant": "AL1",
+  "release_relevance": "medium",
+  "source": "types.mjs:165",
+  "raw_event": { "id": 4, "from": "admin", "kind": "message", "ts": 1778000000000 },
+  "expected_event": "__throws__",
+  "expected_error_substring": "bad from"
+}

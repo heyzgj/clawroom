@@ -1,0 +1,11 @@
+{
+  "id": "metadata-json-leak-throws",
+  "description": "Event with metadata_json field also blocked (invariant 9 covers both).",
+  "category": "watch-events",
+  "invariant": "AL1",
+  "release_relevance": "high",
+  "source": "types.mjs:152-158",
+  "raw_event": { "id": 3, "from": "host", "kind": "close", "ts": 1778000000000, "metadata_json": "{\"hidden\":\"yes\"}" },
+  "expected_event": "__throws__",
+  "expected_error_substring": "invariant 9"
+}

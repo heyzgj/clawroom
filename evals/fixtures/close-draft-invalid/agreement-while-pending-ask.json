@@ -1,0 +1,27 @@
+{
+  "id": "agreement-while-pending-ask",
+  "description": "outcome=agreement while pending_owner_ask is still active. Reject condition 2.",
+  "category": "close-draft-invalid",
+  "invariant": "AL3 + AL8",
+  "release_relevance": "high",
+  "source": "close.mjs:166-180 reject condition 2",
+  "state_overrides": {
+    "pending_owner_ask": {
+      "question_id": "q1-pending",
+      "question_text": "Approve exceeding budget?",
+      "asked_at": "2026-05-13T09:00:00Z",
+      "timeout_at": "2026-05-13T09:30:00Z"
+    }
+  },
+  "close_draft": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "$700", "provenance": "peer_message:3" }],
+    "unresolved_items": [],
+    "owner_constraints": [{ "constraint": "budget_ceiling_usd=650", "source": "create", "requires_owner_approval": true }],
+    "peer_commitments": [{ "commitment": "deliver in 2 weeks", "provenance": "peer_message:3" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "ship", "owner": "guest" }],
+    "owner_summary": "Closing without waiting for owner — invalid."
+  },
+  "expected": { "pass": false, "reject_reason": "pending" }
+}

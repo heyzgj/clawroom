@@ -48,6 +48,15 @@ Kill only stale processes you understand, then verify the list is empty.
 - The skill owns the workflow complexity. If the agent needs a long prompt to
   create, join, monitor, or close a room, treat that as a product bug in the
   skill UX.
+- For cold/naive subagent E2E, the child prompt must read like a real owner
+  request. Do not mention tests, harnesses, phases, case numbers, subagents,
+  evals, OWNER_ASK packets, wire protocols, or release gates.
+- Enforce isolation with a temporary skill copy, working directory, HOME, and
+  state directory. Do not tell the child agent "do not read docs/evals/legacy";
+  that instruction itself reveals the test harness.
+- If test protocol leaks into a naive E2E prompt or transcript, mark the run
+  invalid for release evidence, stop the child agent, discard the room, and
+  restart with a fresh invite.
 - Start with the 99% path first: plain intent, plain invite, clear owner
   outcome. Use CLI keepalive or detailed launch instructions only as fallback
   diagnostics after the naive path fails.

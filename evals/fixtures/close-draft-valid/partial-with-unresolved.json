@@ -1,0 +1,28 @@
+{
+  "id": "partial-with-unresolved",
+  "description": "outcome=partial with explicit unresolved blocker (validateCloseDraft requires at least one unresolved_items entry for partial).",
+  "category": "close-draft-valid",
+  "invariant": "AL3",
+  "release_relevance": "high",
+  "source": "close.mjs:146-149 outcome consistency rule",
+  "state_overrides": {},
+  "close_draft": {
+    "outcome": "partial",
+    "agreed_terms": [
+      { "term": "price", "value": "$650", "provenance": "peer_message:3" }
+    ],
+    "unresolved_items": [
+      { "item": "delivery date", "reason": "peer needs internal confirmation by 2026-05-15; will re-open room" }
+    ],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_usd=650", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [
+      { "commitment": "confirm delivery date by 2026-05-15", "provenance": "peer_message:3" }
+    ],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "await peer's delivery confirmation; re-open if not received by 2026-05-15", "owner": "host" }],
+    "owner_summary": "Price agreed at $650. Delivery date still pending peer confirmation by May 15. Partial close pending follow-up."
+  },
+  "expected": { "pass": true }
+}

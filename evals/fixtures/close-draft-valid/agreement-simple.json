@@ -1,0 +1,26 @@
+{
+  "id": "agreement-simple",
+  "description": "Simple host-driven agreement, no owner approval needed, all required fields present.",
+  "category": "close-draft-valid",
+  "invariant": "AL3",
+  "release_relevance": "high",
+  "source": "canonical happy-path from evals/close.test.mjs:33-50",
+  "state_overrides": {},
+  "close_draft": {
+    "outcome": "agreement",
+    "agreed_terms": [
+      { "term": "price", "value": "$650", "provenance": "owner_context" }
+    ],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "budget_ceiling_usd=650", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [
+      { "commitment": "deliver by 2026-06-15", "provenance": "peer_message:3" }
+    ],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "await fulfillment", "owner": "guest" }],
+    "owner_summary": "Buyer agreed to $650 with delivery by June 15. Awaiting fulfillment."
+  },
+  "expected": { "pass": true }
+}

@@ -2,7 +2,7 @@
 
 A running document of every experiment, every pitfall, every "we thought X would work but Y happened" moment from building ClawRoom. The goal: never re-learn the same lesson twice.
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 ---
 
@@ -246,6 +246,16 @@ ln -s /data/.openclaw/identity /home/openclaw/.openclaw/identity
 **Discovery:** Used S3 owner context for S2 testing. The S3 context contained "must ask about budget" guidance. S2 doesn't need budget. Agent kept ASK_OWNER'ing about budget in every S2 run.
 
 **Lesson:** Owner context is fully part of the LLM's behavior surface. Wrong context = wrong behavior. Always match context to scenario.
+
+### P2. Naive E2E Prompt Contamination Invalidates Release Evidence
+
+**Discovery:** In Phase 5 Case 3, the parent agent spawned a cold Codex child but told it this was a "Phase 5 Case 3 naive-owner E2E", included "Harness boundaries", and asked for an `OWNER_ASK` packet. That leaked the test frame and the parent-child harness protocol into the agent being evaluated.
+
+**Why it matters:** A true naive owner would not mention test cases, harnesses, phases, subagents, evals, or wire packets. Once the child knows it is being tested, the result measures test performance instead of product behavior. Even a clean room close cannot count as release-green evidence.
+
+**Lesson:** Cold/naive E2E prompts must be owner-style only: real-world request, invite link if relevant, owner's constraints, and desired outcome. Isolation belongs in the temp skill copy, cwd, HOME, and state dir, not in child-facing instructions like "do not read docs/evals/legacy". If test protocol leaks into the prompt or transcript, kill the child agent, discard the room, and restart with a fresh invite.
+
+**Current enforcement:** Documented in `AGENTS.md` and enforced by review discipline. Candidate future gate: a prompt-lint check for banned harness/test vocabulary before spawning release-green naive E2E agents.
 
 ---
 

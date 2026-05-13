@@ -1,0 +1,44 @@
+{
+  "id": "adversarial-iso-date-over-deadline",
+  "description": "Adversarial: constraint encodes a deadline later than the anchor. With type:date, the anchor must catch 2026-06-17 > 2026-06-15 instead of being fooled by the last numeric token. Tests Phase 4 review P1 anchor-matcher date fix.",
+  "category": "owner-context-golden",
+  "invariant": "AL3 + anchor-match date-type correctness",
+  "release_relevance": "high",
+  "source": "Phase 4 review t_2b22838a-7de Codex P1 — date last-numeric exploit",
+  "owner_prompt": "Schedule a meeting with this client before 2026-06-15, hard deadline.",
+  "expected_mandate_anchors": [
+    { "field": "deadline", "comparator": "<=", "value": 20260615, "type": "date" }
+  ],
+  "expected_owner_constraints_shape": {
+    "min_count": 1,
+    "requires_owner_approval_when_crossed": false
+  },
+  "must_not_drop": ["2026-06-15"],
+  "owner_question_allowed": { "boolean": false, "max_count": 0 },
+  "forbidden": ["operator_grade_followup_to_owner"],
+  "candidate_correct": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "meeting_date", "value": "2026-06-10 14:00", "provenance": "peer_message:2" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "deadline <= 2026-06-12 (within owner's 2026-06-15 cap)", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "show up 2026-06-10 14:00", "provenance": "peer_message:2" }],
+    "owner_approvals": [],
+    "next_steps": [{ "step": "send calendar invite", "owner": "host" }],
+    "owner_summary": "Meeting set 2026-06-10 14:00, within owner's 2026-06-15 deadline."
+  },
+  "candidate_incorrect": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "meeting_date", "value": "2026-06-17 09:00", "provenance": "peer_message:2" }],
+    "unresolved_items": [],
+    "owner_constraints": [
+      { "constraint": "deadline <= 2026-06-17", "source": "create", "requires_owner_approval": false }
+    ],
+    "peer_commitments": [{ "commitment": "show up June 17", "provenance": "peer_message:2" }],
+    "owner_approvals": [],
+    "next_steps": [],
+    "owner_summary": "Date violates 2026-06-15 deadline — but trailing digits in 2026-06-17 must NOT fool the matcher."
+  },
+  "candidate_incorrect_reason": "missing_anchor: no owner_constraints entry matches deadline"
+}

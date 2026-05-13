@@ -1,0 +1,39 @@
+{
+  "id": "close-rejects-evidence-mismatch",
+  "description": "Reject condition 3: draft.owner_approvals evidence differs from state.owner_approvals evidence for same question_id. Approval text must mirror state verbatim.",
+  "category": "owner-approval-flow",
+  "invariant": "AL3 + AL8 (Codex pass 3 P2 strict-match)",
+  "release_relevance": "high",
+  "source": "close.mjs:198-212 approval_evidence_mismatch",
+  "scenario": "cmdClose_rejects_evidence_mismatch",
+  "state_overrides": {
+    "owner_approvals": [
+      {
+        "question_id": "q-approve",
+        "decision": "approve",
+        "source": "primary_agent_conversation",
+        "evidence": "Owner approved $720 exceeding budget_ceiling_usd=650 ceiling, full quote.",
+        "ts": "2026-05-13T10:00:00Z"
+      }
+    ]
+  },
+  "close_draft": {
+    "outcome": "agreement",
+    "agreed_terms": [{ "term": "price", "value": "$720", "provenance": "peer_message:4; owner_approval:q-approve" }],
+    "unresolved_items": [],
+    "owner_constraints": [{ "constraint": "budget_ceiling_usd=650", "source": "create", "requires_owner_approval": true }],
+    "peer_commitments": [{ "commitment": "deliver 2 weeks", "provenance": "peer_message:4" }],
+    "owner_approvals": [
+      {
+        "question_id": "q-approve",
+        "decision": "approve",
+        "source": "primary_agent_conversation",
+        "evidence": "Owner okayed $720, budget_ceiling_usd=650 overridden, paraphrased version.",
+        "ts": "2026-05-13T10:00:00Z"
+      }
+    ],
+    "next_steps": [{ "step": "fulfill", "owner": "guest" }],
+    "owner_summary": "Evidence paraphrased — must mirror state verbatim."
+  },
+  "expected": { "exit_code": 5, "reason_substring": "evidence" }
+}

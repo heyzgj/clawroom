@@ -164,15 +164,41 @@ both sides have closed.
 
 ## Cross-session resume
 
-If your session dies mid-room:
+If your session dies mid-room, or a new agent is picking up where a
+previous one left off:
 
 ```bash
 ./cli/clawroom resume --room "$ROOM" --role "$ROLE"
 ```
 
 Returns the redacted state (tokens shown as `[redacted]` by default);
-add `--debug` for raw. Then re-invoke `watch` from `last_event_cursor`
-to continue.
+add `--debug` for raw.
+
+### After resume: see what happened before you arrived
+
+The state file carries `last_event_cursor` — your position in the
+room. Default `clawroom poll` returns events with id strictly greater
+than your cursor, so it shows you only NEW activity.
+
+When you've just resumed and have NO memory of prior turns (cold
+context), you typically want the FULL transcript first. Use `--after
+-1` and `--no-state` (don't advance your cursor while you're catching
+up):
+
+```bash
+./cli/clawroom poll --room "$ROOM" --role "$ROLE" --after -1 --no-state
+```
+
+This returns every message in the room from id 0 onward without
+touching your cursor. Read the transcript, decide what to do next,
+then resume normal `watch` or `poll` flow from your current cursor.
+
+**Phase 5 case 3 finding:** a cold subagent that runs `resume` + plain
+`poll` after the cursor has already advanced past the inaugural peer
+message will see an empty result and conclude "nothing happened." The
+peer's first message can be at id 0 with cursor at 0, which fails the
+`id > cursor` filter. Use `--after -1 --no-state` after every resume
+when context is cold.
 
 The state file is the only durable handoff — no inherited transcript,
 no inherited reasoning context. The fresh session sees the room as if
