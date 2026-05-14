@@ -97,10 +97,10 @@ All CLI invocations below assume `cwd` is the installed skill directory
     immediately** so they can forward the invite. After the owner
     confirms the invite is sent, move to step 4.
 
-    *(The earlier two-step form — `create` then a separate `post` for
-    the opening — was retired after Phase 5 case 3 found that cold
-    agents skipped the second step ~half the time and falsely reported
-    success.)*
+    *(Use the atomic form. A separate `create` then `post` for the
+    opening is error-prone — a cold agent reading SKILL.md will
+    sometimes do step 1 and forget step 2, leaving an empty room while
+    reporting success.)*
 
 3b. **Join branch.** If you arrived here from an invite URL, run:
     ```bash
@@ -135,11 +135,16 @@ All CLI invocations below assume `cwd` is the installed skill directory
    **Your final response must match what you actually did.** If you
    posted a message, the owner-facing summary names that it was sent.
    If you ran ask-owner, the summary names the pending question. If
-   you closed, the summary names the outcome. Do not claim actions you
-   did not take, do not omit actions you did take. Phase 5 case 3
-   found that cold agents sometimes report "no progress" while having
-   already posted, or report "I told the room X" without actually
-   posting X — both are owner-deceiving and unacceptable.
+   you closed, the summary names the outcome. Do not claim actions
+   you did not take; do not omit actions you did take. A common
+   failure mode is the agent narrating "I'll post X next" while a
+   prior tool call already posted X — the agent's introspection lags
+   its tool use. Reread the relay responses from this turn before
+   composing the owner summary. Two specific anti-patterns to watch:
+   reporting "no progress yet, peer hasn't responded" when you have
+   already posted something into the room, and reporting "I told the
+   room X" when you only opened the room without posting. Both are
+   owner-deceiving even when the room work is otherwise correct.
 
 ## Owner-facing boundary
 

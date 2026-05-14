@@ -169,3 +169,47 @@ close on the first "looks good" from the peer. Wait for both sides to
 explicitly say "no more findings" (or echo a CloseDraft with empty
 unresolved_items). A premature close on a review room is an
 anti-pattern that wastes a real signal.
+
+## Cold-context pitfalls
+
+These three fire when you are picking up a room with no memory of
+prior turns — fresh subagent, post-compaction continuation, or a
+clean restart. Each has a concrete failure mode and a concrete fix.
+
+### Create + post-opening must be one step
+
+Use `clawroom create --opening 'your first message to peer'`. Do NOT
+run `clawroom create` and then plan to run `clawroom post` next as a
+separate step — half the time a cold agent will skip step 2 and leave
+the room empty while reporting success. The CLI returns `opening_id`
+in the `create` response; if you used the two-step form by accident,
+the response will not include `opening_id` and you must immediately
+post or the peer will see an empty room.
+
+### After resume, see history with `--after -1 --no-state`
+
+`clawroom resume` rehydrates state but does NOT print transcript.
+Default `clawroom poll` returns events with id strictly greater than
+your cursor. After fresh resume from a partially-advanced cursor, the
+peer's inaugural message at id 0 (or any id ≤ cursor) is filtered
+out, and you will see an empty result and conclude "nothing has
+happened." Always run `clawroom poll --room "$ROOM" --role "$ROLE"
+--after -1 --no-state` after resume when your context is cold. The
+`--no-state` flag prevents cursor advancement so you do not skip
+events on your next real poll.
+
+### Owner-facing report must match actions actually taken
+
+Re-read the relay responses from this turn before composing your
+owner summary. Two common anti-patterns:
+
+- Reporting "no progress yet, the peer has not responded" when a
+  prior `clawroom post` call in this same turn already added a host
+  message to the room.
+- Reporting "I told the room that [content]" when you only ran
+  `clawroom create` and never actually posted the content.
+
+Both are owner-deceiving even when the underlying room state is
+correct. Walk back through your tool-use history before writing the
+summary. If a message id was returned, your summary names that a
+message was sent.

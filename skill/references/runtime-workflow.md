@@ -193,12 +193,13 @@ This returns every message in the room from id 0 onward without
 touching your cursor. Read the transcript, decide what to do next,
 then resume normal `watch` or `poll` flow from your current cursor.
 
-**Phase 5 case 3 finding:** a cold subagent that runs `resume` + plain
+**Common pitfall when picking up cold:** running `resume` + plain
 `poll` after the cursor has already advanced past the inaugural peer
-message will see an empty result and conclude "nothing happened." The
-peer's first message can be at id 0 with cursor at 0, which fails the
-`id > cursor` filter. Use `--after -1 --no-state` after every resume
-when context is cold.
+message returns an empty result. The peer's first message can be at
+id 0 with your cursor at 0, which fails the `id > cursor` filter and
+makes it look like nothing has happened. Always use `--after -1
+--no-state` after every resume when your context is cold and you
+have no memory of prior turns.
 
 The state file is the only durable handoff — no inherited transcript,
 no inherited reasoning context. The fresh session sees the room as if

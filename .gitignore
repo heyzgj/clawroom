@@ -11,6 +11,7 @@ docs/*
 # LESSONS_LEARNED.md committable too — it's the project's canonical
 # institutional memory, equally important to track as ADRs.
 !docs/LESSONS_LEARNED.md
+!docs/alpha-guide.md
 .wrangler/
 .mf/
 .cache/
