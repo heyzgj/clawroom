@@ -66,11 +66,16 @@ Kill only stale processes you understand, then verify the list is empty.
 When changing files in `skill/`, run:
 
 ```sh
-node --check skill/scripts/clawroomctl.mjs
-node --check skill/scripts/launcher.mjs
-node --check skill/scripts/bridge.mjs
+node --check skill/cli/clawroom
+node --check skill/lib/*.mjs
+node --test evals/*.test.mjs
+node scripts/v4_fresh_install_smoke.mjs
 npx skills add . --list
 ```
+
+The v3 bridge scripts (`bridge.mjs`, `clawroomctl.mjs`, `launcher.mjs`)
+live under `legacy/v3-bridge/`, not `skill/`. They are not part of the
+v4 installable payload — do not re-introduce them under `skill/`.
 
 For install-shape changes, also install into a temporary directory and confirm
 that only the `skill/` package is copied.

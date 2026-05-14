@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 /**
- * Verified launcher for ClawRoom bridge.
+ * Verified launcher for ClawRoom bridge (DEPRECATED v3 legacy).
+ *
+ * **DEPRECATED — v3 legacy.** Archived under `legacy/v3-bridge/`; not
+ * part of the v4 installable skill payload. The v4 primary agent
+ * drives the room directly via `skill/cli/clawroom`; no detached
+ * launcher process exists in v4. See
+ * `docs/decisions/0001-direct-mode-replaces-bridge.md`.
+ *
+ * (Original v3 doc retained below.)
  *
  * Starts bridge.mjs as a detached process, waits for runtime-state.json,
  * verifies the PID is alive, and prints a machine-readable launch result.

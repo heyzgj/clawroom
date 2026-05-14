@@ -210,9 +210,14 @@ full phase plan. Summary:
   - `docs/progress/v4_t_bf866856-df0.redacted.json`
 - v3 lessons: `docs/LESSONS_LEARNED.md` (A–BJ). Lessons AB / AC / AD /
   AE / AM / AT survive as legacy/adapter-only per v3-only appendix.
-- v3 prior code (will move to `legacy/v3-bridge/` post-Phase 5):
+- v3 prior code: moved to `legacy/v3-bridge/` during Phase 2 pre-commit
+  cleanup (room `t_c9edc573-b36`). Files formerly at
   `skill/scripts/bridge.mjs`, `skill/scripts/launcher.mjs`,
-  `skill/scripts/clawroomctl.mjs`.
+  `skill/scripts/clawroomctl.mjs` are now at
+  `legacy/v3-bridge/bridge.mjs`, `legacy/v3-bridge/launcher.mjs`,
+  `legacy/v3-bridge/clawroomctl.mjs` respectively, with deprecation
+  README at `legacy/v3-bridge/README.md`. Gate 10 install-shape smoke
+  enforces their absence from any installed skill payload.
 
 ## 2026 Best-Practice Anchors
 

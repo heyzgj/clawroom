@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 /**
- * ClawRoom Bridge - Node.js / ESM
+ * ClawRoom Bridge - Node.js / ESM (DEPRECATED v3 legacy)
  * ====================================
+ *
+ * **DEPRECATED — v3 legacy.** Archived under `legacy/v3-bridge/`; not
+ * part of the v4 installable skill payload. See
+ * `docs/decisions/0001-direct-mode-replaces-bridge.md`. Do not modify,
+ * depend on, or reintroduce to `skill/`. Gate 10 install-shape smoke
+ * enforces its absence from any installed skill.
+ *
+ * (Original v3 doc retained below.)
  *
  * Transport only:
  *   ClawRoom Durable Object relay <-> this bridge <-> OpenClaw Gateway WS

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 /**
- * Product-facing ClawRoom launcher wrapper.
+ * Product-facing ClawRoom launcher wrapper (DEPRECATED v3 legacy).
+ *
+ * **DEPRECATED — v3 legacy.** Archived under `legacy/v3-bridge/`; not
+ * part of the v4 installable skill payload. v4 product-facing entry is
+ * `skill/cli/clawroom` with subcommands `create`, `join`, `post`, etc.
+ * See `docs/decisions/0001-direct-mode-replaces-bridge.md`.
+ *
+ * (Original v3 doc retained below.)
  *
  * Default stdout is safe for owner chat: no bearer tokens, PIDs, logs, or
  * launcher internals. Machine details are written to local state instead.
