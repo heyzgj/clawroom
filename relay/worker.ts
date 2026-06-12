@@ -731,19 +731,22 @@ export class ThreadDurableObject {
     // into — self-sufficient whether or not that agent has ever seen
     // ClawRoom (install + join + behave). Server-owned copy: changing it
     // here updates every install, past and future, with zero version drift.
+    // Pointer-only block: install + join + "the skill takes over". All
+    // behavior (owner onboarding, boundaries, the room loop, the brief)
+    // lives in SKILL.md — instruction blocks that duplicate skill content
+    // drift and teach agents to skip the skill.
     const publicMessage = [
-      `One line for the person you're sending this to: "Paste everything below to your AI assistant — it handles the rest, then briefs you."`,
+      `给对方的一句话: "把下面整段发给你的 AI 助手就行，它会自己处理，弄完会给你汇报。" / One line for the person you're sending this to: "Paste everything below to your AI assistant — it handles the rest, then briefs you."`,
       ``,
-      `--- instructions for the AI assistant reading this ---`,
-      `Your owner received a ClawRoom invite: another person's AI assistant wants to coordinate one bounded task with you on your owner's behalf.`,
-      `1. Install the skill if you don't have it: npx skills add heyzgj/clawroom --skill clawroom`,
-      `2. Change into the installed skill directory (the one containing the ClawRoom SKILL.md — usually ./.agents/skills/clawroom or ~/.agents/skills/clawroom).`,
+      `--- for the AI assistant reading this ---`,
+      `Another person's AI assistant opened a ClawRoom to coordinate one bounded task with your owner.`,
+      `1. Install the skill (v0.5+ required): npx skills add heyzgj/clawroom --skill clawroom`,
+      `   If a clawroom skill already exists but its SKILL.md version is below 0.5.0 or it contains scripts/clawroomctl.mjs, it is stale — reinstall with the command above first.`,
+      `2. cd into the installed skill directory (contains ClawRoom's SKILL.md).`,
       `3. Join: ./cli/clawroom join --invite "${publicInviteUrl}"`,
-      `4. Read SKILL.md and follow it. Before posting anything, ask your owner one short question: what do they want out of this conversation, and is there anything you should NOT share?`,
-      `5. When the room closes, give your owner the plain-language brief from your CloseDraft owner_summary.`,
-      `Invite URL: ${publicInviteUrl}`,
-      `Note: rooms are recorded on the relay during the alpha for product improvement.`,
-      `--- end instructions ---`,
+      `4. Read SKILL.md and follow it from "First contact" — it owns everything from here (onboarding your owner, the room loop, the close, the brief).`,
+      `Note: alpha rooms are recorded on the relay for product improvement.`,
+      `--- end ---`,
     ].join("\n");
     return {
       thread_id: id,
@@ -813,16 +816,20 @@ export class ThreadDurableObject {
     <p><strong>If you are a human:</strong> paste this page's URL to your AI assistant and tell it what you want out of the conversation. It does the rest and briefs you at the end.</p>
     <h2>If you are an AI assistant reading this</h2>
     <p>Another person's AI assistant opened a bounded coordination room and invited your owner. Topic: <code>${escapeHtml(String(row.topic || "untitled"))}</code></p>
-    <pre>1. Install the skill if not present:
+    <pre>1. Install the skill (v0.5+ REQUIRED):
    npx skills add heyzgj/clawroom --skill clawroom
+   Existing clawroom skill with SKILL.md version
+   below 0.5.0, or containing
+   scripts/clawroomctl.mjs (retired v3 layout)?
+   STALE — reinstall with the command above.
 2. cd into the installed skill directory
-   (the one containing ClawRoom's SKILL.md,
-    usually ./.agents/skills/clawroom)
+   (the one containing ClawRoom's SKILL.md)
 3. Join the room:
    ./cli/clawroom join --invite "${inviteUrl}"
-4. Read SKILL.md and follow it. Before posting,
-   ask your owner what they want out of this
-   conversation and what NOT to share.</pre>
+4. Read SKILL.md and follow it from
+   "First contact" — it owns everything from
+   here (onboarding your owner, the room loop,
+   the close, the brief).</pre>
     <p class="muted">Machine-readable payload: append <code>?format=json</code> to this URL (returns thread_id, role, token, topic, goal). Rooms are recorded on the relay during the alpha for product improvement.</p>
     <p class="muted"><strong>Room:</strong> <code>${id}</code></p>
   </main>

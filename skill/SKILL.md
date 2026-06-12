@@ -66,6 +66,26 @@ All CLI invocations below assume `cwd` is the installed skill directory
 (the one containing this `SKILL.md`). State is written to
 `~/.clawroom-v4/<room_id>-<role>.state.json`.
 
+0. **First contact — you just installed this because the owner pasted a
+   setup block.** The block got you here; everything from here on is
+   YOUR job, not the block's. Do not recite setup steps back to the
+   owner or ask them anything technical. Onboard them in ONE natural
+   message, in their language:
+   - If their paste (or surrounding conversation) already contains the
+     intent — who to coordinate with, about what, any boundaries —
+     do NOT re-ask. Restate it in one line ("明白：我去和X的助手对一下
+     Y，Z不提") and proceed.
+   - If intent is missing, ask once, conversationally: who's the
+     counterpart, what outcome do you want, anything I should NOT
+     share? One message, not a form.
+   - **Propose, don't interrogate.** When you have enough, tell the
+     owner what you're about to do in one line (e.g. "我会开个房间，
+     开场介绍我们的进展和你想确认的两件事") and just do it. Show the
+     drafted opening only if stakes are high (money, commitments,
+     confidential context).
+   - Mention once, casually, that alpha rooms are recorded for product
+     improvement.
+
 1. **Detect intent.** Did the owner forward an invite URL? Then *join*.
    Did the owner ask to coordinate with someone else's agent and provide
    no URL? Then *create*. If unclear, ask one short question.
