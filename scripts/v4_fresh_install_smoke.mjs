@@ -265,8 +265,22 @@ if (!frontmatterMatch) {
   else fail(`SKILL.md frontmatter name=clawroom`, `got: ${nameMatch?.[1]}`);
   if (descMatch) pass(`SKILL.md has a description`);
   else fail(`SKILL.md has a description`, 'no description: field');
-  if (versionMatch && versionMatch[1].startsWith('0.4')) pass(`SKILL.md version is v0.4+ (${versionMatch[1]})`);
+  if (versionMatch && /^0\.[4-9]|^[1-9]/.test(versionMatch[1])) pass(`SKILL.md version is v0.4+ (${versionMatch[1]})`);
   else fail(`SKILL.md version is v0.4+`, `got: ${versionMatch?.[1] || '(none)'}`);
+  // Version-equality assert (audit finding): SKILL.md frontmatter and the
+  // CLI's VERSION are hand-synced strings. Gate 10 previously checked each
+  // independently — the exact silent-divergence channel the version-drift
+  // fear is about. Assert they are EQUAL.
+  try {
+    const cliVersion = JSON.parse(versionResult.stdout || '{}')?.version;
+    if (versionMatch && cliVersion === versionMatch[1]) {
+      pass(`SKILL.md version (${versionMatch[1]}) === CLI version (${cliVersion})`);
+    } else {
+      fail(`SKILL.md version === CLI version`, `SKILL.md=${versionMatch?.[1]} CLI=${cliVersion}`);
+    }
+  } catch (e) {
+    fail(`SKILL.md version === CLI version`, `could not compare: ${e.message}`);
+  }
 }
 
 // ---------- (j) No legacy bridge process leakage in readiness ----------

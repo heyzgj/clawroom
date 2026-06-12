@@ -1,12 +1,15 @@
 ---
 name: clawroom
 description: >-
-  Coordinate with another owner's agent in a bounded room and close with a
-  clear, structured agreement. Use when the owner asks to start, join, or
-  continue a room with another person's agent; when an invite URL arrives;
-  or when an agent-to-agent task needs owner approval mid-conversation.
+  Coordinate with another person's AI agent in a bounded room and close with
+  a clear, structured agreement each owner can read. Use when the owner asks
+  you to sync, align, 勾兑, or coordinate with someone else's agent; to let
+  the two agents "talk first" and brief their humans before (or instead of)
+  a meeting; when a ClawRoom invite URL arrives; when the owner forwards a
+  pasted instruction block mentioning ClawRoom; or when an agent-to-agent
+  task needs owner approval mid-conversation.
 metadata:
-  version: "0.4.0"
+  version: "0.5.0"
   relay: "https://api.clawroom.cc"
   openclaw:
     requires:
@@ -51,6 +54,11 @@ Three things this skill is **not**:
   [references/owner-context.md](references/owner-context.md).
 - For failure modes, owner-approval edge cases, and the six close-reject
   conditions, load [references/gotchas.md](references/gotchas.md).
+- For pre-meeting sync rooms — "让我们的 agent 先聊/勾兑一下", "have your
+  agent talk to mine first, then brief me" — load
+  [references/sync-playbook.md](references/sync-playbook.md). It covers
+  what a good sync exchanges, what stays confidential by default, the
+  chunk-and-ack protocol for long context, and the brief template.
 
 ## Quick pipeline
 
@@ -73,17 +81,18 @@ All CLI invocations below assume `cwd` is the installed skill directory
    in state via `ask-owner` (for exceptions) and in the CloseDraft
    (when closing).
 
-3a. **Create branch — only if you have relay access.** Before invoking
-    `create`, check that EITHER a `--create-key` value is available OR
-    the `CLAWROOM_CREATE_KEY` env var is set OR the owner has supplied
-    a `--relay` URL pointing at a self-hosted relay they control. If
-    none of those is true, **stop and tell the owner**: "I can join
-    rooms invited to you, but I can't create a hosted room until relay
-    access is configured." Do **not** ask the owner to paste a secret
-    into chat.
+3a. **Create branch.** The hosted relay (`api.clawroom.cc`) is in open
+    alpha — creating a room needs no key or signup. Just create. (If a
+    relay ever answers `401 create_key_required`, it is a private relay:
+    tell the owner "that relay needs access configured" and do **not**
+    ask them to paste a secret into chat. A `--create-key` flag or the
+    `CLAWROOM_CREATE_KEY` env var covers private relays when the
+    runtime has one configured. Rooms on the hosted relay are recorded
+    during the alpha for product improvement — mention this to the
+    owner the first time you create one.)
 
-    With access available, use the **atomic create+opening form** so
-    you cannot leave the room empty:
+    Use the **atomic create+opening form** so you cannot leave the
+    room empty:
     ```bash
     ./cli/clawroom create \
       --topic 'TOPIC' \

@@ -68,9 +68,13 @@ function validateRoomState(raw) {
  * @param {string} [args.guest_token]  - REQUIRED when role==='guest'; rejected when role==='host'
  * @param {string} [args.topic]
  * @param {string} [args.goal]
+ * @param {string} [args.relay] - relay origin this room lives on. Persisted so
+ *   every subsequent post/poll/watch/close targets the SAME relay the room
+ *   was created/joined on — without this, BYO-relay rooms silently fall
+ *   back to the hosted default after join and 404.
  * @returns {RoomState}
  */
-export function initState({ room_id, role, host_token, guest_token, topic, goal }) {
+export function initState({ room_id, role, host_token, guest_token, topic, goal, relay }) {
   if (role === 'host' && guest_token) {
     throw new Error('initState: host state cannot persist guest_token (invariant 17 — role custody non-transferable)');
   }
@@ -95,6 +99,7 @@ export function initState({ room_id, role, host_token, guest_token, topic, goal 
     last_seen_at: nowIso(),
     topic,
     goal,
+    ...(relay ? { relay } : {}),
     ...(role === 'host' ? { host_token } : { guest_token }),
   };
   writeState(state);

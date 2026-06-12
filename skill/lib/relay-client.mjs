@@ -49,6 +49,12 @@ class RelayError extends Error {
 function classifyStatus(status) {
   if (FATAL_RELAY_STATUSES.has(status)) return { fatal: true, retriable: false };
   if (RETRIABLE_RELAY_STATUSES.has(status)) return { fatal: false, retriable: true };
+  // 409 not_your_turn is a NORMAL race (peer posted while we composed),
+  // not a fatal error. Not auto-retriable either — the correct move is
+  // poll-then-recompose, which only the caller can do. Surfaced as its
+  // own case so the CLI can exit 7 with poll-first guidance instead of
+  // "fatal, don't retry, tell the owner".
+  if (status === 409) return { fatal: false, retriable: false };
   if (status >= 500) return { fatal: false, retriable: true };
   if (status >= 400) return { fatal: true, retriable: false };
   return { fatal: false, retriable: false };
@@ -457,6 +463,15 @@ export function resolveInvite(url) {
   const s = String(url || '');
   const m = /\/i\/([^/?#]+)\/([^/?#]+)/.exec(s);
   if (!m) throw new Error('resolveInvite: not a clawroom invite URL');
+  // Chat apps glue closing punctuation onto pasted URLs (。）」』、，english
+  // ).,;!? etc). The invite code is [A-Za-z0-9-]; strip anything after the
+  // last valid code character so "…/CR-ABC。" still resolves. Message-is-
+  // the-product makes this a front-door path, not an edge case.
+  const codeMatch = /^[A-Za-z0-9_-]+/.exec(m[2]);
+  if (!codeMatch) throw new Error('resolveInvite: invite code is empty after trimming');
+  const inviteCode = codeMatch[0];
+  const threadMatch = /^[A-Za-z0-9_-]+/.exec(m[1]);
+  if (!threadMatch) throw new Error('resolveInvite: thread id is empty after trimming');
   let origin = '';
   try {
     origin = new URL(s).origin;
@@ -464,9 +479,9 @@ export function resolveInvite(url) {
     throw new Error(`resolveInvite: invite URL is not a valid URL: ${s}`);
   }
   return {
-    thread_id: m[1],
-    invite_code: m[2],
-    invite_url: s,
+    thread_id: threadMatch[0],
+    invite_code: inviteCode,
+    invite_url: `${origin}/i/${threadMatch[0]}/${inviteCode}`,
     relay: origin,
   };
 }

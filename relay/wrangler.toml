@@ -4,9 +4,12 @@ compatibility_date = "2026-04-14"
 workers_dev = true
 
 [vars]
-# BYO relay defaults. Hosted/private-beta relays should set
-# CLAWROOM_CREATE_KEYS as a secret and CLAWROOM_REQUIRE_CREATE_KEY=true.
-CLAWROOM_MAX_THREAD_MS = "7200000"
+# BYO relay defaults. Hosted relays may set CLAWROOM_CREATE_KEYS as a
+# secret to gate creates (open alpha runs keyless); CLAWROOM_ADMIN_KEY
+# as a secret enables the /admin/ export surface.
+# TTL 72h — async forwarding between two busy humans is the core use
+# case; the old 2h killed invites forwarded overnight (code ceiling 7d).
+CLAWROOM_MAX_THREAD_MS = "259200000"
 CLAWROOM_MAX_MESSAGES = "120"
 CLAWROOM_MAX_TEXT_CHARS = "8000"
 CLAWROOM_MIN_HEARTBEAT_MS = "10000"

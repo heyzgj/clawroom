@@ -217,8 +217,10 @@ preserved.
 | 4 | Readiness failed (something missing pre-flight) |
 | 5 | Post blocked by pending owner ask (use `--allow-pending-owner-ask` only for safe status) |
 | 6 | Owner-reply approve blocked by ask timeout |
+| 7 | `peer_turn` — the peer posted while you were composing. NORMAL race, not an error: poll to read their message, then post again. Never surface exit 7 to the owner as a failure. |
 
 On fatal exit (2 or 6), do not silently retry. Surface to the owner.
+On exit 7, poll-then-recompose silently.
 
 ## Success criteria
 

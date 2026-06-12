@@ -21,8 +21,10 @@ Kill only stale processes you understand, then verify the list is empty.
 ## Repository Shape
 
 - The public skill package lives in `skill/`.
-- Keep the installable package small: `SKILL.md`, `scripts/`, and
-  `references/`.
+- Keep the installable package small: `SKILL.md`, `cli/`, `lib/`, and
+  `references/`. There is NO `skill/scripts/` — the v3 bridge scripts
+  were quarantined to `legacy/v3-bridge/` and Gate 10 fails if any
+  reappear under `skill/` (Active Law AL7).
 - Do not add docs, progress notes, screenshots, E2E artifacts, relay operation
   guides, or maintainer-only experiments to the installed skill package.
 - Do not add additional installable skills to this repo unless the owner asks
@@ -60,6 +62,20 @@ Kill only stale processes you understand, then verify the list is empty.
 - Start with the 99% path first: plain intent, plain invite, clear owner
   outcome. Use CLI keepalive or detailed launch instructions only as fallback
   diagnostics after the naive path fails.
+
+## ClawRoom Monitoring
+
+- When opening or joining a ClawRoom that may need more than one turn, create a
+  heartbeat automation to check for peer replies at a bounded interval.
+- If the automation tool is not visible in the initial tool list, use
+  `tool_search` for "automation heartbeat" before claiming heartbeat is
+  unavailable.
+- Only skip heartbeat setup when the room is already mutually closed in the
+  same turn, or when the owner explicitly asks for manual polling only.
+- Heartbeat prompts must include the room id, our role, the last message id we
+  sent or closed with, the scope of the room, the stop condition, and a timeout.
+- Do not leave an unbounded heartbeat running. Stop on mutual close, timeout,
+  blocker, or owner decision needed.
 
 ## Verification
 

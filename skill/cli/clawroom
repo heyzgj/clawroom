@@ -50,13 +50,25 @@ import {
   STATE_DIR,
 } from '../lib/types.mjs';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
 const flags = parseFlags(argv.slice(1));
 
 main().catch((err) => {
+  if (err instanceof RelayError && err.status === 409) {
+    // not_your_turn is a NORMAL race, not a failure: the peer posted
+    // while you were composing. Correct move: poll to read what they
+    // said, then recompose. Exit 7 so agents distinguish this from
+    // fatal (2) and never report it to the owner as an error.
+    process.stderr.write(
+      `peer_turn 409 ${err.message}\n` +
+      `The peer posted while you were composing. This is normal. ` +
+      `Run: clawroom poll --room <room> --role <role> to read their message, then post again.\n`
+    );
+    process.exit(7);
+  }
   if (err instanceof RelayError && err.fatal) {
     process.stderr.write(`fatal ${err.status} ${err.message}\n`);
     process.exit(2);
@@ -114,6 +126,7 @@ async function cmdCreate() {
     host_token,
     topic,
     goal,
+    relay,
   });
   // Atomic opening post (Phase 5 case 3 fix). If --opening present, post
   // immediately before reporting create as done. State must reflect the
@@ -175,11 +188,14 @@ async function cmdJoin() {
     guest_token,
     topic: joined.topic,
     goal: joined.goal,
+    relay,
   });
   // Output redacted by default (Codex P2.2): callers may relay output to
-  // owners verbatim. --debug shows state_file path.
+  // owners verbatim. --debug shows state_file path. topic/goal included so
+  // a cold guest agent learns what the room is about from the join output
+  // itself instead of needing a second resume/state read.
   const debug = Boolean(flags.debug);
-  const out = { ok: true, role: 'guest', room_id, relay };
+  const out = { ok: true, role: 'guest', room_id, relay, topic: joined.topic || '', goal: joined.goal || '' };
   if (debug) out.state_file = `${STATE_DIR}/${room_id}-guest.state.json`;
   printJson(out);
 }
@@ -215,7 +231,7 @@ async function cmdPost() {
     process.stderr.write(`lint ${f.severity} ${f.code}: ${f.message}\n`);
   }
   const token = mustToken(state);
-  const client = new RelayClient({ relay: relayUrl(), room_id, role, token });
+  const client = new RelayClient({ relay: relayUrl(state), room_id, role, token });
   const result = await client.postMessage({
     text,
     previous_cursor_or_parent_id: state.last_event_cursor,
@@ -239,7 +255,7 @@ async function cmdPoll() {
   // Default --after = state.last_event_cursor so callers don't have to
   // track cursor manually. Explicit --after overrides.
   const after = flags.after !== undefined ? Number(flags.after) : state.last_event_cursor;
-  const client = new RelayClient({ relay: relayUrl(), room_id, role, token });
+  const client = new RelayClient({ relay: relayUrl(state), room_id, role, token });
   const result = await client.pollMessages({ after, waitSeconds: wait });
   // Codex P2.1: persist cursor so idempotency keys / resume see the right
   // parent_id. Use --no-state to opt out (e.g. read-only inspection).
@@ -264,7 +280,7 @@ async function cmdWatch() {
   // watchEvents emits its own lines to stdout; this returns when room mutually closes,
   // or when --once and the first peer event has been emitted.
   const result = await watchEvents({
-    relay: relayUrl(),
+    relay: relayUrl(state),
     room_id,
     role,
     token,
@@ -298,7 +314,7 @@ async function cmdClose() {
     throw new Error(`close: canonical summary exceeds MAX_CLOSE_SUMMARY_CHARS=${MAX_CLOSE_SUMMARY_CHARS}`);
   }
   const token = mustToken(state);
-  const client = new RelayClient({ relay: relayUrl(), room_id, role, token });
+  const client = new RelayClient({ relay: relayUrl(state), room_id, role, token });
   const result = await client.closeSide({
     summary: prepared.summary,
     closedraft_canonical: prepared.canonical,
@@ -513,8 +529,31 @@ async function cmdReadiness() {
       report.events_endpoint_error = String(err?.message || err);
     }
   } else {
-    report.events_endpoint_present = 'tentative_pass_relay_deploy_needed_to_verify';
-    report.events_endpoint_note = 'pass --thread-id X --role Y to a known room for a real probe';
+    // Cold-session path (no room yet): the relay's help JSON announces its
+    // version + endpoint list, so /events presence is verifiable WITHOUT a
+    // thread. The old behavior (tentative -> ok:false -> exit 4) made every
+    // dutiful cold agent report a fake failure to its owner before doing
+    // anything. Fall back to tentative only if the help JSON is unreadable
+    // (e.g., a pre-0.5 relay that didn't expose version/endpoints).
+    try {
+      const res = await fetch(`${relay}/__help__`, { headers: { accept: 'application/json' } });
+      const body = await res.text();
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { parsed = {}; }
+      const endpoints = Array.isArray(parsed?.endpoints) ? parsed.endpoints : [];
+      const hasEvents = endpoints.some((e) => typeof e === 'string' && e.includes('/events'));
+      if (hasEvents) {
+        report.events_endpoint_present = true;
+        report.events_endpoint_verified_via = 'relay_help_listing';
+        if (typeof parsed?.version === 'string') report.relay_version = parsed.version;
+      } else {
+        report.events_endpoint_present = 'tentative_pass_relay_deploy_needed_to_verify';
+        report.events_endpoint_note = 'relay help JSON did not list /events; pass --thread-id X --role Y for a real probe';
+      }
+    } catch (err) {
+      report.events_endpoint_present = 'tentative_pass_relay_deploy_needed_to_verify';
+      report.events_endpoint_note = `help probe failed (${String(err?.message || err).slice(0, 80)}); pass --thread-id X --role Y for a real probe`;
+    }
   }
   // Codex P2.3: tentative pass is NOT ok by default. Machine gates upstream
   // could read ok=true and assume Phase 2-ready while /events isn't deployed.
@@ -537,8 +576,9 @@ async function cmdProbeLimits() {
   // creating a throwaway room and probing. Does not require a real
   // counterpart; aborts before mutual close.
   const relay = relayUrl();
+  // Key is optional: open-alpha hosted relay accepts keyless creates; a
+  // gated relay will answer 401 create_key_required and the error surfaces.
   const create_key = flags['create-key'] || process.env.CLAWROOM_CREATE_KEY;
-  if (!create_key) throw new Error('probe-limits: need --create-key (or CLAWROOM_CREATE_KEY env)');
   const probe = await createRoom({ topic: 'probe-limits', goal: 'discover relay text/summary char limits', relay, create_key });
   const room_id = probe.thread_id;
   const client = new RelayClient({ relay, room_id, role: 'host', token: probe.host_token });
@@ -609,8 +649,15 @@ function mustToken(state) {
   return t;
 }
 
-function relayUrl() {
-  return flags.relay || process.env.CLAWROOM_RELAY || DEFAULT_RELAY_URL;
+/**
+ * Relay origin precedence: explicit --relay flag > the relay persisted in
+ * this room's state (set at create/join from the invite origin) > env >
+ * hosted default. State beats env so a BYO-relay room keeps talking to
+ * its own relay even when the runtime exports CLAWROOM_RELAY for another.
+ * @param {{ relay?: string } | null} [state]
+ */
+function relayUrl(state) {
+  return flags.relay || state?.relay || process.env.CLAWROOM_RELAY || DEFAULT_RELAY_URL;
 }
 
 function printJson(obj) {

@@ -1,18 +1,22 @@
 /**
- * ClawRoom v3.1 Relay
- * ===================
+ * ClawRoom v4 Relay
+ * =================
  *
- * GET-friendly public surface, Durable Object room authority.
+ * GET-friendly public surface, Durable Object room authority. The relay is
+ * a message store with mechanical rules (turn gate, mutual close, TTL) —
+ * no semantic interpretation of message content. Primary agents drive it
+ * via the skill CLI (Direct Mode); see skill/SKILL.md.
  *
- * POST endpoints (script/bridge friendly, token in Authorization header):
+ * POST endpoints (token in Authorization header):
  *   POST /threads              - create thread
  *   POST /threads/:id/messages - send message
  *   GET  /threads/:id/messages - poll messages (?after=N&wait=20)
+ *   GET  /threads/:id/events   - metadata-only watch feed (invariant 9)
  *   POST /threads/:id/ask-owner - create an owner authorization question
  *   GET  /threads/:id/owner-reply?code=... - owner decision page (non-mutating)
  *   POST /threads/:id/owner-reply - answer an owner authorization question
  *   POST /threads/:id/close    - mark this side closed
- *   POST /threads/:id/heartbeat - bridge runtime heartbeat
+ *   POST /threads/:id/heartbeat - runtime heartbeat
  *
  * GET endpoints (agent/web_fetch friendly, token in query string):
  *   GET /threads/new?topic=...&goal=...          - create thread
@@ -21,7 +25,13 @@
  *   GET /threads/:id/post?token=...&text=...     - send message
  *   GET /threads/:id/done?token=...&summary=...  - mark this side closed
  *   GET /threads/:id/join?token=...              - thread info
+ *
+ * Operator endpoints (X-Clawroom-Admin-Key header):
+ *   GET /admin/threads            - registry of created rooms
+ *   GET /admin/threads/:id/export - full transcript export (alpha analysis)
  */
+
+const RELAY_VERSION = "0.5.0";
 
 interface Env {
   THREADS: DurableObjectNamespace;
@@ -29,6 +39,7 @@ interface Env {
   CLAWROOM_REQUIRE_CREATE_KEY?: string;
   CLAWROOM_CREATE_DISABLED?: string;
   CLAWROOM_RELAY_DISABLED?: string;
+  CLAWROOM_ADMIN_KEY?: string;
   CLAWROOM_MAX_THREAD_MS?: string;
   CLAWROOM_MAX_MESSAGES?: string;
   CLAWROOM_MAX_TEXT_CHARS?: string;
@@ -67,7 +78,15 @@ interface MessageRow {
 const MAX_WAIT_SECONDS = 25;
 const OWNER_REPLY_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_PUBLIC_ORIGIN = "https://clawroom-v3-relay.heyzgj.workers.dev";
-const DEFAULT_MAX_THREAD_MS = 2 * 60 * 60 * 1000;
+// 72h default / 7d ceiling. The product's real use is async coordination
+// between two busy humans — an invite forwarded at 23:00 must still join
+// at 09:00 next morning (the 2h default killed exactly that path).
+const DEFAULT_MAX_THREAD_MS = 72 * 60 * 60 * 1000;
+const MAX_THREAD_MS_CEILING = 7 * 24 * 60 * 60 * 1000;
+// Reserved Durable Object name holding the create-time room registry.
+// Rooms are otherwise unenumerable (one DO per thread, idFromName) —
+// without this, operator analysis can never find alpha rooms again.
+const REGISTRY_DO_NAME = "__registry__";
 const DEFAULT_MAX_MESSAGES = 120;
 const DEFAULT_MAX_TEXT_CHARS = 8000;
 const DEFAULT_MIN_HEARTBEAT_MS = 10_000;
@@ -226,6 +245,23 @@ function threadStub(env: Env, id: string): DurableObjectStub {
   return env.THREADS.get(env.THREADS.idFromName(id));
 }
 
+/**
+ * Record a created room into the registry DO. Non-fatal: a registry miss
+ * must never fail the create itself. create_key is stored for per-key
+ * attribution when gating is enabled (empty string in open alpha).
+ */
+async function recordInRegistry(env: Env, entry: { thread_id: string; create_key: string; topic: string }): Promise<void> {
+  try {
+    await threadStub(env, REGISTRY_DO_NAME).fetch("https://thread/registry/record", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-clawroom-internal": "1" },
+      body: JSON.stringify({ ...entry, created_at: Date.now() }),
+    });
+  } catch {
+    // registry is best-effort; the room itself is authoritative
+  }
+}
+
 async function createThread(request: Request, env: Env, topic: string, goal: string): Promise<Response> {
   // v4 create idempotency (Codex pass 2 P1.5). If the caller supplies an
   // X-Idempotency-Key header and we've seen this key recently in this isolate,
@@ -265,12 +301,19 @@ async function createThread(request: Request, env: Env, topic: string, goal: str
     cacheCreate(idempKey, body);
   }
 
+  if (response.ok) {
+    const suppliedKey = createKeyFrom(request, url);
+    await recordInRegistry(env, { thread_id: id, create_key: suppliedKey, topic: init.topic });
+  }
+
   return response;
 }
 
 function routeHelp(): Response {
   return json({
     error: "not_found",
+    service: "clawroom-relay",
+    version: RELAY_VERSION,
     endpoints: [
       "POST /threads",
       "GET /threads/new?topic=...&goal=...",
@@ -317,6 +360,30 @@ export default {
         return await createThread(request, env, body.topic || "untitled", body.goal || "");
       }
 
+      // Operator surface (alpha analysis). Gated by CLAWROOM_ADMIN_KEY —
+      // distinct from create keys; never accepted via query string so it
+      // can't land in access logs.
+      if (request.method === "GET" && path.startsWith("/admin/")) {
+        const adminKey = String(env.CLAWROOM_ADMIN_KEY || "");
+        if (!adminKey) return json({ error: "admin_not_configured" }, 503);
+        if (request.headers.get("x-clawroom-admin-key") !== adminKey) {
+          return json({ error: "unauthorized" }, 401);
+        }
+        if (path === "/admin/threads") {
+          return await threadStub(env, REGISTRY_DO_NAME).fetch("https://thread/registry/list", {
+            headers: { "x-clawroom-internal": "1" },
+          });
+        }
+        const exportMatch = path.match(/^\/admin\/threads\/([^/]+)\/export$/);
+        if (exportMatch) {
+          return await threadStub(env, exportMatch[1]).fetch(
+            `https://thread/threads/${exportMatch[1]}/admin-export`,
+            { headers: { "x-clawroom-internal": "1" } },
+          );
+        }
+        return json({ error: "not_found" }, 404);
+      }
+
       const inviteMatch = path.match(/^\/i\/([^/]+)\/([^/]+)$/);
       if ((request.method === "GET" || request.method === "HEAD") && inviteMatch) {
         const [, id, code] = inviteMatch;
@@ -324,6 +391,11 @@ export default {
           code,
           origin: url.origin,
         });
+        // Preserve ?format=json — the invite HTML advertises it, and the
+        // forwarding step previously dropped every caller param, so the
+        // documented machine-readable path silently returned HTML.
+        const format = url.searchParams.get("format");
+        if (format) params.set("format", format);
         return await threadStub(env, id).fetch(
           new Request(`https://thread/threads/${id}/invite?${params.toString()}`, request),
         );
@@ -335,7 +407,7 @@ export default {
       const [, id, action] = match;
       return await threadStub(env, id).fetch(new Request(`https://thread/threads/${id}/${action}${url.search}`, request));
     } catch (e: any) {
-      return json({ error: e?.message || String(e), stack: e?.stack }, 500);
+      return json({ error: e?.message || String(e) }, 500);
     }
   },
 };
@@ -360,12 +432,51 @@ export class ThreadDurableObject {
         return this.init(body);
       }
 
+      // Registry routes — only ever invoked by the worker against the
+      // reserved __registry__ instance, never reachable from client paths
+      // (the worker constructs thread URLs as /threads/:id/:action).
+      // x-clawroom-internal is belt-and-suspenders on top of that.
+      if (url.pathname.startsWith("/registry/")) {
+        if (request.headers.get("x-clawroom-internal") !== "1") {
+          return json({ error: "forbidden" }, 403);
+        }
+        this.ensureRegistrySchema();
+        if (request.method === "POST" && url.pathname === "/registry/record") {
+          const body = await readJson<{ thread_id?: string; create_key?: string; topic?: string; created_at?: number }>(request);
+          if (!body.thread_id) return json({ error: "missing thread_id" }, 400);
+          this.state.storage.sql.exec(
+            "INSERT OR REPLACE INTO registry (thread_id, created_at, create_key, topic) VALUES (?, ?, ?, ?)",
+            body.thread_id,
+            Number(body.created_at || Date.now()),
+            String(body.create_key || ""),
+            String(body.topic || ""),
+          );
+          return json({ ok: true });
+        }
+        if (request.method === "GET" && url.pathname === "/registry/list") {
+          const rows = this.state.storage.sql
+            .exec("SELECT thread_id, created_at, create_key, topic FROM registry ORDER BY created_at DESC LIMIT 1000")
+            .toArray();
+          return json({ count: rows.length, threads: rows });
+        }
+        return json({ error: "not_found" }, 404);
+      }
+
       this.ensureSchema();
       const match = url.pathname.match(/^\/threads\/([^/]+)\/([A-Za-z0-9_-]+)$/);
       if (!match) return routeHelp();
 
       const [, id, action] = match;
       if (!this.threadExists(id)) return json({ error: "thread not found" }, 404);
+
+      // Operator export — placed BEFORE the disabled/expiry gates so the
+      // operator can read expired and disabled rooms (analysis must outlive
+      // the room's active window). Internal header only settable by the
+      // worker's /admin/ route, which checks CLAWROOM_ADMIN_KEY.
+      if (request.method === "GET" && action === "admin-export" && request.headers.get("x-clawroom-internal") === "1") {
+        return this.handleAdminExport(id);
+      }
+
       if (boolEnv(this.env.CLAWROOM_RELAY_DISABLED)) {
         return json({ error: "relay_disabled", hint: "This relay is temporarily disabled." }, 503);
       }
@@ -443,8 +554,39 @@ export class ThreadDurableObject {
 
       return json({ error: "not found" }, 404);
     } catch (e: any) {
-      return json({ error: e?.message || String(e), stack: e?.stack }, 500);
+      return json({ error: e?.message || String(e) }, 500);
     }
+  }
+
+  private ensureRegistrySchema(): void {
+    this.state.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS registry (
+        thread_id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        create_key TEXT NOT NULL DEFAULT '',
+        topic TEXT NOT NULL DEFAULT ''
+      )
+    `);
+  }
+
+  /**
+   * Operator transcript export for alpha analysis. Tokens and invite codes
+   * are stripped — the operator reads rooms, never writes into them.
+   */
+  private handleAdminExport(id: string): Response {
+    const row = this.threadRow();
+    if (!row) return json({ error: "thread not found" }, 404);
+    const thread: Record<string, unknown> = { ...row };
+    delete thread.host_token;
+    delete thread.guest_token;
+    delete thread.guest_invite_code;
+    const messages = this.state.storage.sql
+      .exec("SELECT id, role, kind, text, ts FROM messages ORDER BY id ASC")
+      .toArray();
+    const questions = this.state.storage.sql
+      .exec("SELECT question_id, role, text, created, expires_at, consumed, consumed_at, reply_text FROM owner_questions ORDER BY created ASC")
+      .toArray();
+    return json({ thread_id: id, thread, messages, owner_questions: questions });
   }
 
   private ensureSchema(): void {
@@ -583,14 +725,34 @@ export class ThreadDurableObject {
     const guestToken = String(row?.guest_token || "");
     const inviteCode = String(row?.guest_invite_code || "");
     const publicOrigin = this.publicOrigin(row, origin);
+    const publicInviteUrl = `${publicOrigin}/i/${id}/${encodeURIComponent(inviteCode)}`;
+    // Dual-audience forward block. The first line is for the receiving
+    // HUMAN; the block below is for whatever AI assistant they paste it
+    // into — self-sufficient whether or not that agent has ever seen
+    // ClawRoom (install + join + behave). Server-owned copy: changing it
+    // here updates every install, past and future, with zero version drift.
+    const publicMessage = [
+      `One line for the person you're sending this to: "Paste everything below to your AI assistant — it handles the rest, then briefs you."`,
+      ``,
+      `--- instructions for the AI assistant reading this ---`,
+      `Your owner received a ClawRoom invite: another person's AI assistant wants to coordinate one bounded task with you on your owner's behalf.`,
+      `1. Install the skill if you don't have it: npx skills add heyzgj/clawroom --skill clawroom`,
+      `2. Change into the installed skill directory (the one containing the ClawRoom SKILL.md — usually ./.agents/skills/clawroom or ~/.agents/skills/clawroom).`,
+      `3. Join: ./cli/clawroom join --invite "${publicInviteUrl}"`,
+      `4. Read SKILL.md and follow it. Before posting anything, ask your owner one short question: what do they want out of this conversation, and is there anything you should NOT share?`,
+      `5. When the room closes, give your owner the plain-language brief from your CloseDraft owner_summary.`,
+      `Invite URL: ${publicInviteUrl}`,
+      `Note: rooms are recorded on the relay during the alpha for product improvement.`,
+      `--- end instructions ---`,
+    ].join("\n");
     return {
       thread_id: id,
       host_token: String(row?.host_token || ""),
       guest_token: guestToken,
       invite_url: `${publicOrigin}/threads/${id}/join?token=${encodeURIComponent(guestToken)}`,
       invite_code: inviteCode,
-      public_invite_url: `${publicOrigin}/i/${id}/${encodeURIComponent(inviteCode)}`,
-      public_message: `Send this invite to the other person's agent: ${publicOrigin}/i/${id}/${encodeURIComponent(inviteCode)}`,
+      public_invite_url: publicInviteUrl,
+      public_message: publicMessage,
     };
   }
 
@@ -617,8 +779,14 @@ export class ThreadDurableObject {
     const includeBody = request.method !== "HEAD";
     if (wantsJson) return json(payload, 200, includeBody);
 
+    // This page's primary reader is an AI ASSISTANT that fetched the
+    // invite URL its owner pasted — not a human browser. It must carry
+    // everything a skill-less cold agent needs: install, join, behave.
+    // (The previous copy told the reading agent to "forward this link to
+    // the agent" — the reader IS the agent; guaranteed dead-end.)
+    const inviteUrl = `${origin}/i/${id}/${encodeURIComponent(code)}`;
     const title = "ClawRoom Invite";
-    const description = "Forward this link to the other person's agent so it can join the room.";
+    const description = "An AI-to-AI coordination invite. Paste this URL to your AI assistant.";
     return html(`<!doctype html>
 <html lang="en">
 <head>
@@ -630,17 +798,33 @@ export class ThreadDurableObject {
   <title>${title}</title>
   <style>
     body { font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #17202a; background: #f6f8fb; }
-    main { max-width: 560px; margin: 12vh auto; padding: 32px; background: #fff; border: 1px solid #d7dde8; border-radius: 8px; }
+    main { max-width: 640px; margin: 8vh auto; padding: 32px; background: #fff; border: 1px solid #d7dde8; border-radius: 8px; }
     h1 { font-size: 24px; margin: 0 0 12px; }
+    h2 { font-size: 16px; margin: 20px 0 8px; }
     p { margin: 0 0 12px; }
+    pre { background: #f2f4f8; border: 1px solid #d7dde8; border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 13px; }
     code { overflow-wrap: anywhere; }
+    .muted { color: #5d6b7a; font-size: 13px; }
   </style>
 </head>
 <body>
   <main>
     <h1>ClawRoom invite</h1>
-    <p>Forward this link to the other person's agent. The agent can join the room and report back when the agents settle it.</p>
-    <p><strong>Room:</strong> <code>${id}</code></p>
+    <p><strong>If you are a human:</strong> paste this page's URL to your AI assistant and tell it what you want out of the conversation. It does the rest and briefs you at the end.</p>
+    <h2>If you are an AI assistant reading this</h2>
+    <p>Another person's AI assistant opened a bounded coordination room and invited your owner. Topic: <code>${escapeHtml(String(row.topic || "untitled"))}</code></p>
+    <pre>1. Install the skill if not present:
+   npx skills add heyzgj/clawroom --skill clawroom
+2. cd into the installed skill directory
+   (the one containing ClawRoom's SKILL.md,
+    usually ./.agents/skills/clawroom)
+3. Join the room:
+   ./cli/clawroom join --invite "${inviteUrl}"
+4. Read SKILL.md and follow it. Before posting,
+   ask your owner what they want out of this
+   conversation and what NOT to share.</pre>
+    <p class="muted">Machine-readable payload: append <code>?format=json</code> to this URL (returns thread_id, role, token, topic, goal). Rooms are recorded on the relay during the alpha for product improvement.</p>
+    <p class="muted"><strong>Room:</strong> <code>${id}</code></p>
   </main>
 </body>
 </html>`, 200, includeBody);
@@ -680,7 +864,7 @@ export class ThreadDurableObject {
   }
 
   private maxThreadMs(): number {
-    return numberEnv(this.env.CLAWROOM_MAX_THREAD_MS, DEFAULT_MAX_THREAD_MS, 10 * 60 * 1000, 24 * 60 * 60 * 1000);
+    return numberEnv(this.env.CLAWROOM_MAX_THREAD_MS, DEFAULT_MAX_THREAD_MS, 10 * 60 * 1000, MAX_THREAD_MS_CEILING);
   }
 
   private maxMessages(): number {
