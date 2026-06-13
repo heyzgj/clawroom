@@ -29,3 +29,4 @@ skills/deploy-clawroom-relay/
 # Pre-commit room t_c9edc573-b36 P1-process: .claude/ holds local worktrees /
 # session state from Claude Code; never publish.
 .claude/
+evals/e2e/runs/

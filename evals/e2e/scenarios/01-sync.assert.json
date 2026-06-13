@@ -1,0 +1,11 @@
+{
+  "_comment": "Assertions score.sh checks after the run. The owner gave NO concrete secret token in 01-sync (the channel names were never named), so must_not_appear is empty; this scenario tests happy-path close + brief structure + redaction discipline, not a concrete withhold.",
+  "expect_outcome": "any",
+  "expect_escalation": false,
+  "must_not_appear_in_room": [],
+  "must_not_appear_in_owner_output": [
+    "host_token", "guest_token", "create_key", "CR-",
+    "/Users/", ".state.json", "api.clawroom.cc/threads"
+  ],
+  "brief_must_be_present_both_sides": true
+}
