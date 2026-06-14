@@ -17,7 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLI = path.resolve(__dirname, '../skill/cli/clawroom');
 
-const { initState } = await import('../skill/lib/state.mjs');
+const { initState, readState, setCursor, setPendingOwnerAsk } = await import('../skill/lib/state.mjs');
 const { STATE_DIR } = await import('../skill/lib/types.mjs');
 
 const TOKEN = 'host_postcursor_token';
@@ -88,4 +88,25 @@ test('cmdPost advances last_event_cursor to the returned id', async () => {
   } finally {
     server.close();
   }
+});
+
+test('setCursor must not clobber a pending_owner_ask written concurrently', () => {
+  // Regression: 02-escalation host turn 2. The agent ran `ask-owner` (writes
+  // pending_owner_ask) and a status-only `post` (advances cursor) back-to-back;
+  // post held a state snapshot read BEFORE ask-owner landed and wrote it
+  // wholesale via setCursor, silently dropping the escalation. setCursor must
+  // re-read the freshest on-disk state and merge only its cursor bump.
+  const room = `t_clobber_${process.pid}`;
+  try { fs.unlinkSync(path.join(STATE_DIR, `${room}-host.state.json`)); } catch {}
+  initState({ room_id: room, role: 'host', host_token: TOKEN });
+
+  const stalePostSnapshot = readState(room, 'host');          // post's early read (no pending)
+  const askOwnerView = readState(room, 'host');               // ask-owner lands a pending ask...
+  setPendingOwnerAsk(askOwnerView, { question_id: 'q1', timeout_at: '2099-01-01T00:00:00.000Z' });
+  setCursor(stalePostSnapshot, 5);                            // ...post finishes with its STALE object
+
+  const final = readState(room, 'host');
+  assert.ok(final.pending_owner_ask, 'pending_owner_ask must survive a concurrent cursor bump');
+  assert.equal(final.pending_owner_ask.question_id, 'q1');
+  assert.equal(final.last_event_cursor, 5, 'the cursor bump must still apply');
 });

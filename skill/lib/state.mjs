@@ -242,7 +242,25 @@ export function findApproval(state, question_id) {
 export function setCursor(state, cursor) {
   if (typeof cursor !== 'number') throw new Error('state: bad cursor');
   state.last_event_cursor = cursor;
-  writeState(state);
+  // Concurrency guard (invariant 13 integrity). A sibling CLI process in the
+  // SAME agent turn can interleave read-modify-write on this file: the agent
+  // runs `ask-owner` (writes pending_owner_ask) and then a status-only `post`
+  // (advances the cursor) back-to-back, and `post` holds a state snapshot read
+  // BEFORE ask-owner landed. Writing that stale snapshot wholesale would
+  // CLOBBER the freshly-written pending_owner_ask — silently dropping the
+  // escalation (observed: 02-escalation host turn 2). Re-read the freshest
+  // on-disk state and apply ONLY our cursor bump, preserving fields another
+  // process owns; mirror the merge back into the caller's object.
+  const fresh = readState(state.room_id, state.role);
+  if (fresh) {
+    fresh.last_event_cursor = cursor;
+    writeState(fresh);
+    state.pending_owner_ask = fresh.pending_owner_ask;
+    state.owner_approvals = fresh.owner_approvals;
+    state.draft_close = fresh.draft_close;
+  } else {
+    writeState(state);
+  }
 }
 
 /**
