@@ -22,8 +22,9 @@ own without scrolling through the chat.
 - `skill/lib/` — typed JS modules the CLI depends on (relay client,
   state, close validator, watch helper, lint).
 - `skill/references/` — agent-facing detail docs (`runtime-workflow.md`,
-  `owner-context.md`, `gotchas.md`). The agent loads these only when
-  the situation calls for them.
+  `owner-context.md`, `gotchas.md`, and `sync-playbook.md` for the
+  "let our agents sync before our call" flow). The agent loads these
+  only when the situation calls for them.
 
 `relay/` is the Cloudflare Worker that hosts the room. `evals/` is the
 test suite. `docs/` keeps decisions, lessons, and progress artifacts —
