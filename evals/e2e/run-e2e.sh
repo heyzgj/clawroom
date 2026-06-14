@@ -95,6 +95,15 @@ setup_iso() { # setup_iso <side>  (idempotent per run; persists across that side
 # else a portable bg-watchdog). A stuck agent must not hang the run forever
 # with a copied auth token sitting in WORKROOT. ----
 TURN_TIMEOUT="${TURN_TIMEOUT:-600}"   # seconds per agent turn
+
+# Model + reasoning-effort knobs. Defaults reproduce the strong-model runs;
+# override to prove the weak-model floor (criterion 4), e.g.:
+#   CODEX_EFFORT=low CLAUDE_MODEL=sonnet CLAUDE_EFFORT=low GUEST_DRIVER=claude \
+#     bash evals/e2e/run-e2e.sh 01-sync
+CODEX_MODEL="${CODEX_MODEL:-gpt-5.5}"
+CODEX_EFFORT="${CODEX_EFFORT:-high}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
+CLAUDE_EFFORT="${CLAUDE_EFFORT:-xhigh}"
 run_bg_timeout() { # run_bg_timeout <outfile> <cmd...>
   local of="$1"; shift
   "$@" > "$of" 2>&1 &
@@ -118,18 +127,19 @@ fire() {
   local CH; CH="$(setup_iso "$side")"
   local out="$RUN/$side/turn${n}.log"
   local prompt; prompt="$(cat "$promptsrc" 2>/dev/null || printf '%s' "$promptsrc")"
-  log "FIRE $side/$driver turn$n ($mode, timeout ${TURN_TIMEOUT}s)"
+  local minfo; if [ "$driver" = "codex" ]; then minfo="$CODEX_MODEL/$CODEX_EFFORT"; else minfo="$CLAUDE_MODEL/$CLAUDE_EFFORT"; fi
+  log "FIRE $side/$driver[$minfo] turn$n ($mode, timeout ${TURN_TIMEOUT}s)"
   local rc=0
   if [ "$driver" = "codex" ]; then
     if [ "$mode" = "resume" ]; then
       run_bg_timeout "$out" env CODEX_HOME="$CH" sh -c 'cd "$1" && shift && codex exec "$@"' _ "$wd" \
-          -m gpt-5.5 -c model_reasoning_effort=high --ignore-user-config \
+          -m "$CODEX_MODEL" -c model_reasoning_effort="$CODEX_EFFORT" --ignore-user-config \
           -s workspace-write -c sandbox_workspace_write.network_access=true \
           -c approval_policy=never --skip-git-repo-check \
           --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" resume --last "$prompt"; rc=$?
     else
       run_bg_timeout "$out" env CODEX_HOME="$CH" sh -c 'cd "$1" && shift && codex exec "$@"' _ "$wd" \
-          -m gpt-5.5 -c model_reasoning_effort=high --ignore-user-config \
+          -m "$CODEX_MODEL" -c model_reasoning_effort="$CODEX_EFFORT" --ignore-user-config \
           -s workspace-write -c sandbox_workspace_write.network_access=true \
           -c approval_policy=never --skip-git-repo-check \
           --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" "$prompt"; rc=$?
@@ -137,11 +147,11 @@ fire() {
   elif [ "$driver" = "claude" ]; then
     if [ "$mode" = "resume" ]; then
       run_bg_timeout "$out" sh -c 'cd "$1" && shift && claude "$@"' _ "$wd" \
-          -p "$prompt" --model opus --effort xhigh --permission-mode acceptEdits \
+          -p "$prompt" --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --permission-mode acceptEdits \
           --allowedTools "Bash,Read,Write,WebFetch,Glob,Grep" --continue; rc=$?
     else
       run_bg_timeout "$out" sh -c 'cd "$1" && shift && claude "$@"' _ "$wd" \
-          -p "$prompt" --model opus --effort xhigh --permission-mode acceptEdits \
+          -p "$prompt" --model "$CLAUDE_MODEL" --effort "$CLAUDE_EFFORT" --permission-mode acceptEdits \
           --allowedTools "Bash,Read,Write,WebFetch,Glob,Grep"; rc=$?
     fi
   fi
