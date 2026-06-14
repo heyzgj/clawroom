@@ -37,9 +37,22 @@ MAX_TURNS_PER_SIDE="${MAX_TURNS_PER_SIDE:-6}"
 ADMIN_KEY="$(grep -h CLAWROOM_ADMIN_KEY "$REPO/docs/operator-admin-key.local.txt" 2>/dev/null | cut -d= -f2)"
 
 TS="$(date +%Y%m%d-%H%M%S)"
-RUN="$HERE/runs/${SCEN}-${TS}"
+RUN="$HERE/runs/${SCEN}-${TS}"          # logs/snapshots live here (gitignored)
 mkdir -p "$RUN/host" "$RUN/guest" "$RUN/snapshots"
+# Agent WORK dirs live OUTSIDE the repo. If they were under the repo (as they
+# were), a cwd-walking codex/claude would ingest the repo's AGENTS.md,
+# CLAUDE.md, skill source and LESSONS_LEARNED — the test agent reading the
+# product's own internals is exactly the maintainer-truth contamination the
+# repo warns about (BO/BP/BQ) and the cross-platform audit flagged. Putting
+# work dirs in a fresh /tmp tree makes the agent a real outsider.
+WORKROOT="$(mktemp -d -t clawroom-e2e-work)"
 echo "RUN: $RUN"
+echo "WORKROOT (outside repo): $WORKROOT"
+# Cleanup on ANY exit (early abort, error, normal) — copied auth tokens live
+# in WORKROOT and must never be left in /tmp. trap guarantees it even on the
+# early `exit 1` paths below.
+cleanup() { rm -rf "$WORKROOT" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
 
 log()  { echo "[$(date +%H:%M:%S)] $*" | tee -a "$RUN/index.log"; }
 
@@ -70,7 +83,7 @@ except: print('0 0 0 0 none')
 # Residual: codex's built-in managed connectors are identical for every user
 # (a constant, not a per-machine confound). Documented in README.
 setup_iso() { # setup_iso <side>  (idempotent per run; persists across that side's turns for resume continuity)
-  local side="$1" ch="$RUN/$side/codex-home"
+  local side="$1" ch="$WORKROOT/$side/codex-home"
   if [ ! -f "$ch/auth.json" ]; then
     mkdir -p "$ch"
     [ -f "$HOME/.codex/auth.json" ] && cp "$HOME/.codex/auth.json" "$ch/auth.json"
@@ -78,45 +91,62 @@ setup_iso() { # setup_iso <side>  (idempotent per run; persists across that side
   echo "$ch"
 }
 
-# ---- one cold/resumed agent turn, fully logged ----
+# ---- hard per-turn timeout (macOS has no `timeout`; use gtimeout if present,
+# else a portable bg-watchdog). A stuck agent must not hang the run forever
+# with a copied auth token sitting in WORKROOT. ----
+TURN_TIMEOUT="${TURN_TIMEOUT:-600}"   # seconds per agent turn
+run_bg_timeout() { # run_bg_timeout <outfile> <cmd...>
+  local of="$1"; shift
+  "$@" > "$of" 2>&1 &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 5; waited=$((waited+5))
+    if [ "$waited" -ge "$TURN_TIMEOUT" ]; then
+      echo "[HARNESS: turn killed after ${TURN_TIMEOUT}s timeout]" >> "$of"
+      kill -TERM "$pid" 2>/dev/null; sleep 3; kill -KILL "$pid" 2>/dev/null
+      return 124
+    fi
+  done
+  wait "$pid" 2>/dev/null; return $?
+}
+
+# ---- one cold/resumed agent turn, fully logged + timed ----
 # fire <side> <driver> <turn-no> <prompt-file-or-string> [resume]
 fire() {
   local side="$1" driver="$2" n="$3" promptsrc="$4" mode="${5:-cold}"
-  local wd="$RUN/$side/work"; mkdir -p "$wd"
+  local wd="$WORKROOT/$side/work"; mkdir -p "$wd"   # OUTSIDE repo (no AGENTS.md/CLAUDE.md ingest)
   local CH; CH="$(setup_iso "$side")"
   local out="$RUN/$side/turn${n}.log"
   local prompt; prompt="$(cat "$promptsrc" 2>/dev/null || printf '%s' "$promptsrc")"
-  log "FIRE $side/$driver turn$n ($mode)"
+  log "FIRE $side/$driver turn$n ($mode, timeout ${TURN_TIMEOUT}s)"
+  local rc=0
   if [ "$driver" = "codex" ]; then
-    # bash 3.2 (macOS) + set -u: expanding an empty array errors, so branch
-    # rather than splat a possibly-empty resume_args.
     if [ "$mode" = "resume" ]; then
-      ( cd "$wd" && CODEX_HOME="$CH" codex exec -m gpt-5.5 -c model_reasoning_effort=high \
-          --ignore-user-config \
+      run_bg_timeout "$out" env CODEX_HOME="$CH" sh -c 'cd "$1" && shift && codex exec "$@"' _ "$wd" \
+          -m gpt-5.5 -c model_reasoning_effort=high --ignore-user-config \
           -s workspace-write -c sandbox_workspace_write.network_access=true \
           -c approval_policy=never --skip-git-repo-check \
-          --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" \
-          resume --last "$prompt" ) > "$out" 2>&1
+          --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" resume --last "$prompt"; rc=$?
     else
-      ( cd "$wd" && CODEX_HOME="$CH" codex exec -m gpt-5.5 -c model_reasoning_effort=high \
-          --ignore-user-config \
+      run_bg_timeout "$out" env CODEX_HOME="$CH" sh -c 'cd "$1" && shift && codex exec "$@"' _ "$wd" \
+          -m gpt-5.5 -c model_reasoning_effort=high --ignore-user-config \
           -s workspace-write -c sandbox_workspace_write.network_access=true \
           -c approval_policy=never --skip-git-repo-check \
-          --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" \
-          "$prompt" ) > "$out" 2>&1
+          --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" "$prompt"; rc=$?
     fi
   elif [ "$driver" = "claude" ]; then
     if [ "$mode" = "resume" ]; then
-      ( cd "$wd" && claude -p "$prompt" --model opus --effort xhigh \
-          --permission-mode acceptEdits \
-          --allowedTools "Bash,Read,Write,WebFetch,Glob,Grep" --continue ) > "$out" 2>&1
+      run_bg_timeout "$out" sh -c 'cd "$1" && shift && claude "$@"' _ "$wd" \
+          -p "$prompt" --model opus --effort xhigh --permission-mode acceptEdits \
+          --allowedTools "Bash,Read,Write,WebFetch,Glob,Grep" --continue; rc=$?
     else
-      ( cd "$wd" && claude -p "$prompt" --model opus --effort xhigh \
-          --permission-mode acceptEdits \
-          --allowedTools "Bash,Read,Write,WebFetch,Glob,Grep" ) > "$out" 2>&1
+      run_bg_timeout "$out" sh -c 'cd "$1" && shift && claude "$@"' _ "$wd" \
+          -p "$prompt" --model opus --effort xhigh --permission-mode acceptEdits \
+          --allowedTools "Bash,Read,Write,WebFetch,Glob,Grep"; rc=$?
     fi
   fi
-  log "  exit $? — $(wc -l < "$out") lines -> $out"
+  [ "$rc" = "124" ] && log "  TIMEOUT ($TURN_TIMEOUT s) — $(wc -l < "$out") lines -> $out" \
+                    || log "  exit $rc — $(wc -l < "$out") lines -> $out"
 }
 
 # ---- extract what the host surfaced to forward (= the human's copy) ----
@@ -213,7 +243,33 @@ snap "$THREAD" "99-final"
 log "=== DONE: closed=$closed host_closed=$hc guest_closed=$gc msgs=$n ==="
 log "transcript + all turn logs + snapshots in: $RUN"
 
+# Save per-role state INTO the run dir so the run is self-scoreable forever
+# (the next run's scrub wipes ~/.clawroom-v4; a recorded run must not depend
+# on live state that gets destroyed — that made an earlier "PASS"
+# unreproducible). Tokens redacted; the validators only need
+# pending_owner_ask / owner_approvals / structure, not the token.
+mkdir -p "$RUN/state"
+for f in "$STATE_DIR/$THREAD"-*.state.json; do
+  [ -e "$f" ] || continue
+  python3 - "$f" "$RUN/state/$(basename "$f")" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+for k in ("host_token","guest_token"):
+    if k in d: d[k]="[redacted]"
+json.dump(d, open(sys.argv[2],"w"), ensure_ascii=False, indent=2)
+PY
+done
+log "saved redacted state snapshots to $RUN/state/"
+
 # Content gate: closed=1 is necessary, not sufficient. score.sh decides
-# PASS/FAIL/STALL on brief validity + leak + withheld-fact + escalation.
+# PASS/FAIL/STALL on brief validity + CloseDraft validation + leak +
+# withheld-fact + escalation. Score against the SAVED state (self-contained).
 log "=== scoring (content assertions, not just close-state) ==="
-bash "$HERE/score.sh" "$RUN" "$SCEN" 2>&1 | tee -a "$RUN/index.log"
+CLAWROOM_STATE_DIR="$RUN/state" bash "$HERE/score.sh" "$RUN" "$SCEN" 2>&1 | tee -a "$RUN/index.log"
+SCORE_RC="${PIPESTATUS[0]}"
+
+cleanup; trap - EXIT INT TERM
+log "cleaned WORKROOT"
+# Propagate score.sh's verdict as the script's exit code (0=PASS, 1=FAIL,
+# 2=STALL) so automation/CI can't read a failing score as success.
+exit "$SCORE_RC"

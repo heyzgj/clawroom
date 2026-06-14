@@ -76,10 +76,14 @@ and figures out join itself, like a real cold agent would.
 
 ## Known fidelity limits (state them in any writeup)
 
-- Same machine, shared `~/.clawroom-v4` state dir (room state is
-  role-keyed so host/guest never collide) — not two different machines
-  on different networks. The cross-*owner* axis is real; the
-  cross-*device* axis is not exercised here.
+- Same machine, one user account, ONE copied Codex auth token shared by
+  both sides. So **cross-*role* is real** (host vs guest tokens, custody
+  fence) but **cross-*owner* identity is simulated** — there is no second
+  account/principal. Room state is role-keyed (`~/.clawroom-v4`,
+  host/guest never collide) and each agent's work dir + `CODEX_HOME` are
+  isolated outside the repo, but a true two-different-humans /
+  two-accounts / two-devices / two-networks test is the real alpha, not
+  this harness.
 - `codex×codex` by default — cross-vendor (`codex×claude`) needs the
   claude CLI logged in.
 - The escalation scenario's owner-answer step is the one place a human

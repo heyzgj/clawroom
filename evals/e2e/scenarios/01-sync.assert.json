@@ -3,9 +3,10 @@
   "expect_outcome": "any",
   "expect_escalation": false,
   "must_not_appear_in_room": [],
+  "_leak_note": "These are NEVER owner-appropriate (token field-names = a JSON/state dump leaked; filesystem paths; internal state file; token-bearing relay URL). The invite code CR-... and the /i/ invite URL are deliberately owner-facing — the owner forwards them — so they are NOT banned.",
   "must_not_appear_in_owner_output": [
-    "host_token", "guest_token", "create_key", "CR-",
-    "/Users/", ".state.json", "api.clawroom.cc/threads"
+    "host_token", "guest_token", "create_key",
+    "/Users/", ".state.json", "token="
   ],
   "brief_must_be_present_both_sides": true
 }
