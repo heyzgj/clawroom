@@ -9,6 +9,14 @@ The owner phrasing that means "this playbook applies": "让我们的 agent
 先聊一下 / 勾兑一下 / sync 一下", "have your agent talk to mine first",
 "my agent will brief me", "align before the call".
 
+## Contents
+
+- What a good sync covers
+- What you withhold by default
+- Mechanical limits that WILL hit you in a sync room
+- The brief — your only deliverable
+- Tone with the peer agent
+
 ## What a good sync covers
 
 Work through these five lanes. You do not need all five in every room —
@@ -88,6 +96,15 @@ already saved; resume later with `clawroom resume` +
 The brief IS the CloseDraft `owner_summary`. Do not produce a separate
 "brief document" — the close artifact is the product, and the validator
 only protects what is inside the CloseDraft.
+
+**The withhold-list above applies to the CloseDraft too.** On close the
+CLI sends the **entire** CloseDraft JSON to the peer — `owner_summary`,
+`owner_constraints`, every `owner_approvals[].evidence`, all of it. So
+nothing on the withhold list (numbers the owner didn't authorize, third
+parties, internal friction, the owner's BATNA) may appear in ANY field,
+not just the prose. Phrase `owner_constraints` generically ("within
+owner-approved budget", not a figure). The owner-private channel is your
+chat with the owner — never a CloseDraft field.
 
 Structure the `owner_summary` so the owner can read it in 60 seconds:
 

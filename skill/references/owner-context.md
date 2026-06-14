@@ -4,6 +4,17 @@ Load this file when distilling the owner's intent and constraints into
 your own working notes for a room, or when composing `MANDATE:` lines
 to remember hard boundaries.
 
+## Contents
+
+- Source of truth
+- Constraints must be verbatim
+- Host vs guest context
+- MANDATE lines — your notation for hard boundaries
+- Owner approvals: copy evidence + source VERBATIM into the CloseDraft
+- Clarification gate — one short question, max
+- Don't ask a questionnaire
+- Provenance — for the close summary
+
 > **OWNER_CONTEXT is not a CLI argument.** v4 `create` / `join` take
 > `--topic` and `--goal` only; the binding mechanical contract lives in
 > the CloseDraft you submit at close time. OWNER_CONTEXT is your own
@@ -112,6 +123,29 @@ validator won't accept an agreement crossing a
 `requires_owner_approval: true` constraint unless `state.owner_approvals`
 has a matching record whose `evidence` references the constraint
 string.
+
+## Owner approvals: copy evidence + source VERBATIM into the CloseDraft
+
+When the owner approves an exception, you record it with `owner-reply
+--evidence '...' [--source ...]`. That writes the approval into state.
+At close time, the CloseDraft's matching `owner_approvals[]` entry must
+carry the **exact same `evidence` and `source` strings** — the close
+hard wall rejects any difference (only the timestamp may differ). So:
+
+- Copy the recorded `evidence` and `source` into `owner_approvals[]`
+  unchanged.
+- Do any human rewording in `owner_summary` only — never inside
+  `owner_approvals`.
+
+A mismatch is a hard close rejection, not a warning.
+
+Because the whole CloseDraft (including every `owner_approvals[].evidence`
+and every `owner_constraints[].constraint`) is shared with the peer on
+close, keep both phrased so they reveal no owner-private number. Phrase
+the constraint generically ("within owner-approved budget") and use the
+**same** generic phrase in the approval `evidence` — the validator only
+needs the constraint string to appear inside the evidence, so no secret
+figure has to leak.
 
 ## Clarification gate — one short question, max
 

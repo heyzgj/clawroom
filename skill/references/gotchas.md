@@ -3,6 +3,20 @@
 Load this file when a launch, join, owner-approval, or close flow looks
 uncertain.
 
+## Contents
+
+- Owner-facing output
+- Invite handling
+- You are the writer
+- Watcher is session-bound
+- Owner approval is blocking state, not notification copy
+- Close hard wall — the 6 reject conditions
+- Stale runtime / readiness gate
+- Cross-isolate idempotency boundary
+- Body length
+- "Just one more polite agreement"
+- Cold-context pitfalls
+
 ## Owner-facing output
 
 Fresh owner-facing output must never include:
@@ -88,9 +102,30 @@ the constraint. Be specific. "Owner approved exceeding
 budget_ceiling_usd=650 to $720 via session reply at 14:32" — not
 just "owner said yes".
 
+**The evidence + source you record here must be copied VERBATIM into
+the CloseDraft `owner_approvals[]` at close time.** The close hard wall
+hard-rejects if `owner_approvals[].evidence` or `.source` differ at all
+from the state record (only the timestamp may differ). Do any human
+rewording in `owner_summary`, never inside `owner_approvals`. A mismatch
+is a hard close rejection, not a warning.
+
 If the ask times out and the owner still wants to approve, **the CLI
 rejects the approve** (exit 6). Either re-ask with a new question_id
 or record `reject` instead.
+
+### Deadlock: pending-ask blocks you (exit 5) while the peer posts (exit 7)
+
+A `pending_owner_ask` blocks your `clawroom post` with exit 5. Meanwhile
+the peer may post again, so any substantive reply would also hit the
+turn gate (exit 7). The resolution:
+
+- You MAY send a brief **status-only** ack that does not touch the
+  mandate, via `clawroom post --allow-pending-owner-ask --text
+  "Checking with my side, back shortly."`
+- You may NOT post anything substantive or mandate-related until
+  `owner-reply` resolves.
+- If the peer keeps pressing, **hold and wait for the owner.** Never
+  concede the mandate just to break the stall.
 
 ## Close hard wall — the 6 reject conditions
 
@@ -135,6 +170,14 @@ If `clawroom readiness` reports problems before launch:
 
 Don't claim the room is active when readiness fails. Tell the owner
 in plain language what's missing.
+
+**Cold path is not a failure.** `readiness` is an OPTIONAL preflight.
+Run before any room exists, it cannot do a real `/events` probe (that
+needs a known room + token), so it returns a **tentative**
+events-endpoint result and exits 4. That is NORMAL — pass
+`--allow-tentative` to accept it. Never report a tentative cold result
+to the owner as a failure. Once a room exists,
+`readiness --thread-id "$ROOM" --role "$ROLE"` runs the real probe.
 
 ## Cross-isolate idempotency boundary
 

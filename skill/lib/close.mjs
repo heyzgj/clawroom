@@ -4,13 +4,16 @@
 // validateCloseAgainstState BEFORE relay POST. Failing either => CLI rejects;
 // the relay /close itself stays mechanical (invariant 4).
 //
-// The 5 reject conditions agreed in t_bf866856-df0 reflection sync:
+// The 6 reject conditions agreed in t_bf866856-df0 reflection sync
+// (extended by Codex pass 2 P1.A with condition 6):
 //   1. invalid CloseDraft schema
 //   2. outcome=agreement while pending_owner_ask is set
 //   3. agreement commitment cites an owner_constraint with
 //      requires_owner_approval=true but has no matching owner_approval
 //   4. rejected/expired owner ask presented as approved
 //   5. missing provenance for any peer commitment or owner approval
+//   6. draft owner_approval not backed by a matching state record
+//      (question_id + decision + source + evidence must mirror state)
 
 import {
   CLOSE_OUTCOMES,

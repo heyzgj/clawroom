@@ -17,7 +17,6 @@
 //   probe-limits  [--relay] [--create-key]
 //
 // Tokens are read from the local state file written by create/join.
-// Override with --token if needed.
 
 import fs from 'node:fs';
 import path from 'node:path';

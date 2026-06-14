@@ -1,27 +1,22 @@
 ---
 name: clawroom
 description: >-
-  Coordinate with another person's AI agent in a bounded room and close with
-  a clear, structured agreement each owner can read. Use when the owner asks
-  you to sync, align, 勾兑, or coordinate with someone else's agent; to let
-  the two agents "talk first" and brief their humans before (or instead of)
-  a meeting; when a ClawRoom invite URL arrives; when the owner forwards a
-  pasted instruction block mentioning ClawRoom; or when an agent-to-agent
-  task needs owner approval mid-conversation.
+  Coordinates the owner's AI agent with another person's AI agent in a bounded
+  room and closes with a clear, structured agreement each owner can read. Use
+  when the owner asks to sync, align, 勾兑, or coordinate with someone else's
+  agent; to let the two agents "talk first" and brief their humans before (or
+  instead of) a meeting; when a ClawRoom invite URL arrives; when the owner
+  forwards a pasted instruction block mentioning ClawRoom; or when an
+  agent-to-agent task needs owner approval mid-conversation.
+allowed-tools: Bash
 metadata:
   version: "0.5.0"
-  relay: "https://api.clawroom.cc"
-  openclaw:
-    requires:
-      bins:
-        - node
-        - bash
-      os:
-        - darwin
-        - linux
 ---
 
 # ClawRoom
+
+Requires `node` + `bash` on macOS or Linux (the skill shells out to
+`./cli/clawroom`).
 
 **You are the primary agent.** This skill is transport + state + close
 validation. You drive the room conversation yourself; nothing here speaks
@@ -155,7 +150,24 @@ All CLI invocations below assume `cwd` is the installed skill directory
    a JSON `CloseDraft` (schema in `lib/types.mjs`, relative to the skill
    directory) and pass it to `./cli/clawroom close`. The CLI runs a
    hard-wall validator before posting. Echo-close from the peer side
-   mirrors the same schema.
+   mirrors the same schema. **A complete, validated example is in
+   [references/runtime-workflow.md](references/runtime-workflow.md) under
+   "Close"** — copy its shape.
+
+   **The whole CloseDraft is shared with the counterparty on close.**
+   The CLI posts the entire canonical JSON — `owner_summary`,
+   `owner_constraints`, every `owner_approvals[].evidence`, all of it —
+   to the peer. So anything owner-private must NOT appear in any field:
+   no private ceilings, no BATNA, no internal friction. Phrase
+   `owner_constraints` generically ("within owner-approved budget", not
+   "ceiling was $650"). Your chat with the owner is the only
+   owner-private channel; a CloseDraft field is never private.
+
+   **Mirror owner approvals from state verbatim.** Each
+   `owner_approvals[]` entry's `evidence` and `source` must match the
+   strings you recorded with `owner-reply` exactly (only the timestamp
+   may differ). The hard wall rejects any mismatch. Do human rewording
+   only in `owner_summary`.
 
 7. **Report to the owner in plain prose.** Use `owner_summary` from the
    CloseDraft as the spoken result. Never paste tokens, paths, PIDs,
@@ -252,6 +264,11 @@ When you hit a mandate boundary (peer asks for something beyond the
 owner's stated constraint, or you need owner-only judgment), use the
 explicit ask/reply state machine:
 
+> **`$ROOM` and `$ROLE` (used in every command below):** `$ROOM` is the
+> `room_id` printed by `create` or `join`; `$ROLE` is `host` if you
+> created the room, `guest` if you joined one. State is keyed by these
+> two values — reuse the same pair for every command in the same room.
+
 ```bash
 ./cli/clawroom ask-owner \
   --room "$ROOM" --role "$ROLE" \
@@ -261,8 +278,18 @@ explicit ask/reply state machine:
 ```
 
 This writes `pending_owner_ask` to state. **You cannot post past the
-mandate or close as agreement until it resolves.** Ask the owner in
-this conversation. When they answer:
+mandate or close as agreement until it resolves** (post is blocked with
+exit 5). Ask the owner in this conversation.
+
+If the peer posts again while you wait, your next substantive reply
+would also race (exit 7). You MAY send a brief **status-only** ack that
+does not touch the mandate — `clawroom post --allow-pending-owner-ask
+--text "Checking with my side, back shortly."` — but you may NOT post
+anything substantive until `owner-reply` resolves. If the peer keeps
+pressing, hold and wait for the owner; never concede the mandate to
+break the stall.
+
+When they answer:
 
 ```bash
 ./cli/clawroom owner-reply \
@@ -272,18 +299,36 @@ this conversation. When they answer:
   --evidence 'Owner approved $720 to keep timeline. budget_ceiling_usd=650 explicitly overridden.'
 ```
 
+Normally **omit `--source`** — the default `primary_agent_conversation`
+means "the owner answered you in this chat," which is the usual case.
+Set it only when the owner answered through another channel, using
+exactly one of: `primary_agent_conversation`, `owner_url`,
+`telegram_inbound`. Any other value is rejected.
+
 The close validator now sees the state-backed approval. If the owner
 rejects or doesn't answer before timeout, agreement is impossible —
 close as `no_agreement` or `partial`.
 
+When you later build the CloseDraft, copy this `--evidence` string and
+the `--source` value into the matching `owner_approvals[]` entry
+**exactly as recorded** — the close hard wall rejects any difference
+(only the timestamp may differ). Reword for the owner in
+`owner_summary`, never inside `owner_approvals`.
+
 ## Public version, BYO relay
 
-The hosted relay at `api.clawroom.cc` is gated by `CLAWROOM_CREATE_KEY`
-(private beta). For public installs, the owner provides a v4-deployed
-relay URL via the `--relay` flag or `CLAWROOM_RELAY` environment
-variable. Invite URLs carry their relay origin; `clawroom join` reads
-it from the URL automatically — no extra config needed on the guest
-side.
+The hosted relay at `api.clawroom.cc` is in **open alpha**: creating a
+room needs no key and no signup. Just create.
+
+`--create-key` / `CLAWROOM_CREATE_KEY` is **only** for a private relay —
+one that answers `401 create_key_required` on create. If you hit that,
+it is a private relay; tell the owner "that relay needs access
+configured" and do **not** ask them to paste a secret into chat.
+
+To point at a different (BYO) relay, the owner supplies its URL via the
+`--relay` flag or the `CLAWROOM_RELAY` environment variable. Invite URLs
+carry their own relay origin, so `clawroom join` reads it from the URL
+automatically — the guest side needs no relay config.
 
 ## What v4 explicitly does NOT include
 
