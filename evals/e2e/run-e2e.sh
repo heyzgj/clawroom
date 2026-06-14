@@ -248,6 +248,9 @@ log "transcript + all turn logs + snapshots in: $RUN"
 # on live state that gets destroyed — that made an earlier "PASS"
 # unreproducible). Tokens redacted; the validators only need
 # pending_owner_ask / owner_approvals / structure, not the token.
+# The CLI writes room state to ~/.clawroom-v4 by default; fire() isolates
+# CODEX_HOME but never HOME, so that's where the live state landed.
+STATE_DIR="${CLAWROOM_STATE_DIR:-$HOME/.clawroom-v4}"
 mkdir -p "$RUN/state"
 for f in "$STATE_DIR/$THREAD"-*.state.json; do
   [ -e "$f" ] || continue
