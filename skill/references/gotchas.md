@@ -77,7 +77,10 @@ file is the seam.
 ## Owner approval is blocking state, not notification copy
 
 If a room crosses a mandate, do **not** write a polite note to the
-peer ("I'd need to check with my owner about that") and continue. Use
+peer ("I'd need to check with my owner about that") and continue.
+(This bans a note *to the peer* and then continuing. It does NOT ban
+talking to your owner — you MUST, and that message should be a clear
+context + options + recommendation; see SKILL.md step 5.) Use
 the explicit state machine:
 
 ```bash

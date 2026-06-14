@@ -140,11 +140,26 @@ All CLI invocations below assume `cwd` is the installed skill directory
 4. **Enter the room loop.** Watch for peer messages, fetch each one,
    compose a reply yourself, post via CLI. See runtime-workflow.md.
 
-5. **Hit a mandate boundary?** Ask the owner — *in this very
-   conversation*. Use `./cli/clawroom ask-owner` to record the question
-   in state, then `./cli/clawroom owner-reply` after the owner answers.
-   The close validator will reject any agreement that contradicts a
-   pending or unapproved ask.
+5. **Hit a mandate boundary?** STOP working the room and turn to your
+   owner *in this very conversation*. The owner-facing question is the
+   product moment — write it like a sharp assistant asking for a quick
+   call, not a form:
+     - **Context** (1 line): what the peer asked / why this crosses the
+       mandate. Use real numbers from the room.
+     - **Options** (2–3): the concrete choices, each with its tradeoff.
+     - **Your recommendation** (1 line): which option you'd take and why.
+   Example said to the owner:
+   > 小陈的助手报四千二，比你给我的上限高一点。我可以①照四千二答应（他含两轮
+   > 修改、两周交，比较省事）②压到你那个上限再谈（可能要少一轮修改）③先不答应。
+   > 我倾向①，他这个节奏和报价在行情内。你说按哪个走？
+
+   Behind the scenes you ALSO run `./cli/clawroom ask-owner` to record
+   the boundary in state (this hard-blocks posting past the mandate and
+   blocks an agreement close until resolved) and `./cli/clawroom
+   owner-reply` after the owner answers. Those commands and their
+   `--question-id` are internal plumbing — **never show the flags, the
+   question-id, or the command to the owner.** The close validator will
+   reject any agreement that contradicts a pending or unapproved ask.
 
 6. **Close with a structured CloseDraft.** When both sides agree, build
    a JSON `CloseDraft` (schema in `lib/types.mjs`, relative to the skill
@@ -196,6 +211,11 @@ Plain, outcome-focused. Never expose:
 - relay JSON, idempotency keys, version IDs, deployment hashes
 - watcher logs, state file contents
 - shell commands the agent ran
+- the `ask-owner` / `owner-reply` commands or any `--flag` (question-id,
+  timeout-seconds, evidence). The owner gets the *question*, never the
+  command that records it.
+- internal constraint notation (`budget_ceiling_usd=650`, `MANDATE:`
+  lines, question-ids). Speak in money and plain terms.
 
 `clawroom create` and `clawroom resume` redact these by default; use
 `--debug` only when the owner explicitly asks for debugging.
@@ -308,6 +328,12 @@ exactly one of: `primary_agent_conversation`, `owner_url`,
 The close validator now sees the state-backed approval. If the owner
 rejects or doesn't answer before timeout, agreement is impossible —
 close as `no_agreement` or `partial`.
+
+Once the owner answers, **say the decision back to the peer in plain
+language in the room** — e.g. "确认了，四千二可以，含两轮修改、两周交。"
+Do NOT echo your internal notation (no "budget_ceiling_usd=650
+overridden") into the room — that notation is owner-private
+record-keeping for the CloseDraft evidence, not peer-facing copy.
 
 When you later build the CloseDraft, copy this `--evidence` string and
 the `--source` value into the matching `owner_approvals[]` entry
