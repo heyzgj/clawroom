@@ -72,6 +72,15 @@ try:
 except: print('0 0 0 0 none')
 "
 }
+pending_ask_qid() { # <thread> <role> -> open pending_owner_ask question_id (or "")
+  python3 - "$HOME/.clawroom-v4/$1-$2.state.json" <<'PY'
+import json,sys
+try:
+  s=json.load(open(sys.argv[1])); p=s.get('pending_owner_ask')
+  print(p.get('question_id','') if isinstance(p,dict) else '')
+except Exception: print('')
+PY
+}
 
 # ---- per-side isolated agent config (req 2: neutral fresh-Codex baseline) ----
 # We do NOT run on the maintainer's real ~/.codex — that machine has personal
@@ -241,6 +250,29 @@ for round in $(seq 1 "$MAX_TURNS_PER_SIDE"); do
   read -r closed hc gc n last <<< "$(room_state "$THREAD")"
   log "state: closed=$closed host_closed=$hc guest_closed=$gc msgs=$n last=$last"
   [ "$closed" = "1" ] && { log "=== MUTUAL CLOSE ==="; break; }
+  # Auto owner-reply (req 4: no manual intervention). The escalation
+  # scenarios put the private mandate on the HOST owner, so the host
+  # agent is the one that escalates (writes pending_owner_ask to state).
+  # If a pending ask is open and the scenario ships a scripted owner
+  # decision, answer it as the owner would, then resume the host so it
+  # relays the decision into the room and proceeds — scripting the single
+  # human-in-the-loop moment so escalation runs auto-complete + record.
+  QID="$(pending_ask_qid "$THREAD" host)"
+  if [ -n "$QID" ] && [ -f "$HERE/scenarios/${SCEN}.owner.txt" ]; then
+    OWNER_ANS="$(cat "$HERE/scenarios/${SCEN}.owner.txt")"
+    DEC=approve
+    printf '%s' "$OWNER_ANS" | grep -qE '不给|不勉强|谈不拢|拒绝|不披露|不能给|decline|reject' && DEC=reject
+    env CLAWROOM_RELAY="$RELAY" "$REPO/skill/cli/clawroom" owner-reply \
+      --room "$THREAD" --role host --question-id "$QID" \
+      --decision "$DEC" --evidence "Owner replied in chat: $OWNER_ANS" \
+      > "$RUN/host/owner-reply-r${round}.log" 2>&1 || true
+    log "AUTO-OWNER-REPLY r${round}: qid=$QID decision=$DEC (scripted from ${SCEN}.owner.txt)"
+    snap "$THREAD" "r${round}-owner-reply"
+    ht=$((ht+1))
+    fire host "$HOST_DRIVER" "$ht" "你问我的那个事我决定了：$OWNER_ANS — 你按这个继续，该跟对方说就说，该收尾就收尾。" resume
+    snap "$THREAD" "r${round}-host"
+    continue
+  fi
   if [ "$last" = "guest" ] || { [ "$hc" = "0" ] && [ "$last" = "none" ]; }; then
     ht=$((ht+1)); fire host "$HOST_DRIVER" "$ht" "$NUDGE" resume; snap "$THREAD" "r${round}-host"
   else
