@@ -37,7 +37,7 @@ MAX_TURNS_PER_SIDE="${MAX_TURNS_PER_SIDE:-6}"
 ADMIN_KEY="$(grep -h CLAWROOM_ADMIN_KEY "$REPO/docs/operator-admin-key.local.txt" 2>/dev/null | cut -d= -f2)"
 
 TS="$(date +%Y%m%d-%H%M%S)"
-RUN="$HERE/runs/${SCEN}-${TS}"          # logs/snapshots live here (gitignored)
+RUN="$HERE/runs/${SCEN}-${TS}-$$"       # logs/snapshots live here (gitignored); -$$ = unique per concurrent run
 mkdir -p "$RUN/host" "$RUN/guest" "$RUN/snapshots"
 # Agent WORK dirs live OUTSIDE the repo. If they were under the repo (as they
 # were), a cwd-walking codex/claude would ingest the repo's AGENTS.md,
@@ -48,6 +48,14 @@ mkdir -p "$RUN/host" "$RUN/guest" "$RUN/snapshots"
 WORKROOT="$(mktemp -d -t clawroom-e2e-work)"
 echo "RUN: $RUN"
 echo "WORKROOT (outside repo): $WORKROOT"
+# Per-run isolation so several run-e2e.sh can run CONCURRENTLY without
+# clobbering each other's room state / npm cache (the only remaining shared
+# globals — workdir + CODEX_HOME are already per-WORKROOT). Both live under
+# WORKROOT so the cleanup trap removes them too. Exported, so the agents'
+# CLI calls (CLAWROOM_STATE_DIR) and npx (npm_config_cache) inherit them.
+export CLAWROOM_STATE_DIR="$WORKROOT/cstate"
+export npm_config_cache="$WORKROOT/npm-cache"
+mkdir -p "$CLAWROOM_STATE_DIR" "$npm_config_cache"
 # Cleanup on ANY exit (early abort, error, normal) — copied auth tokens live
 # in WORKROOT and must never be left in /tmp. trap guarantees it even on the
 # early `exit 1` paths below.
@@ -59,11 +67,11 @@ log()  { echo "[$(date +%H:%M:%S)] $*" | tee -a "$RUN/index.log"; }
 # ---- snapshot the room via operator export (recording, requirement 4) ----
 snap() { # snap <thread> <label>
   [ -z "${1:-}" ] && return 0
-  curl -s -H "x-clawroom-admin-key: $ADMIN_KEY" "$RELAY/admin/threads/$1/export" \
+  curl -s --max-time 30 -H "x-clawroom-admin-key: $ADMIN_KEY" "$RELAY/admin/threads/$1/export" \
     > "$RUN/snapshots/$2.json" 2>/dev/null || true
 }
 room_state() { # room_state <thread> -> "closed host_closed guest_closed nmsgs lastrole"
-  curl -s -H "x-clawroom-admin-key: $ADMIN_KEY" "$RELAY/admin/threads/$1/export" 2>/dev/null | python3 -c "
+  curl -s --max-time 30 -H "x-clawroom-admin-key: $ADMIN_KEY" "$RELAY/admin/threads/$1/export" 2>/dev/null | python3 -c "
 import sys,json
 try:
   d=json.load(sys.stdin); t=d['thread']; m=d['messages']
@@ -73,7 +81,7 @@ except: print('0 0 0 0 none')
 "
 }
 pending_ask_qid() { # <thread> <role> -> open pending_owner_ask question_id (or "")
-  python3 - "$HOME/.clawroom-v4/$1-$2.state.json" <<'PY'
+  python3 - "$CLAWROOM_STATE_DIR/$1-$2.state.json" <<'PY'
 import json,sys
 try:
   s=json.load(open(sys.argv[1])); p=s.get('pending_owner_ask')
@@ -145,13 +153,13 @@ fire() {
           -m "$CODEX_MODEL" -c model_reasoning_effort="$CODEX_EFFORT" --ignore-user-config \
           -s workspace-write -c sandbox_workspace_write.network_access=true \
           -c approval_policy=never --skip-git-repo-check \
-          --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" resume --last "$prompt"; rc=$?
+          --add-dir "$npm_config_cache" --add-dir "$CLAWROOM_STATE_DIR" resume --last "$prompt"; rc=$?
     else
       run_bg_timeout "$out" env CODEX_HOME="$CH" sh -c 'cd "$1" && shift && codex exec "$@"' _ "$wd" \
           -m "$CODEX_MODEL" -c model_reasoning_effort="$CODEX_EFFORT" --ignore-user-config \
           -s workspace-write -c sandbox_workspace_write.network_access=true \
           -c approval_policy=never --skip-git-repo-check \
-          --add-dir "$HOME/.npm" --add-dir "$HOME/.clawroom-v4" "$prompt"; rc=$?
+          --add-dir "$npm_config_cache" --add-dir "$CLAWROOM_STATE_DIR" "$prompt"; rc=$?
     fi
   elif [ "$driver" = "claude" ]; then
     if [ "$mode" = "resume" ]; then
@@ -191,7 +199,7 @@ PY
 # Only accept a room created AFTER this run began — a stale room from a
 # prior run must never be mistaken for the one the host just made.
 newest_thread() { # newest_thread <since_epoch_ms>
-  curl -s -H "x-clawroom-admin-key: $ADMIN_KEY" "$RELAY/admin/threads" 2>/dev/null | python3 -c "
+  curl -s --max-time 30 -H "x-clawroom-admin-key: $ADMIN_KEY" "$RELAY/admin/threads" 2>/dev/null | python3 -c "
 import sys,json
 since=int('${1:-0}')
 try:
@@ -246,10 +254,12 @@ snap "$THREAD" "02-after-guest-turn1"
 # ---- alternate to mutual close, owner-voice nudges, no technical input ----
 NUDGE="有进展吗？对面那边该回就回，回完按你判断该收尾就收尾，弄完跟我说一声。"
 ht=1; gt=1
+RUN_DEADLINE=$(( $(date +%s) + ${GLOBAL_RUN_CAP:-1500} ))   # 25min hard wall-clock cap per run (belt to the per-turn timeout)
 for round in $(seq 1 "$MAX_TURNS_PER_SIDE"); do
   read -r closed hc gc n last <<< "$(room_state "$THREAD")"
   log "state: closed=$closed host_closed=$hc guest_closed=$gc msgs=$n last=$last"
   [ "$closed" = "1" ] && { log "=== MUTUAL CLOSE ==="; break; }
+  [ "$(date +%s)" -ge "$RUN_DEADLINE" ] && { log "=== GLOBAL CAP (${GLOBAL_RUN_CAP:-1500}s) hit — aborting; run did not converge ==="; break; }
   # Auto owner-reply (req 4: no manual intervention). The escalation
   # scenarios put the private mandate on the HOST owner, so the host
   # agent is the one that escalates (writes pending_owner_ask to state).
@@ -260,8 +270,10 @@ for round in $(seq 1 "$MAX_TURNS_PER_SIDE"); do
   QID="$(pending_ask_qid "$THREAD" host)"
   if [ -n "$QID" ] && [ -f "$HERE/scenarios/${SCEN}.owner.txt" ]; then
     OWNER_ANS="$(cat "$HERE/scenarios/${SCEN}.owner.txt")"
-    DEC=approve
-    printf '%s' "$OWNER_ANS" | grep -qE '不给|不勉强|谈不拢|拒绝|不披露|不能给|decline|reject' && DEC=reject
+    # The owner's decision (approve|reject) is declared explicitly in the
+    # scenario assert — robust vs sniffing free-text owner voice (an approval
+    # like "别再往上加" must not read as a rejection).
+    DEC="$(python3 -c "import json;print(json.load(open('$HERE/scenarios/${SCEN}.assert.json')).get('owner_decision','approve'))" 2>/dev/null || echo approve)"
     env CLAWROOM_RELAY="$RELAY" "$REPO/skill/cli/clawroom" owner-reply \
       --room "$THREAD" --role host --question-id "$QID" \
       --decision "$DEC" --evidence "Owner replied in chat: $OWNER_ANS" \
