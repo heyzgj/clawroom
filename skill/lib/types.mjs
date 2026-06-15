@@ -101,6 +101,14 @@
  * @property {string} last_seen_at
  * @property {string} [topic]
  * @property {string} [goal]
+ * @property {number} [last_wakeup_event_id] - heartbeat wake-lease: the peer
+ *   event id that most recently triggered a wake_agent. Absent ⇒ 0. Owned by
+ *   `setWakeLease`; never touched by post/poll/close. Dedupe key so a second
+ *   heartbeat for the same event returns noop/wake_inflight instead of
+ *   re-waking the agent.
+ * @property {string | null} [wakeup_inflight_until] - heartbeat wake-lease:
+ *   ISO timestamp until which the most recent wake is considered in-flight.
+ *   Absent/null ⇒ no lease. After this time the same event can wake again.
  */
 
 // ---------- constants ----------
@@ -129,6 +137,20 @@ export const DEFAULT_RELAY_URL = 'https://api.clawroom.cc';
 export const DEFAULT_LONG_POLL_WAIT_SECONDS = 20;
 export const DEFAULT_RETRY_ATTEMPTS = 4;
 export const DEFAULT_RETRY_BASE_MS = 250;
+
+// Room TTL mirror of the relay's DEFAULT_MAX_THREAD_MS (worker.ts: 72h
+// default / 7d ceiling). The relay is the authority — an expired room
+// answers 410 thread_expired and the heartbeat treats that as cancel/ttl.
+// This client-side value lets `heartbeat` predict expiry from
+// state.started_at WITHOUT a relay round-trip when the relay can't be
+// reached, and matches the default so the prediction agrees with the relay.
+export const DEFAULT_MAX_THREAD_MS = 72 * 60 * 60 * 1000;
+
+// Heartbeat wake-lease TTL. After waking the primary agent for a peer event,
+// suppress re-waking for the SAME (or older) event for this long, so a
+// scheduler firing every few minutes does not stack duplicate wakes while
+// the agent is still working that turn. Overridable per-call via --lease-ttl.
+export const DEFAULT_WAKE_LEASE_TTL_SECONDS = 600;
 
 // State file location. Override via CLAWROOM_STATE_DIR for tests.
 export const STATE_DIR = process.env.CLAWROOM_STATE_DIR

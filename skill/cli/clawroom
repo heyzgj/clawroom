@@ -8,6 +8,9 @@
 //   post          --room --role --text [--logical-post-id] [--allow-pending-owner-ask]
 //   poll          --room --role [--after N] [--wait S] [--no-state]
 //   watch         --room --role [--include-self] [--once]
+//   heartbeat     --room --role [--wait S] [--lease-ttl S] [--exit-code-mode]
+//                 DUMB wakeup CHECK: detect room state, say whether to wake the
+//                 primary agent. NEVER reads bodies / advances cursor / posts.
 //   close         --room --role --draft-file PATH
 //   resume        --room --role [--debug]
 //   lint          --room --role (--text TEXT | --before-close --draft-file PATH)
@@ -34,6 +37,7 @@ import {
   writeState,
   resumeRoom,
   setCursor,
+  setWakeLease,
   setPendingOwnerAsk,
   resolveOwnerAsk,
   pendingAskTimedOut,
@@ -46,6 +50,8 @@ import {
   DEFAULT_RELAY_URL,
   MAX_MESSAGE_TEXT_CHARS,
   MAX_CLOSE_SUMMARY_CHARS,
+  DEFAULT_MAX_THREAD_MS,
+  DEFAULT_WAKE_LEASE_TTL_SECONDS,
   STATE_DIR,
 } from '../lib/types.mjs';
 
@@ -84,6 +90,7 @@ async function main() {
     case 'post':         return cmdPost();
     case 'poll':         return cmdPoll();
     case 'watch':        return cmdWatch();
+    case 'heartbeat':    return cmdHeartbeat();
     case 'close':        return cmdClose();
     case 'resume':       return cmdResume();
     case 'lint':         return cmdLint();
@@ -291,6 +298,189 @@ async function cmdWatch() {
   if (!okReasons.has(result.exit_reason)) {
     process.exit(1);
   }
+}
+
+// Phase 6.5 P0 — a DUMB wakeup CHECK. It detects room state and says whether
+// to wake the primary agent. It NEVER reads message bodies, NEVER advances the
+// read cursor, NEVER replies, NEVER makes a business decision. It knocks on the
+// door; it never speaks. (NOT a bridge, NOT a brain.)
+//
+// Output (default): single-line JSON
+//   {"ok":true,"action":...,"reason":...,"room":...,"role":...,"event_id":N}
+//   action ∈ {wake_agent, noop, notify_owner, cancel}
+//   reason ∈ {peer_event, peer_close, no_new_event, self_event, wake_inflight,
+//             pending_owner_ask, mutual_close, ttl}
+//
+// Exit codes:
+//   default        — 0 on ANY successful detection (the JSON carries action);
+//                    non-zero ONLY on real errors (bad args, unreadable state,
+//                    network failure after the client's normal retries). A noop
+//                    is NOT a failure.
+//   --exit-code-mode (opt-in) — 0 wake_agent / 3 noop / 4 cancel / 5 notify_owner.
+async function cmdHeartbeat() {
+  const room_id = required('room');
+  const role = requiredRole();
+  const exitCodeMode = Boolean(flags['exit-code-mode']);
+  // Bounded tick, NOT a long-poll. Default wait=0; allow a couple seconds.
+  const wait = flags.wait !== undefined ? Number(flags.wait) : 0;
+  if (!Number.isFinite(wait) || wait < 0) {
+    throw new Error(`heartbeat: --wait must be a non-negative number, got "${flags.wait}"`);
+  }
+  const leaseTtlRaw = flags['lease-ttl'] ?? DEFAULT_WAKE_LEASE_TTL_SECONDS;
+  const leaseTtlSeconds = Number(leaseTtlRaw);
+  if (!Number.isFinite(leaseTtlSeconds) || leaseTtlSeconds <= 0) {
+    throw new Error(`heartbeat: --lease-ttl must be a positive number, got "${leaseTtlRaw}"`);
+  }
+
+  // (a) Read local state. mustReadState throws (exit 1) if unreadable/missing.
+  const state = mustReadState(room_id, role);
+  const cursor = state.last_event_cursor;
+  const lastWakeId = typeof state.last_wakeup_event_id === 'number' ? state.last_wakeup_event_id : 0;
+  const inflightUntil = state.wakeup_inflight_until ? Date.parse(state.wakeup_inflight_until) : 0;
+  const now = Date.now();
+
+  const decide = (action, reason, eventId = null) => ({
+    ok: true,
+    action,
+    reason,
+    room: room_id,
+    role,
+    event_id: eventId,
+  });
+
+  const emit = (decision) => {
+    printJson(decision);
+    if (exitCodeMode) {
+      const code = { wake_agent: 0, noop: 3, cancel: 4, notify_owner: 5 }[decision.action];
+      process.exit(code === undefined ? 1 : code);
+    }
+    // Default mode: any successful detection is exit 0 (the JSON carries action).
+    process.exit(0);
+  };
+
+  // (b) Blocked on the OWNER → notify_owner, do NOT poll. Waking the agent is
+  // useless while it is waiting on a human decision. A timed-out ask no longer
+  // blocks the room, so we fall through to normal detection in that case.
+  if (state.pending_owner_ask && !pendingAskTimedOut(state)) {
+    emit(decide('notify_owner', 'pending_owner_ask'));
+    return;
+  }
+
+  // (c) Poll the relay events endpoint as THIS role — metadata only (id, from,
+  // kind), a short bounded tick. NEVER /messages, NEVER message bodies.
+  const token = mustToken(state);
+  const client = new RelayClient({ relay: relayUrl(state), room_id, role, token });
+
+  // Local TTL prediction (backstop): the relay is the authority and answers
+  // 410 thread_expired when a room is past its max age, but if the relay is
+  // unreachable we still want to recognize a room that is *certainly* dead
+  // (started_at + TTL < now) rather than report a network failure for a room
+  // that can no longer make progress.
+  const startedAtMs = state.started_at ? Date.parse(state.started_at) : NaN;
+  const locallyExpired = Number.isFinite(startedAtMs) && now > startedAtMs + DEFAULT_MAX_THREAD_MS;
+
+  let events;
+  try {
+    const result = await client.pollEvents({ after: cursor, waitSeconds: wait });
+    events = Array.isArray(result.body) ? result.body : [];
+  } catch (err) {
+    // (e) Relay says the room expired (410). cancel/ttl — not an error.
+    if (err instanceof RelayError && err.status === 410) {
+      emit(decide('cancel', 'ttl'));
+      return;
+    }
+    // Network failure after the client's normal retries: if the room is past
+    // its local TTL it cannot progress anyway → cancel/ttl; otherwise this is
+    // a real error (non-zero exit, surfaced to the caller / scheduler).
+    if (locallyExpired) {
+      emit(decide('cancel', 'ttl'));
+      return;
+    }
+    throw err;
+  }
+
+  const peerRole = role === 'host' ? 'guest' : 'host';
+
+  // (d/e/f) Scan the polled events (metadata only). Find the highest new id,
+  // the highest-id PEER event, and whether any close event appeared this tick.
+  let maxId = cursor;
+  let peerEvent = null;     // highest-id peer event strictly newer than the cursor
+  let closeEventSeen = false;
+  for (const raw of events) {
+    const id = Number(raw?.id);
+    if (!Number.isFinite(id) || id <= cursor) continue;
+    if (id > maxId) maxId = id;
+    if (String(raw?.kind) === 'close') closeEventSeen = true;
+    if (String(raw?.from) === peerRole) {
+      if (!peerEvent || id > Number(peerEvent.id)) peerEvent = raw;
+    }
+  }
+
+  // (d) Authoritative close check via /join close_state — ONLY when a close
+  // event surfaced this tick. close_state is the authority for mutual vs
+  // peer-only (a peer close event alone can't tell us if WE already closed).
+  // This is METADATA ONLY: we read the boolean host_closed/guest_closed/closed
+  // flags and NEVER the summary or last_message body the snapshot carries.
+  // Mirrors watch.mjs using /join as the close authority. Skipping it on the
+  // common no-close tick keeps heartbeat a single GET.
+  let weClosed = false;
+  if (closeEventSeen) {
+    let closeState = null;
+    try {
+      const join = await client.join();
+      closeState = /** @type {any} */ (join.body)?.close_state || null;
+    } catch (err) {
+      if (err instanceof RelayError && err.status === 410) { emit(decide('cancel', 'ttl')); return; }
+      if (locallyExpired) { emit(decide('cancel', 'ttl')); return; }
+      throw err;
+    }
+    if (Boolean(closeState?.closed)) {
+      emit(decide('cancel', 'mutual_close'));
+      return;
+    }
+    weClosed = Boolean(role === 'host' ? closeState?.host_closed : closeState?.guest_closed);
+  }
+
+  // (e) Local TTL backstop: relay 410 (caught around the polls) is the primary
+  // expiry signal; this catches a room past its client-side max age when the
+  // relay didn't 410 (e.g. relay max-age lowered after this room started).
+  if (locallyExpired) {
+    emit(decide('cancel', 'ttl'));
+    return;
+  }
+
+  // (f) New events past the cursor?
+  if (maxId <= cursor) {
+    // No event newer than the cursor at all.
+    emit(decide('noop', 'no_new_event'));
+    return;
+  }
+  if (!peerEvent) {
+    // Newer events exist but they are ALL from us (echoes of our own posts).
+    emit(decide('noop', 'self_event'));
+    return;
+  }
+
+  // A peer event exists. DEDUPE against the wake-lease: if this event id is not
+  // newer than the one we last woke for AND the lease is still in-flight, the
+  // agent is already handling it — do not wake again.
+  const peerId = Number(peerEvent.id);
+  if (peerId <= lastWakeId && now < inflightUntil) {
+    emit(decide('noop', 'wake_inflight', peerId));
+    return;
+  }
+
+  // Wake. peer CLOSE (peer closed, we haven't) is its own reason so the agent
+  // knows to move toward an echo-close rather than another message turn.
+  const isPeerClose = String(peerEvent.kind) === 'close' && !weClosed;
+  const reason = isPeerClose ? 'peer_close' : 'peer_event';
+
+  // Write the lease (ONLY the two lease fields, via the re-read-merge guard so
+  // a concurrent agent turn's pending_owner_ask / approvals / cursor survive).
+  const until = new Date(now + leaseTtlSeconds * 1000).toISOString();
+  setWakeLease(state, peerId, until);
+
+  emit(decide('wake_agent', reason, peerId));
 }
 
 async function cmdClose() {
@@ -673,6 +863,7 @@ Subcommands:
   post          --room --role --text [--logical-post-id]
   poll          --room --role [--after N] [--wait S] [--no-state]
   watch         --room --role [--include-self] [--once]
+  heartbeat     --room --role [--wait S] [--lease-ttl S] [--exit-code-mode]
   close         --room --role --draft-file PATH
   resume        --room --role [--debug]
   lint          --room --role (--text TEXT | --before-close --draft-file PATH)

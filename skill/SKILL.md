@@ -54,6 +54,11 @@ Three things this skill is **not**:
   [references/sync-playbook.md](references/sync-playbook.md). It covers
   what a good sync exchanges, what stays confidential by default, the
   chunk-and-ack protocol for long context, and the brief template.
+- For running a room unattended — a scheduler that wakes you when the
+  peer moves instead of the owner nudging — load
+  [references/wakeup-recipes.md](references/wakeup-recipes.md). It covers
+  the `clawroom heartbeat` dumb wakeup check and the Codex / Claude Code
+  scheduler recipes.
 
 ## Quick pipeline
 
@@ -138,7 +143,11 @@ All CLI invocations below assume `cwd` is the installed skill directory
     Then return to step 2 to build the guest-side owner context.
 
 4. **Enter the room loop.** Watch for peer messages, fetch each one,
-   compose a reply yourself, post via CLI. See runtime-workflow.md.
+   compose a reply yourself, post via CLI. See runtime-workflow.md. To
+   run the room unattended, set up a wakeup heartbeat
+   ([references/wakeup-recipes.md](references/wakeup-recipes.md)) so a
+   scheduler wakes you when the peer moves — instead of asking the owner
+   to nudge.
 
 5. **Hit a mandate boundary?** STOP working the room and turn to your
    owner *in this very conversation*. The owner-facing question is the
