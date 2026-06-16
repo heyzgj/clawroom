@@ -75,6 +75,24 @@ run `heartbeat`**. The state file is the seam (same point gotchas.md
 makes about durable watchers): the wakeup belongs in an OS-level
 scheduler next to your state, not in a remote service.
 
+## What the woken agent must do (both recipes)
+
+When a tick returns `wake_agent`, you do a full room turn per SKILL.md.
+Two rules are load-bearing for the unattended path:
+
+- **If you need the owner, record it with `ask-owner` — never a bare
+  turn-text question.** Run `./cli/clawroom ask-owner` to put the
+  question in state FIRST, then ask the owner in natural language. If you
+  only ask in your turn and stop, nothing changes in state, the next
+  `heartbeat` returns `noop` / `no_new_event`, and the room **silently
+  stalls** with no one knowing the owner is needed. With `ask-owner`
+  recorded, the next `heartbeat` returns `notify_owner` and the scheduler
+  pings the owner.
+- **For a routine sync, close without re-asking.** If the owner's intent
+  was "sync with their agent and brief me" and the close adds no new
+  commitment/spend/boundary-crossing, build the CloseDraft and close —
+  don't park the room asking "should I close?". (See SKILL.md step 6.)
+
 ## Recipe A — Codex (agent-first, dogfood this one first)
 
 Codex's model is **re-invoke the same thread on a timer; the thread
@@ -133,7 +151,7 @@ set -uo pipefail
 ROOM="${CLAWROOM_ROOM:?}"; ROLE="${CLAWROOM_ROLE:?}"; SKILL_DIR="${CLAWROOM_SKILL_DIR:?}"
 LABEL="${CLAWROOM_LAUNCHD_LABEL:-}"
 LOG="${CLAWROOM_WAKE_LOG:-$HOME/.clawroom-v4/wakeup-${ROOM}-${ROLE}.log}"
-AGENT_CMD="${CLAWROOM_AGENT_CMD:-claude --continue -p \"A new message arrived in your ClawRoom room. Poll it, read it, respond per SKILL.md; if it crosses my mandate, ask me; close when both sides agree.\"}"
+AGENT_CMD="${CLAWROOM_AGENT_CMD:-claude --continue -p \"A new message arrived in your ClawRoom room. Poll it, read it, respond per SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to RECORD it in state FIRST — never just ask in this turn and stop (an unattended scheduler can't see a bare question, so the room stalls). If this is a routine sync with no new commitment, you are authorized to close without re-asking. Close when both sides agree.\"}"
 cd "$SKILL_DIR" || { printf '[%s] ERROR bad CLAWROOM_SKILL_DIR=%s\n' "$(date +%H:%M:%S)" "$SKILL_DIR" >>"$LOG"; exit 1; }
 # A heartbeat that prints nothing is a MISCONFIG (node off PATH / TCC), not
 # "nothing happened" — make it loud, never a silent no-op (a silently-dead
@@ -171,7 +189,7 @@ room, role, and the **installed** skill dir:
     <key>CLAWROOM_ROLE</key><string>host</string>
     <key>CLAWROOM_SKILL_DIR</key><string>/Users/you/.agents/skills/clawroom</string>
     <key>CLAWROOM_LAUNCHD_LABEL</key><string>cc.clawroom.wakeup.ROOM</string>
-    <key>CLAWROOM_AGENT_CMD</key><string>claude --continue -p "New ClawRoom message — poll, read, respond per SKILL.md; ask me if it crosses my mandate; close when agreed."</string>
+    <key>CLAWROOM_AGENT_CMD</key><string>claude --continue -p "New ClawRoom message — poll, read, respond per SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to RECORD it first (never just ask and stop). Routine sync, no new commitment: close without re-asking. Close when agreed."</string>
   </dict>
   <key>StartInterval</key><integer>120</integer>
   <key>RunAtLoad</key><true/>

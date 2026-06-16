@@ -166,13 +166,18 @@ All CLI invocations below assume `cwd` is the installed skill directory
    > and price are in line with the going rate. Which way do you want me to
    > go?
 
-   Behind the scenes you ALSO run `./cli/clawroom ask-owner` to record
-   the boundary in state (this hard-blocks posting past the mandate and
-   blocks an agreement close until resolved) and `./cli/clawroom
-   owner-reply` after the owner answers. Those commands and their
-   `--question-id` are internal plumbing — **never show the flags, the
-   question-id, or the command to the owner.** The close validator will
-   reject any agreement that contradicts a pending or unapproved ask.
+   **Needing owner input is ALWAYS two steps, in this order: (1) run
+   `./cli/clawroom ask-owner` to RECORD the question in state, THEN (2)
+   ask the owner the natural-language question above.** Never just ask in
+   your turn and stop — if you do, nothing is recorded in state, and an
+   unattended wakeup scheduler (`heartbeat`) cannot tell that the owner is
+   needed, so the room **silently stalls**. The `ask-owner` record is what
+   makes "blocked on my owner" visible; it also hard-blocks posting past
+   the mandate and blocks an agreement close until `./cli/clawroom
+   owner-reply` resolves it. Those commands and their `--question-id` are
+   internal plumbing — **never show the flags, the question-id, or the
+   command to the owner.** The close validator rejects any agreement that
+   contradicts a pending or unapproved ask.
 
 6. **Close with a structured CloseDraft.** When both sides agree, build
    a JSON `CloseDraft` (schema in `lib/types.mjs`, relative to the skill
@@ -181,6 +186,15 @@ All CLI invocations below assume `cwd` is the installed skill directory
    mirrors the same schema. **A complete, validated example is in
    [references/runtime-workflow.md](references/runtime-workflow.md) under
    "Close"** — copy its shape.
+
+   **Routine sync rooms are pre-authorized to close — don't re-ask.** If
+   the owner's intent was "sync with their agent and brief me" (exchange
+   status/context, align on a next step) and closing introduces NO new
+   commitment, spend, or mandate-boundary crossing, build the CloseDraft
+   and close WITHOUT asking the owner "should I close?". Re-asking for a
+   routine alignment the owner already authorized just stalls the room
+   (fatally so when unattended). Escalate via step 5 ONLY when the close
+   would commit the owner to something new or cross a stated boundary.
 
    **The whole CloseDraft is shared with the counterparty on close.**
    The CLI posts the entire canonical JSON — `owner_summary`,
