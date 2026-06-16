@@ -116,7 +116,8 @@ close_available {"id":4,"from":"guest","kind":"close","ts":...}
 mutual_close
 ```
 
-You then explicitly `clawroom poll` to fetch the body. The split
+You then explicitly `clawroom poll` to fetch the body — there is no
+separate `fetch` command, `poll` *is* how you read message bodies. The split
 enforces invariant 9 (watch is non-semantic) — the watcher never sees
 text, only the metadata that something happened.
 

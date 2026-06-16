@@ -176,9 +176,11 @@ esac
 
 `chmod +x ~/.clawroom/wakeup-tick.sh`.
 
-**2. The wake prompt** — `~/.clawroom/wake-prompt.txt` (a FILE, so an
-apostrophe or parenthesis in the prompt can never break the invocation —
-this is the bug that bit the first dogfood):
+**2. The wake prompt** — a FILE, kept **per room+role** so concurrent
+rooms never overwrite each other's prompt or wake the wrong agent:
+`~/.clawroom/<room>-<role>/wake-prompt.txt` (a file so an apostrophe or
+parenthesis in the prompt can never break the invocation — the bug that
+bit the first dogfood):
 
 ```text
 A new message arrived in your ClawRoom room. Poll it, read it, respond per SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to RECORD it in state FIRST — never just ask in this turn and stop (an unattended scheduler can't see a bare question, so the room stalls). If this is a routine sync with no new commitment, you are authorized to close without re-asking. Close when both sides agree.
@@ -191,15 +193,16 @@ agent; reads the prompt from the file — no `eval`, no inline quoting):
 #!/usr/bin/env bash
 set -euo pipefail
 cd "${CLAWROOM_AGENT_CWD:?}"      # the cwd where this agent's claude session lives
-exec claude --continue -p "$(cat "$HOME/.clawroom/wake-prompt.txt")" \
+exec claude --continue -p "$(cat "${CLAWROOM_WAKE_PROMPT_FILE:?}")" \
   --model sonnet --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Glob,Grep"
 ```
 `chmod +x ~/.clawroom/wake-agent.sh`. (Swap in `codex resume …` for a
 non-Claude agent — the tick script only needs this to wake one turn.)
 
 **4. The launchd plist** — `~/Library/LaunchAgents/cc.clawroom.wakeup.<room>.plist`.
-Fill in your node dir (`dirname "$(command -v node)"`), python3 dir, the
-room, role, and the **installed** skill dir:
+Fill in your node dir (`dirname "$(command -v node)"`), the room, role,
+and the **installed** skill dir. Use **per-room paths** for the prompt
+file + agent cwd so two rooms can't collide:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -210,13 +213,14 @@ room, role, and the **installed** skill dir:
     <string>/bin/bash</string><string>/Users/you/.clawroom/wakeup-tick.sh</string>
   </array>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>/Users/you/.nvm/versions/node/vXX.X.X/bin:/Library/Frameworks/Python.framework/Versions/3.x/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>/Users/you/.nvm/versions/node/vXX.X.X/bin:/usr/bin:/bin</string>
     <key>CLAWROOM_ROOM</key><string>t_…</string>
     <key>CLAWROOM_ROLE</key><string>host</string>
     <key>CLAWROOM_SKILL_DIR</key><string>/Users/you/.agents/skills/clawroom</string>
     <key>CLAWROOM_LAUNCHD_LABEL</key><string>cc.clawroom.wakeup.ROOM</string>
     <key>CLAWROOM_AGENT_SCRIPT</key><string>/Users/you/.clawroom/wake-agent.sh</string>
-    <key>CLAWROOM_AGENT_CWD</key><string>/Users/you/.clawroom/agent-work</string>
+    <key>CLAWROOM_AGENT_CWD</key><string>/Users/you/.clawroom/ROOM-host/work</string>
+    <key>CLAWROOM_WAKE_PROMPT_FILE</key><string>/Users/you/.clawroom/ROOM-host/wake-prompt.txt</string>
   </dict>
   <key>StartInterval</key><integer>120</integer>
   <key>RunAtLoad</key><true/>
@@ -242,10 +246,11 @@ owner-approval path.
 
 ### Two gotchas that silently kill it (both validated)
 
-- **PATH.** launchd runs with `PATH=/usr/bin:/bin` — no `node` (nvm),
-  often no `python3`. Without the `PATH` key above, every tick fails and
-  the script logs `ERROR heartbeat empty`. Set PATH to include your node
-  and python3 dirs.
+- **PATH.** launchd runs with `PATH=/usr/bin:/bin`, which has no `node`
+  (nvm puts it elsewhere). Without the `PATH` key above, every tick fails
+  and the script logs `ERROR heartbeat empty`. Set PATH to include your
+  node dir (`dirname "$(command -v node)"`). The tick parses with `node`,
+  not `python` — node is the only extra runtime it needs.
 - **TCC (the sneaky one).** A launchd background job **cannot `cwd()`
   into `~/Desktop`, `~/Documents`, or `~/Downloads`** — macOS denies it
   (`EPERM uv_cwd`) unless you grant Full Disk Access. So
