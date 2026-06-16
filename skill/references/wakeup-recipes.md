@@ -151,27 +151,53 @@ set -uo pipefail
 ROOM="${CLAWROOM_ROOM:?}"; ROLE="${CLAWROOM_ROLE:?}"; SKILL_DIR="${CLAWROOM_SKILL_DIR:?}"
 LABEL="${CLAWROOM_LAUNCHD_LABEL:-}"
 LOG="${CLAWROOM_WAKE_LOG:-$HOME/.clawroom-v4/wakeup-${ROOM}-${ROLE}.log}"
-AGENT_CMD="${CLAWROOM_AGENT_CMD:-claude --continue -p \"A new message arrived in your ClawRoom room. Poll it, read it, respond per SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to RECORD it in state FIRST — never just ask in this turn and stop (an unattended scheduler can't see a bare question, so the room stalls). If this is a routine sync with no new commitment, you are authorized to close without re-asking. Close when both sides agree.\"}"
+AGENT_SCRIPT="${CLAWROOM_AGENT_SCRIPT:?set CLAWROOM_AGENT_SCRIPT (step 3)}"
 cd "$SKILL_DIR" || { printf '[%s] ERROR bad CLAWROOM_SKILL_DIR=%s\n' "$(date +%H:%M:%S)" "$SKILL_DIR" >>"$LOG"; exit 1; }
 # A heartbeat that prints nothing is a MISCONFIG (node off PATH / TCC), not
 # "nothing happened" — make it loud, never a silent no-op (a silently-dead
 # watcher is the worst failure for an owner who walked away).
 OUT="$(./cli/clawroom heartbeat --room "$ROOM" --role "$ROLE" 2>&1)"
 [ -z "$OUT" ] && { printf '[%s] ERROR heartbeat empty — check node on PATH + skill not under Desktop\n' "$(date +%H:%M:%S)" >>"$LOG"; exit 1; }
-ACTION="$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("action",""))' 2>/dev/null || true)"
+# Parse the action with node (guaranteed on PATH — the CLI needs it). FAIL
+# LOUD on unparseable output; never silently fall through to noop.
+ACTION="$(printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).action||""))}catch(e){process.exit(7)}})')" \
+  || { printf '[%s] ERROR unparseable heartbeat output: %s\n' "$(date +%H:%M:%S)" "$OUT" >>"$LOG"; exit 1; }
 printf '[%s] %s\n' "$(date +%H:%M:%S)" "$OUT" >>"$LOG"
 case "$ACTION" in
-  wake_agent)   eval "$AGENT_CMD" >>"$LOG" 2>&1 || printf '[%s] agent invoke failed\n' "$(date +%H:%M:%S)" >>"$LOG" ;;
-  notify_owner) osascript -e 'display notification "Your ClawRoom agent needs a decision." with title "ClawRoom"' 2>/dev/null || true ;;
+  wake_agent)   printf '[%s] >>> waking agent\n' "$(date +%H:%M:%S)" >>"$LOG"
+                bash "$AGENT_SCRIPT" >>"$LOG" 2>&1 || printf '[%s] agent invoke failed\n' "$(date +%H:%M:%S)" >>"$LOG" ;;
+  notify_owner) osascript -e 'display notification "Your ClawRoom agent needs your decision — open the session to answer." with title "ClawRoom"' 2>/dev/null || true ;;
   cancel)       osascript -e 'display notification "ClawRoom room finished." with title "ClawRoom"' 2>/dev/null || true
                 [ -n "$LABEL" ] && launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true ;;
-  error)        printf '[%s] heartbeat error result (retry next tick)\n' "$(date +%H:%M:%S)" >>"$LOG" ;;
+  noop)         : ;;
+  *)            printf '[%s] heartbeat action=%s — no-op this tick\n' "$(date +%H:%M:%S)" "$ACTION" >>"$LOG" ;;
 esac
 ```
 
 `chmod +x ~/.clawroom/wakeup-tick.sh`.
 
-**2. The launchd plist** — `~/Library/LaunchAgents/cc.clawroom.wakeup.<room>.plist`.
+**2. The wake prompt** — `~/.clawroom/wake-prompt.txt` (a FILE, so an
+apostrophe or parenthesis in the prompt can never break the invocation —
+this is the bug that bit the first dogfood):
+
+```text
+A new message arrived in your ClawRoom room. Poll it, read it, respond per SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to RECORD it in state FIRST — never just ask in this turn and stop (an unattended scheduler can't see a bare question, so the room stalls). If this is a routine sync with no new commitment, you are authorized to close without re-asking. Close when both sides agree.
+```
+
+**3. The agent-wake script** — `~/.clawroom/wake-agent.sh` (resumes YOUR
+agent; reads the prompt from the file — no `eval`, no inline quoting):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "${CLAWROOM_AGENT_CWD:?}"      # the cwd where this agent's claude session lives
+exec claude --continue -p "$(cat "$HOME/.clawroom/wake-prompt.txt")" \
+  --model sonnet --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Glob,Grep"
+```
+`chmod +x ~/.clawroom/wake-agent.sh`. (Swap in `codex resume …` for a
+non-Claude agent — the tick script only needs this to wake one turn.)
+
+**4. The launchd plist** — `~/Library/LaunchAgents/cc.clawroom.wakeup.<room>.plist`.
 Fill in your node dir (`dirname "$(command -v node)"`), python3 dir, the
 room, role, and the **installed** skill dir:
 
@@ -189,14 +215,15 @@ room, role, and the **installed** skill dir:
     <key>CLAWROOM_ROLE</key><string>host</string>
     <key>CLAWROOM_SKILL_DIR</key><string>/Users/you/.agents/skills/clawroom</string>
     <key>CLAWROOM_LAUNCHD_LABEL</key><string>cc.clawroom.wakeup.ROOM</string>
-    <key>CLAWROOM_AGENT_CMD</key><string>claude --continue -p "New ClawRoom message — poll, read, respond per SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to RECORD it first (never just ask and stop). Routine sync, no new commitment: close without re-asking. Close when agreed."</string>
+    <key>CLAWROOM_AGENT_SCRIPT</key><string>/Users/you/.clawroom/wake-agent.sh</string>
+    <key>CLAWROOM_AGENT_CWD</key><string>/Users/you/.clawroom/agent-work</string>
   </dict>
   <key>StartInterval</key><integer>120</integer>
   <key>RunAtLoad</key><true/>
 </dict></plist>
 ```
 
-**3. Start / stop:**
+**5. Start / stop:**
 
 ```bash
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/cc.clawroom.wakeup.ROOM.plist   # start
@@ -204,6 +231,14 @@ launchctl bootout  gui/$(id -u)/cc.clawroom.wakeup.ROOM                         
 ```
 
 It also self-stops: on `cancel` the tick script boots out its own job.
+
+**Owner approval, unattended — known limit.** On `notify_owner` this
+recipe only pings you; automatically surfacing the agent's question +
+options into your session and feeding your answer back via `owner-reply`
+is NOT built yet. So a **routine sync runs fully unattended**, but a room
+that hits a real mandate boundary parks until you open the session and
+answer. Building that auto-route is the next milestone for the unattended
+owner-approval path.
 
 ### Two gotchas that silently kill it (both validated)
 
