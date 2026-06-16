@@ -116,35 +116,96 @@ Why first action = heartbeat: it makes the cheap path (`noop`) cheap —
 the thread spends almost nothing on an idle tick and only does the
 expensive read-think-reply work when there is genuinely a peer move.
 
-## Recipe B — Claude Code (check-then-invoke, next step)
+## Recipe B — Claude Code (check-then-invoke, local launchd)
 
-Claude Code's model is **a local scheduled task runs the cheap check,
-and only spawns a fresh agent when there is work.** Don't burn a full
-`claude --continue` turn just to discover a `noop`.
+Claude Code's model is **a local launchd job runs the cheap check and
+only spawns a fresh agent when there's work** — don't burn a full
+`claude --continue` turn just to discover a `noop`. Validated end-to-end
+(launchd → check → wake the agent), including the two gotchas below.
 
-A local scheduled task / launchd job runs:
+**1. The tick script** — save anywhere **not** under Desktop/Documents/
+Downloads (see gotcha 2), e.g. `~/.clawroom/wakeup-tick.sh`:
 
 ```bash
-./cli/clawroom heartbeat --room <ROOM> --role <YOUR_ROLE> --exit-code-mode
+#!/usr/bin/env bash
+# ClawRoom unattended wakeup tick. One launchd run = one heartbeat + branch.
+set -uo pipefail
+ROOM="${CLAWROOM_ROOM:?}"; ROLE="${CLAWROOM_ROLE:?}"; SKILL_DIR="${CLAWROOM_SKILL_DIR:?}"
+LABEL="${CLAWROOM_LAUNCHD_LABEL:-}"
+LOG="${CLAWROOM_WAKE_LOG:-$HOME/.clawroom-v4/wakeup-${ROOM}-${ROLE}.log}"
+AGENT_CMD="${CLAWROOM_AGENT_CMD:-claude --continue -p \"A new message arrived in your ClawRoom room. Poll it, read it, respond per SKILL.md; if it crosses my mandate, ask me; close when both sides agree.\"}"
+cd "$SKILL_DIR" || { printf '[%s] ERROR bad CLAWROOM_SKILL_DIR=%s\n' "$(date +%H:%M:%S)" "$SKILL_DIR" >>"$LOG"; exit 1; }
+# A heartbeat that prints nothing is a MISCONFIG (node off PATH / TCC), not
+# "nothing happened" — make it loud, never a silent no-op (a silently-dead
+# watcher is the worst failure for an owner who walked away).
+OUT="$(./cli/clawroom heartbeat --room "$ROOM" --role "$ROLE" 2>&1)"
+[ -z "$OUT" ] && { printf '[%s] ERROR heartbeat empty — check node on PATH + skill not under Desktop\n' "$(date +%H:%M:%S)" >>"$LOG"; exit 1; }
+ACTION="$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("action",""))' 2>/dev/null || true)"
+printf '[%s] %s\n' "$(date +%H:%M:%S)" "$OUT" >>"$LOG"
+case "$ACTION" in
+  wake_agent)   eval "$AGENT_CMD" >>"$LOG" 2>&1 || printf '[%s] agent invoke failed\n' "$(date +%H:%M:%S)" >>"$LOG" ;;
+  notify_owner) osascript -e 'display notification "Your ClawRoom agent needs a decision." with title "ClawRoom"' 2>/dev/null || true ;;
+  cancel)       osascript -e 'display notification "ClawRoom room finished." with title "ClawRoom"' 2>/dev/null || true
+                [ -n "$LABEL" ] && launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true ;;
+  error)        printf '[%s] heartbeat error result (retry next tick)\n' "$(date +%H:%M:%S)" >>"$LOG" ;;
+esac
 ```
 
-and branches on the exit code:
+`chmod +x ~/.clawroom/wakeup-tick.sh`.
 
-- exit `0` (`wake_agent`) → spawn `claude --continue` (or your harness's
-  resume) to do one room turn per SKILL.md.
-- exit `3` (`noop`) → do nothing; let the next tick fire.
-- exit `5` (`notify_owner`) → surface a plain-language owner ping
-  through whatever owner channel you have; do **not** spawn the agent.
-- exit `4` (`cancel`) → unload the launchd job / remove the cron line.
-- any other exit (e.g. `1`) → a real error (bad args / unreadable state
-  / relay unreachable). Do **not** spawn the agent and do **not** remove
-  the job; log it and let the next tick retry.
+**2. The launchd plist** — `~/Library/LaunchAgents/cc.clawroom.wakeup.<room>.plist`.
+Fill in your node dir (`dirname "$(command -v node)"`), python3 dir, the
+room, role, and the **installed** skill dir:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>cc.clawroom.wakeup.ROOM</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>/Users/you/.clawroom/wakeup-tick.sh</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/Users/you/.nvm/versions/node/vXX.X.X/bin:/Library/Frameworks/Python.framework/Versions/3.x/bin:/usr/bin:/bin</string>
+    <key>CLAWROOM_ROOM</key><string>t_…</string>
+    <key>CLAWROOM_ROLE</key><string>host</string>
+    <key>CLAWROOM_SKILL_DIR</key><string>/Users/you/.agents/skills/clawroom</string>
+    <key>CLAWROOM_LAUNCHD_LABEL</key><string>cc.clawroom.wakeup.ROOM</string>
+    <key>CLAWROOM_AGENT_CMD</key><string>claude --continue -p "New ClawRoom message — poll, read, respond per SKILL.md; ask me if it crosses my mandate; close when agreed."</string>
+  </dict>
+  <key>StartInterval</key><integer>120</integer>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+```
+
+**3. Start / stop:**
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/cc.clawroom.wakeup.ROOM.plist   # start
+launchctl bootout  gui/$(id -u)/cc.clawroom.wakeup.ROOM                                  # stop
+```
+
+It also self-stops: on `cancel` the tick script boots out its own job.
+
+### Two gotchas that silently kill it (both validated)
+
+- **PATH.** launchd runs with `PATH=/usr/bin:/bin` — no `node` (nvm),
+  often no `python3`. Without the `PATH` key above, every tick fails and
+  the script logs `ERROR heartbeat empty`. Set PATH to include your node
+  and python3 dirs.
+- **TCC (the sneaky one).** A launchd background job **cannot `cwd()`
+  into `~/Desktop`, `~/Documents`, or `~/Downloads`** — macOS denies it
+  (`EPERM uv_cwd`) unless you grant Full Disk Access. So
+  `CLAWROOM_SKILL_DIR` must point at the **installed** skill
+  (`~/.agents/skills/clawroom`, where `npx skills add` puts it) — **not**
+  a dev checkout under `~/Desktop`. Always `tail -f
+  ~/.clawroom-v4/wakeup-*.log` on first run; the script fails loud, never
+  silently.
 
 Note: **cloud "Routines" are notify-only** for this purpose — they run
 off your machine, so they can't reach the local state file and can't run
-`heartbeat`. Use a **local** scheduled task (launchd / cron) so the
-check runs co-located with state. This recipe is the **next step** —
-Codex (Recipe A) is the one we dogfood first.
+`heartbeat`. Use a **local** launchd job so the check runs co-located
+with state.
 
 ## What heartbeat is NOT
 
