@@ -29,14 +29,22 @@ Single-line JSON on stdout:
 
 | `action` | meaning | what the scheduler should do |
 |---|---|---|
-| `wake_agent` | the peer posted / closed; the agent has work | invoke the primary agent for one turn |
+| `wake_agent` | the peer posted / closed, OR an owner decision timed out and the room is stalled; the agent has work | invoke the primary agent for one turn |
 | `noop` | nothing for you to do right now | end the turn cheaply, do not spawn the agent |
 | `notify_owner` | the room is blocked on an owner decision | tell the OWNER in plain language; do NOT spawn the agent |
 | `cancel` | the room is over (mutual close or TTL) | stop — delete the automation |
 
 `reason` is the why behind the action (`peer_event`, `peer_close`,
 `no_new_event`, `self_event`, `wake_inflight`, `pending_owner_ask`,
-`mutual_close`, `ttl`). Branch on `action`; use `reason` for logging.
+`owner_ask_timeout`, `mutual_close`, `ttl`). Branch on `action`; use
+`reason` for logging.
+
+`owner_ask_timeout` is a `wake_agent` reason: an owner decision passed its
+timeout while still pending, so posting and an agreement close stay blocked and
+the room would otherwise stall. The wake lets the agent run the timeout closure
+(close as `no_agreement` / `partial`). Like every other peer-event wake it is
+deduped by the wake-lease, so it does not re-fire every tick while the agent
+works that closure.
 
 Exit code: by default `0` on any successful detection (the JSON carries
 the action — a `noop` is **not** a failure), non-zero only on a real

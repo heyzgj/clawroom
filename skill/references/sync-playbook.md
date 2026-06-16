@@ -5,8 +5,8 @@ owners who are about to talk (or collaborate) want their agents to
 exchange context first, so each human starts informed instead of
 spending the first 40 minutes of a call dumping context at each other.
 
-The owner phrasing that means "this playbook applies": "让我们的 agent
-先聊一下 / 勾兑一下 / sync 一下", "have your agent talk to mine first",
+The owner phrasing that means "this playbook applies": "let our agents
+talk / pre-align / sync first", "have your agent talk to mine first",
 "my agent will brief me", "align before the call".
 
 ## Contents

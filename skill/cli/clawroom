@@ -53,6 +53,7 @@ import {
   DEFAULT_MAX_THREAD_MS,
   DEFAULT_WAKE_LEASE_TTL_SECONDS,
   STATE_DIR,
+  makeWatchEvent,
 } from '../lib/types.mjs';
 
 const VERSION = '0.5.0';
@@ -305,17 +306,24 @@ async function cmdWatch() {
 // read cursor, NEVER replies, NEVER makes a business decision. It knocks on the
 // door; it never speaks. (NOT a bridge, NOT a brain.)
 //
-// Output (default): single-line JSON
+// Output: COMPACT single-line JSON (no indentation) so a line-based scheduler
+// parser reads exactly one line per tick (wakeup-recipes.md). printJson stays
+// pretty for other commands; heartbeat prints its own compact form.
 //   {"ok":true,"action":...,"reason":...,"room":...,"role":...,"event_id":N}
 //   action ∈ {wake_agent, noop, notify_owner, cancel}
 //   reason ∈ {peer_event, peer_close, no_new_event, self_event, wake_inflight,
-//             pending_owner_ask, mutual_close, ttl}
+//             pending_owner_ask, owner_ask_timeout, mutual_close, ttl}
+//
+// FAIL CLOSED on a body-leaking relay (invariant 9): every raw /events item is
+// run through makeWatchEvent (which throws on any disallowed field like `text`);
+// if it throws, heartbeat emits ok:false and exits non-zero EVEN in default mode,
+// because a relay leaking message bodies is a real error, not a detection.
 //
 // Exit codes:
 //   default        — 0 on ANY successful detection (the JSON carries action);
 //                    non-zero ONLY on real errors (bad args, unreadable state,
-//                    network failure after the client's normal retries). A noop
-//                    is NOT a failure.
+//                    invariant-9 leak, network failure after the client's normal
+//                    retries). A noop is NOT a failure.
 //   --exit-code-mode (opt-in) — 0 wake_agent / 3 noop / 4 cancel / 5 notify_owner.
 async function cmdHeartbeat() {
   const room_id = required('room');
@@ -348,8 +356,13 @@ async function cmdHeartbeat() {
     event_id: eventId,
   });
 
+  // Compact single-line print (Finding 4): a scheduler parses one line per tick.
+  // We do NOT use the shared printJson (pretty, multi-line) — other commands may
+  // rely on its indentation; heartbeat owns this compact form.
+  const printCompact = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
+
   const emit = (decision) => {
-    printJson(decision);
+    printCompact(decision);
     if (exitCodeMode) {
       const code = { wake_agent: 0, noop: 3, cancel: 4, notify_owner: 5 }[decision.action];
       process.exit(code === undefined ? 1 : code);
@@ -358,11 +371,43 @@ async function cmdHeartbeat() {
     process.exit(0);
   };
 
-  // (b) Blocked on the OWNER → notify_owner, do NOT poll. Waking the agent is
-  // useless while it is waiting on a human decision. A timed-out ask no longer
-  // blocks the room, so we fall through to normal detection in that case.
-  if (state.pending_owner_ask && !pendingAskTimedOut(state)) {
-    emit(decide('notify_owner', 'pending_owner_ask'));
+  // Hard error (NOT a detection): a body-leaking relay (invariant 9) or other
+  // real failure. Emits ok:false and exits non-zero in BOTH modes — heartbeat
+  // must FAIL CLOSED rather than silently proceed past a leak.
+  const emitError = (reason, detail) => {
+    printCompact({ ok: false, action: 'error', reason, room: room_id, role, event_id: null });
+    if (detail) process.stderr.write(`heartbeat: ${detail}\n`);
+    process.exit(2);
+  };
+
+  // (b) Blocked on the OWNER. Two sub-cases:
+  if (state.pending_owner_ask) {
+    if (!pendingAskTimedOut(state)) {
+      // Still within the owner's window → notify_owner, do NOT poll. Waking the
+      // agent is useless while it waits on a human decision.
+      emit(decide('notify_owner', 'pending_owner_ask'));
+      return;
+    }
+    // (b2) Finding 2: the ask TIMED OUT but is still set, so `post` and an
+    // agreement close stay blocked — the room would silently stall. Wake the
+    // agent so it can run the no_agreement/partial timeout closure. Still dumb:
+    // no semantics, just "wake, the ask timed out."
+    //
+    // Dedupe so we don't re-wake every tick. We reuse the wake-lease fields but
+    // key this case on a STABLE RESERVED SENTINEL id derived from the pending
+    // ask's question_id: a negative number. Real /events ids are >= 0
+    // (makeWatchEvent rejects id < 0; the cursor floor is -1), so a negative
+    // sentinel can never collide with a real peer event id. We match the lease
+    // EXACTLY (=== sentinel), not with the monotonic `<=` used for real events,
+    // because the sentinel is not part of the event sequence.
+    const sentinel = ownerAskTimeoutSentinel(state.pending_owner_ask.question_id);
+    if (lastWakeId === sentinel && now < inflightUntil) {
+      emit(decide('noop', 'wake_inflight', sentinel));
+      return;
+    }
+    const until = new Date(now + leaseTtlSeconds * 1000).toISOString();
+    setWakeLease(state, sentinel, until);
+    emit(decide('wake_agent', 'owner_ask_timeout', sentinel));
     return;
   }
 
@@ -403,16 +448,29 @@ async function cmdHeartbeat() {
 
   // (d/e/f) Scan the polled events (metadata only). Find the highest new id,
   // the highest-id PEER event, and whether any close event appeared this tick.
+  //
+  // Finding 1 / invariant 9: run EVERY raw event through makeWatchEvent before
+  // inspecting it — exactly as watch.mjs does. It throws if the relay leaked a
+  // body/`text` field (or any non-allowed field) and trims to {id, from, kind,
+  // ts}. If it throws, FAIL CLOSED: a body-leaking relay is a real error, so we
+  // emit ok:false and exit non-zero rather than silently proceeding.
   let maxId = cursor;
   let peerEvent = null;     // highest-id peer event strictly newer than the cursor
   let closeEventSeen = false;
   for (const raw of events) {
-    const id = Number(raw?.id);
-    if (!Number.isFinite(id) || id <= cursor) continue;
+    let ev;
+    try {
+      ev = makeWatchEvent(raw);
+    } catch (err) {
+      emitError('invariant9_violation', `relay leaked a disallowed field on a /events item — ${err?.message || err}`);
+      return;
+    }
+    const id = ev.id;
+    if (id <= cursor) continue;
     if (id > maxId) maxId = id;
-    if (String(raw?.kind) === 'close') closeEventSeen = true;
-    if (String(raw?.from) === peerRole) {
-      if (!peerEvent || id > Number(peerEvent.id)) peerEvent = raw;
+    if (ev.kind === 'close') closeEventSeen = true;
+    if (ev.from === peerRole) {
+      if (!peerEvent || id > Number(peerEvent.id)) peerEvent = ev;
     }
   }
 
@@ -836,6 +894,28 @@ function mustToken(state) {
   const t = state.role === 'host' ? state.host_token : state.guest_token;
   if (!t) throw new Error(`state for ${state.room_id}-${state.role} has no token`);
   return t;
+}
+
+/**
+ * Stable RESERVED wake-lease key for an owner_ask_timeout wake (Finding 2).
+ * Maps a question_id to a deterministic NEGATIVE integer. Real /events ids are
+ * always >= 0 (makeWatchEvent rejects id < 0; cursor floor is -1), so a negative
+ * key can never collide with a real peer event id — the timeout wake and a real
+ * peer-event wake never alias each other in the lease fields. Deterministic so a
+ * second tick for the SAME still-pending timed-out ask recomputes the same key
+ * and dedupes to wake_inflight. Bounded well inside safe-integer range.
+ * @param {string} questionId
+ * @returns {number} a negative integer in [-(2^31), -1]
+ */
+function ownerAskTimeoutSentinel(questionId) {
+  let h = 0;
+  const s = String(questionId || '');
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  // |0 yields a signed 32-bit int. Map to a strictly-negative reserved id:
+  // -1 - (h >>> 0 mod 2^31) lands in [-(2^31), -1], never 0 or positive.
+  return -1 - ((h >>> 0) % 0x80000000);
 }
 
 /**

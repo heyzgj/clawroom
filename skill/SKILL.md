@@ -3,11 +3,11 @@ name: clawroom
 description: >-
   Coordinates the owner's AI agent with another person's AI agent in a bounded
   room and closes with a clear, structured agreement each owner can read. Use
-  when the owner asks to sync, align, 勾兑, or coordinate with someone else's
-  agent; to let the two agents "talk first" and brief their humans before (or
-  instead of) a meeting; when a ClawRoom invite URL arrives; when the owner
-  forwards a pasted instruction block mentioning ClawRoom; or when an
-  agent-to-agent task needs owner approval mid-conversation.
+  when the owner asks to sync, align, reconcile, pre-align, or coordinate with
+  someone else's agent; to let the two agents "talk first" and brief their
+  humans before (or instead of) a meeting; when a ClawRoom invite URL arrives;
+  when the owner forwards a pasted instruction block mentioning ClawRoom; or
+  when an agent-to-agent task needs owner approval mid-conversation.
 allowed-tools: Bash
 metadata:
   version: "0.5.0"
@@ -49,8 +49,8 @@ Three things this skill is **not**:
   [references/owner-context.md](references/owner-context.md).
 - For failure modes, owner-approval edge cases, and the six close-reject
   conditions, load [references/gotchas.md](references/gotchas.md).
-- For pre-meeting sync rooms — "让我们的 agent 先聊/勾兑一下", "have your
-  agent talk to mine first, then brief me" — load
+- For pre-meeting sync rooms — "let our agents talk / pre-align first",
+  "have your agent talk to mine first, then brief me" — load
   [references/sync-playbook.md](references/sync-playbook.md). It covers
   what a good sync exchanges, what stays confidential by default, the
   chunk-and-ack protocol for long context, and the brief template.
@@ -73,16 +73,16 @@ All CLI invocations below assume `cwd` is the installed skill directory
    message, in their language:
    - If their paste (or surrounding conversation) already contains the
      intent — who to coordinate with, about what, any boundaries —
-     do NOT re-ask. Restate it in one line ("明白：我去和X的助手对一下
-     Y，Z不提") and proceed.
+     do NOT re-ask. Restate it in one line ("Got it: I'll sync with X's
+     assistant about Y; I won't bring up Z.") and proceed.
    - If intent is missing, ask once, conversationally: who's the
      counterpart, what outcome do you want, anything I should NOT
      share? One message, not a form.
    - **Propose, don't interrogate.** When you have enough, tell the
-     owner what you're about to do in one line (e.g. "我会开个房间，
-     开场介绍我们的进展和你想确认的两件事") and just do it. Show the
-     drafted opening only if stakes are high (money, commitments,
-     confidential context).
+     owner what you're about to do in one line (e.g. "I'll open a room
+     and start by sharing our progress and the two things you want to
+     confirm.") and just do it. Show the drafted opening only if stakes
+     are high (money, commitments, confidential context).
    - Mention once, casually, that alpha rooms are recorded for product
      improvement.
 
@@ -158,9 +158,13 @@ All CLI invocations below assume `cwd` is the installed skill directory
      - **Options** (2–3): the concrete choices, each with its tradeoff.
      - **Your recommendation** (1 line): which option you'd take and why.
    Example said to the owner:
-   > 小陈的助手报四千二，比你给我的上限高一点。我可以①照四千二答应（他含两轮
-   > 修改、两周交，比较省事）②压到你那个上限再谈（可能要少一轮修改）③先不答应。
-   > 我倾向①，他这个节奏和报价在行情内。你说按哪个走？
+   > Chen's assistant is quoting $4,200 — a bit over the ceiling you gave
+   > me. I can (1) accept at $4,200 (it includes two rounds of revisions
+   > and two-week delivery, and it's the least hassle), (2) push back to
+   > your ceiling and re-negotiate (we'd probably lose a round of
+   > revisions), or (3) hold off for now. I lean toward (1) — his timeline
+   > and price are in line with the going rate. Which way do you want me to
+   > go?
 
    Behind the scenes you ALSO run `./cli/clawroom ask-owner` to record
    the boundary in state (this hard-blocks posting past the mandate and
@@ -339,7 +343,8 @@ rejects or doesn't answer before timeout, agreement is impossible —
 close as `no_agreement` or `partial`.
 
 Once the owner answers, **say the decision back to the peer in plain
-language in the room** — e.g. "确认了，四千二可以，含两轮修改、两周交。"
+language in the room** — e.g. "Confirmed — $4,200 works, with two rounds
+of revisions and two-week delivery."
 Do NOT echo your internal notation (no "budget_ceiling_usd=650
 overridden") into the room — that notation is owner-private
 record-keeping for the CloseDraft evidence, not peer-facing copy.

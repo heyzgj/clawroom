@@ -271,6 +271,98 @@ test('pending_owner_ask set → notify_owner/pending_owner_ask AND it did NOT po
   }
 });
 
+test('Finding 1: hostile relay leaks a `text` field on /events → heartbeat FAILS CLOSED (ok:false, non-zero exit)', async () => {
+  // Mirror invariant9.test.mjs's hostile-relay test, but for heartbeat: if the
+  // relay returns a /events item carrying a message body, makeWatchEvent must
+  // reject it and heartbeat must refuse to proceed (it won't tolerate a
+  // body-leaking relay) rather than silently scanning around the leak.
+  const room = freshRoom('leak', { cursor: 2 });
+  const { server, state, url } = await startMockRelay({
+    events: [{ id: 3, from: 'guest', kind: 'message', ts: 10, text: 'peer body leaked by a hostile relay' }],
+  });
+  try {
+    const r = await runCli(['heartbeat', '--room', room, '--role', 'host'], { CLAWROOM_RELAY: url });
+    assert.notEqual(r.code, 0, `a leaked body is a real error: must exit non-zero; stderr=${r.stderr}`);
+    const d = parseDecision(r.stdout);
+    assert.equal(d.ok, false, 'fail-closed result is ok:false');
+    assert.equal(d.action, 'error');
+    assert.equal(d.reason, 'invariant9_violation');
+    // Even failing closed, heartbeat never fetched a body.
+    assert.equal(state.hitMessages, false);
+    // And the leaked body text never appears in any output surface.
+    assert.ok(!/peer body leaked/.test(r.stdout + r.stderr), 'leaked body must not be echoed anywhere');
+    assert.equal(readJsonState(room).last_wakeup_event_id, 0, 'a rejected leak writes no wake lease');
+  } finally {
+    server.close();
+  }
+});
+
+test('Finding 2: timed-out pending_owner_ask → wake_agent/owner_ask_timeout; 2nd tick within lease → noop/wake_inflight', async () => {
+  const room = freshRoom('asktimeout', { cursor: 1 });
+  // A pending ask that is ALREADY past its timeout. It stays set (so post +
+  // agreement close remain blocked), which means the room would silently stall
+  // unless the agent is woken to run the timeout closure.
+  const s = readState(room, 'host');
+  setPendingOwnerAsk(s, {
+    question_id: 'q-stalled',
+    question_text: 'over ceiling?',
+    asked_at: new Date(Date.now() - 7200_000).toISOString(),
+    timeout_at: '2000-01-01T00:00:00.000Z', // in the past
+    blocks_until: 'answered',
+    context_snapshot: {},
+  });
+  // No NEW peer event waiting (id 1 is at the cursor) — proves the wake comes
+  // from the timeout, not from a fresh peer move.
+  const { server, state, url } = await startMockRelay({
+    events: [{ id: 1, from: 'guest', kind: 'message', ts: 1 }],
+  });
+  try {
+    // First tick: wake to run the timeout closure.
+    const first = await runCli(
+      ['heartbeat', '--room', room, '--role', 'host', '--lease-ttl', '3600'],
+      { CLAWROOM_RELAY: url }
+    );
+    assert.equal(first.code, 0, `stderr=${first.stderr}`);
+    const d1 = parseDecision(first.stdout);
+    assert.equal(d1.action, 'wake_agent');
+    assert.equal(d1.reason, 'owner_ask_timeout');
+    // A timed-out ask is a blocked-on-owner short-circuit BEFORE any relay poll:
+    // heartbeat must NOT poll /events to decide to wake on the timeout.
+    assert.equal(state.eventsPolls, 0, 'owner_ask_timeout wakes without polling the relay');
+    assert.equal(state.hitMessages, false);
+    const sentinel = d1.event_id;
+    assert.equal(typeof sentinel, 'number');
+    assert.ok(sentinel < 0, 'lease keyed on a reserved negative sentinel id (no collision with real peer ids)');
+    assert.equal(readJsonState(room).last_wakeup_event_id, sentinel, 'lease records the sentinel');
+    // The ask is still pending after the wake — heartbeat does not resolve it.
+    assert.ok(readJsonState(room).pending_owner_ask, 'pending_owner_ask still set; heartbeat only knocks');
+
+    // Second tick within the lease: deduped, do not re-wake every tick.
+    const second = await runCli(
+      ['heartbeat', '--room', room, '--role', 'host', '--lease-ttl', '3600'],
+      { CLAWROOM_RELAY: url }
+    );
+    const d2 = parseDecision(second.stdout);
+    assert.equal(d2.action, 'noop');
+    assert.equal(d2.reason, 'wake_inflight');
+    assert.equal(d2.event_id, sentinel, 'wake_inflight reports the same sentinel');
+
+    // After lease expiry, the still-pending timed-out ask wakes again.
+    const s3 = readJsonState(room);
+    s3.wakeup_inflight_until = '2000-01-01T00:00:00.000Z';
+    fs.writeFileSync(path.join(STATE_DIR, `${room}-host.state.json`), JSON.stringify(s3, null, 2));
+    const third = await runCli(
+      ['heartbeat', '--room', room, '--role', 'host', '--lease-ttl', '3600'],
+      { CLAWROOM_RELAY: url }
+    );
+    const d3 = parseDecision(third.stdout);
+    assert.equal(d3.action, 'wake_agent', 'after lease expiry the still-stalled ask wakes again');
+    assert.equal(d3.reason, 'owner_ask_timeout');
+  } finally {
+    server.close();
+  }
+});
+
 test('dedupe: same peer event → 1st wake_agent, 2nd noop/wake_inflight; after lease expiry → wake again', async () => {
   const room = freshRoom('dedupe', { cursor: 2 });
   const { server, url } = await startMockRelay({
