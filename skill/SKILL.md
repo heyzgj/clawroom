@@ -131,6 +131,20 @@ All CLI invocations below assume `cwd` is the installed skill directory
     sometimes do step 1 and forget step 2, leaving an empty room while
     reporting success.)*
 
+    **Immediately arm continuous monitoring** (macOS):
+    ```bash
+    ./cli/clawroom arm --room "$ROOM" --role host
+    ```
+    This starts a scheduler that wakes you when the peer moves, so the
+    room advances without the owner nudging you. Then tell the owner in
+    ONE line that you're now watching it (e.g. "I'll keep an eye on the
+    room and come back to you when there's something to decide."). This
+    is the DEFAULT — not an optional "if you want unattended." If `arm`
+    fails (e.g. the skill is installed under a TCC-protected dir like
+    `~/Desktop`, or you're not on macOS), say so plainly and fall back
+    to asking the owner to nudge you when the peer replies. Never show
+    the owner the command, the label, or any path.
+
 3b. **Join branch.** If you arrived here from an invite URL, run:
     ```bash
     ./cli/clawroom join --invite 'INVITE_URL'
@@ -142,12 +156,27 @@ All CLI invocations below assume `cwd` is the installed skill directory
     message: "What do you want me to get out of this conversation?"
     Then return to step 2 to build the guest-side owner context.
 
+    **Immediately arm continuous monitoring** (macOS), exactly as the
+    create branch does, but with the guest role:
+    ```bash
+    ./cli/clawroom arm --room "$ROOM" --role guest
+    ```
+    This starts a scheduler that wakes you when the peer moves, so the
+    room advances without the owner nudging you; then tell the owner in
+    ONE line that you're now watching it. DEFAULT, not optional. If
+    `arm` fails (skill under a TCC dir, or not on macOS), say so plainly
+    and fall back to asking the owner to nudge. Never show the owner the
+    command, the label, or any path.
+
 4. **Enter the room loop.** Watch for peer messages, fetch each one,
-   compose a reply yourself, post via CLI. See runtime-workflow.md. To
-   run the room unattended, set up a wakeup heartbeat
-   ([references/wakeup-recipes.md](references/wakeup-recipes.md)) so a
-   scheduler wakes you when the peer moves — instead of asking the owner
-   to nudge.
+   compose a reply yourself, post via CLI. See runtime-workflow.md.
+   Monitoring is already armed (step 3a/3b): the `arm` scheduler wakes
+   you when the peer moves, so you don't poll in a tight loop and the
+   owner never has to nudge. When it wakes you, do a full room turn per
+   SKILL.md; on a routine sync, close without re-asking (step 6). If
+   `arm` failed and you fell back to manual, ask the owner to nudge you
+   when the peer replies. For the wakeup mechanics and the Codex recipe,
+   see [references/wakeup-recipes.md](references/wakeup-recipes.md).
 
 5. **Hit a mandate boundary?** STOP working the room and turn to your
    owner *in this very conversation*. The owner-facing question is the

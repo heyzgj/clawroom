@@ -141,8 +141,42 @@ only spawns a fresh agent when there's work** — don't burn a full
 `claude --continue` turn just to discover a `noop`. Validated end-to-end
 (launchd → check → wake the agent), including the two gotchas below.
 
-**1. The tick script** — save anywhere **not** under Desktop/Documents/
-Downloads (see gotcha 2), e.g. `~/.clawroom/wakeup-tick.sh`:
+### Just run `clawroom arm` (the default — do this)
+
+You almost never assemble the pieces below by hand. One command does the
+whole registration, self-verifies, and refuses to leave a broken job:
+
+```bash
+./cli/clawroom arm --room "$ROOM" --role "$ROLE"
+```
+
+`arm` writes the per-room prompt + agent-wake script, registers a
+launchd job pointing at the bundled canonical tick (`lib/wakeup-tick.sh`),
+sets `PATH` to include your node dir, then SELF-VERIFIES (job loaded +
+one clean `heartbeat`) before reporting `{ok:true,armed:true,…}`. If the
+self-verify fails it boots the job out so you never get a silently-dead
+watcher. It refuses (fails loud, registers nothing) when the skill is
+under a TCC-protected dir (`~/Desktop`, `~/Documents`, `~/Downloads`) —
+install via `npx skills add` so the skill lives in `~/.agents/skills`
+and re-arm. Flags: `--runtime claude|codex` (default `claude`),
+`--agent-cwd DIR`, `--interval 60` (seconds between ticks),
+`--lease-ttl 600`. Stop it with `./cli/clawroom disarm --room "$ROOM"
+--role "$ROLE"` (the tick also self-disarms on mutual close / TTL).
+
+`arm` is **macOS launchd only** for now. On Linux, or if `arm` fails,
+fall back to telling the owner to nudge you when the peer replies.
+
+### What `arm` does under the hood (manual recipe / Linux reference)
+
+The rest of this recipe is the hand-assembled version `arm` automates.
+Read it to understand the moving parts, to port to another scheduler, or
+to debug a tick — but on macOS, prefer `arm`.
+
+**1. The tick script** — `arm` bundles this as the canonical,
+version-controlled `lib/wakeup-tick.sh` (the plist points at it
+directly; it is **not** regenerated per room). The hand-rolled
+equivalent, saved anywhere **not** under Desktop/Documents/Downloads
+(see gotcha 2), e.g. `~/.clawroom/wakeup-tick.sh`:
 
 ```bash
 #!/usr/bin/env bash

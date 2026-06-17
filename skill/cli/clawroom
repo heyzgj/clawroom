@@ -11,6 +11,11 @@
 //   heartbeat     --room --role [--wait S] [--lease-ttl S] [--exit-code-mode]
 //                 DUMB wakeup CHECK: detect room state, say whether to wake the
 //                 primary agent. NEVER reads bodies / advances cursor / posts.
+//   arm           --room --role [--runtime claude|codex] [--agent-cwd DIR]
+//                 [--interval 60] [--lease-ttl 600]
+//                 Self-verifying: register a macOS launchd job that runs the
+//                 heartbeat tick on a timer so the room self-drives. (macOS only.)
+//   disarm        --room --role   Boot out the launchd job + rm the per-room base.
 //   close         --room --role --draft-file PATH
 //   resume        --room --role [--debug]
 //   lint          --room --role (--text TEXT | --before-close --draft-file PATH)
@@ -22,7 +27,9 @@
 // Tokens are read from the local state file written by create/join.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   RelayClient,
@@ -92,6 +99,8 @@ async function main() {
     case 'poll':         return cmdPoll();
     case 'watch':        return cmdWatch();
     case 'heartbeat':    return cmdHeartbeat();
+    case 'arm':          return cmdArm();
+    case 'disarm':       return cmdDisarm();
     case 'close':        return cmdClose();
     case 'resume':       return cmdResume();
     case 'lint':         return cmdLint();
@@ -541,6 +550,309 @@ async function cmdHeartbeat() {
   emit(decide('wake_agent', reason, peerId));
 }
 
+// ---------- arm / disarm (macOS launchd unattended monitoring) ----------
+//
+// `arm` encapsulates the validated launchd recipe (references/wakeup-recipes.md
+// Recipe B) as ONE command the AGENT runs right after create/join, so the room
+// self-drives and the owner never becomes the relay. It writes per-room files,
+// registers a launchd job pointing at the canonical bundled tick
+// (lib/wakeup-tick.sh), and SELF-VERIFIES (job loaded + one clean heartbeat)
+// before reporting success — leaving NO half-armed/broken job behind.
+//
+// macOS launchd ONLY for now (Linux systemd --user is a TODO). The agent tells
+// the owner a plain sentence ("I'm now watching this room"); this JSON is for
+// the agent and is never shown to the owner — it carries no tokens/paths in any
+// owner-facing surface, only the label/log path the agent uses to disarm/debug.
+
+function armPlatformGuard() {
+  if (process.platform !== 'darwin') {
+    throw new Error(
+      'arm: macOS launchd only for now (this is darwin-specific). ' +
+      'Linux systemd --user support is a TODO. ' +
+      'Fall back to asking the owner to nudge, or run the heartbeat manually.'
+    );
+  }
+}
+
+/**
+ * The directory containing THIS CLI's skill (the dir that holds SKILL.md). The
+ * CLI lives at <skillDir>/cli/clawroom, so the skill dir is two levels up. The
+ * launchd tick must `cd` here, so it must be the INSTALLED skill, not a dev
+ * checkout under a TCC-protected dir.
+ */
+function skillDir() {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(__dirname, '..');
+}
+
+/**
+ * TCC guard (critical). A launchd background job CANNOT cwd into ~/Desktop,
+ * ~/Documents, or ~/Downloads — macOS denies it (EPERM uv_cwd) unless Full Disk
+ * Access is granted. So if the skill is installed under one of those, the tick
+ * would die silently every fire. We FAIL LOUD and register NOTHING, telling the
+ * agent to install via `npx skills add` (which lands in ~/.agents/skills) and
+ * re-arm. Match by path prefix against the user's home TCC dirs.
+ */
+function assertSkillNotUnderTcc(dir) {
+  const home = os.homedir();
+  const tccDirs = ['Desktop', 'Documents', 'Downloads'].map((d) => path.join(home, d));
+  const resolved = path.resolve(dir);
+  for (const tcc of tccDirs) {
+    if (resolved === tcc || resolved.startsWith(tcc + path.sep)) {
+      throw new Error(
+        `arm: skill is under a TCC-protected dir (${resolved}); a launchd job ` +
+        `cannot cwd there, so the wakeup would die silently every fire. ` +
+        `Install via \`npx skills add heyzgj/clawroom\` (lands in ~/.agents/skills) and re-arm.`
+      );
+    }
+  }
+}
+
+/** Per-room base dir: $HOME/.clawroom/<room>-<role>/ (separate from STATE_DIR). */
+function armBaseDir(room_id, role) {
+  return path.join(os.homedir(), '.clawroom', `${room_id}-${role}`);
+}
+
+function armLabel(room_id, role) {
+  // Launchd label prefix is inlined (not a module-level const) so it is never
+  // in the temporal dead zone when main() runs synchronously at module load.
+  return `cc.clawroom.wake.${room_id}-${role}`;
+}
+
+function plistPath(label) {
+  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+}
+
+/** XML-escape a string for safe embedding in plist <string> values. */
+function xmlEscape(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/** Is a launchd label currently loaded for this gui domain? */
+function launchdLabelLoaded(label) {
+  // `launchctl list <label>` exits 0 and prints a dict if loaded; non-zero if not.
+  const r = spawnSync('launchctl', ['list', label], { encoding: 'utf8' });
+  return r.status === 0;
+}
+
+/** Boot out a launchd label from the current gui domain (idempotent). */
+function launchdBootout(label) {
+  const uid = process.getuid ? process.getuid() : 0;
+  spawnSync('launchctl', ['bootout', `gui/${uid}/${label}`], { encoding: 'utf8' });
+}
+
+/**
+ * The default per-room wake prompt (wakeup-recipes.md step 2 wording). A
+ * function, not a module-level const, so it is never in the temporal dead zone
+ * when main() runs synchronously at module load (the bug that bit arm/disarm).
+ */
+function wakePromptText() {
+  return (
+    "A new message arrived in your ClawRoom room. Poll it, read it, respond per " +
+    "SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to " +
+    "RECORD it in state FIRST — never just ask in this turn and stop (an " +
+    "unattended scheduler can't see a bare question, so the room stalls). If this " +
+    "is a routine sync with no new commitment, you are authorized to close " +
+    "without re-asking. Close when both sides agree.\n"
+  );
+}
+
+/**
+ * The per-room wake-agent.sh body. Reads the prompt from a FILE (no eval, no
+ * inline quoting — an apostrophe/paren in the prompt can never break the
+ * invocation). <resume> differs per runtime; the tick only needs this to wake
+ * one turn.
+ */
+function wakeAgentScript(runtime) {
+  const resume =
+    runtime === 'codex'
+      ? 'exec codex exec resume --last "$(cat "${CLAWROOM_WAKE_PROMPT_FILE:?}")"'
+      : 'exec claude --continue -p "$(cat "${CLAWROOM_WAKE_PROMPT_FILE:?}")" \\\n' +
+        '  --model sonnet --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Glob,Grep"';
+  return (
+    '#!/usr/bin/env bash\n' +
+    '# Per-room agent-wake script written by `clawroom arm`. Resumes THIS agent\n' +
+    '# for ONE turn and reads the prompt from a file (no eval, no inline quoting).\n' +
+    'set -euo pipefail\n' +
+    'cd "${CLAWROOM_AGENT_CWD:?}"\n' +
+    resume + '\n'
+  );
+}
+
+/**
+ * Build the launchd plist XML. ProgramArguments points at the CANONICAL bundled
+ * tick (lib/wakeup-tick.sh), never a per-room copy. All per-room variation is in
+ * EnvironmentVariables. PATH includes the node dir so launchd's bare
+ * PATH=/usr/bin:/bin (which has no nvm node) doesn't silently kill every tick.
+ */
+function buildPlist({ label, tickScript, nodeDir, room_id, role, skill_dir, stateDir, wakeLog, agentScript, agentCwd, promptFile, interval }) {
+  const env = {
+    PATH: `${nodeDir}:/usr/bin:/bin`,
+    CLAWROOM_ROOM: room_id,
+    CLAWROOM_ROLE: role,
+    CLAWROOM_SKILL_DIR: skill_dir,
+    CLAWROOM_STATE_DIR: stateDir,
+    CLAWROOM_WAKE_LOG: wakeLog,
+    CLAWROOM_LAUNCHD_LABEL: label,
+    CLAWROOM_AGENT_SCRIPT: agentScript,
+    CLAWROOM_AGENT_CWD: agentCwd,
+    CLAWROOM_WAKE_PROMPT_FILE: promptFile,
+  };
+  const envXml = Object.entries(env)
+    .map(([k, v]) => `    <key>${xmlEscape(k)}</key><string>${xmlEscape(v)}</string>`)
+    .join('\n');
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
+    '<plist version="1.0"><dict>\n' +
+    `  <key>Label</key><string>${xmlEscape(label)}</string>\n` +
+    '  <key>ProgramArguments</key><array>\n' +
+    `    <string>/bin/bash</string><string>${xmlEscape(tickScript)}</string>\n` +
+    '  </array>\n' +
+    '  <key>EnvironmentVariables</key><dict>\n' +
+    envXml + '\n' +
+    '  </dict>\n' +
+    `  <key>StartInterval</key><integer>${interval}</integer>\n` +
+    '  <key>RunAtLoad</key><true/>\n' +
+    '</dict></plist>\n'
+  );
+}
+
+async function cmdArm() {
+  armPlatformGuard();
+  const room_id = required('room');
+  const role = requiredRole();
+  const runtime = String(flags.runtime || 'claude');
+  if (runtime !== 'claude' && runtime !== 'codex') {
+    throw new Error(`arm: --runtime must be claude or codex, got "${runtime}"`);
+  }
+  const interval = Number(flags.interval ?? 60);
+  if (!Number.isFinite(interval) || interval <= 0 || !Number.isInteger(interval)) {
+    throw new Error(`arm: --interval must be a positive integer (seconds), got "${flags.interval}"`);
+  }
+  const leaseTtl = Number(flags['lease-ttl'] ?? DEFAULT_WAKE_LEASE_TTL_SECONDS);
+  if (!Number.isFinite(leaseTtl) || leaseTtl <= 0) {
+    throw new Error(`arm: --lease-ttl must be a positive number, got "${flags['lease-ttl']}"`);
+  }
+
+  // (1) Require the room state to exist — arm runs AFTER create/join. Missing
+  // state is a loud failure: there is nothing to monitor.
+  mustReadState(room_id, role); // throws (exit 1) if missing
+
+  // (2) Resolve paths.
+  const SKILL_DIR = skillDir();
+  // (3) TCC guard — FAIL LOUD before registering anything.
+  assertSkillNotUnderTcc(SKILL_DIR);
+
+  const nodeDir = path.dirname(process.execPath);
+  const stateDir = STATE_DIR; // inherits CLAWROOM_STATE_DIR or the ~/.clawroom-v4 default
+  const base = armBaseDir(room_id, role);
+  const agentCwd = flags['agent-cwd'] ? String(flags['agent-cwd']) : path.join(base, 'work');
+  const label = armLabel(room_id, role);
+  const tickScript = path.join(SKILL_DIR, 'lib', 'wakeup-tick.sh');
+  if (!fs.existsSync(tickScript)) {
+    throw new Error(`arm: bundled tick missing at ${tickScript} — broken install`);
+  }
+  const wakeLog = path.join(stateDir, `wakeup-${room_id}-${role}.log`);
+  const promptFile = path.join(base, 'wake-prompt.txt');
+  const agentScript = path.join(base, 'wake-agent.sh');
+  const plist = plistPath(label);
+
+  // (4) Write the per-room files.
+  fs.mkdirSync(base, { recursive: true });
+  fs.mkdirSync(agentCwd, { recursive: true });
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(path.dirname(plist), { recursive: true });
+  fs.writeFileSync(promptFile, wakePromptText(), 'utf8');
+  fs.writeFileSync(agentScript, wakeAgentScript(runtime), { mode: 0o755 });
+
+  // (6) Write the launchd plist pointing at the CANONICAL bundled tick.
+  const plistXml = buildPlist({
+    label, tickScript, nodeDir, room_id, role,
+    skill_dir: SKILL_DIR, stateDir, wakeLog, agentScript, agentCwd, promptFile, interval,
+  });
+  fs.writeFileSync(plist, plistXml, 'utf8');
+
+  // (7) Idempotent: if already loaded, boot out first, then bootstrap fresh.
+  if (launchdLabelLoaded(label)) launchdBootout(label);
+
+  // (8) Bootstrap.
+  const uid = process.getuid ? process.getuid() : 0;
+  const boot = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { encoding: 'utf8' });
+  if (boot.status !== 0) {
+    // Clean up: never leave a plist behind for a job that didn't load.
+    launchdBootout(label);
+    try { fs.unlinkSync(plist); } catch {}
+    throw new Error(
+      `arm: launchctl bootstrap failed (status ${boot.status}): ${(boot.stderr || boot.stdout || '').trim().slice(0, 200)}`
+    );
+  }
+
+  // (9) Self-verify. Either failure → boot out + FAIL LOUD (never a half-armed job).
+  const failArm = (detail) => {
+    launchdBootout(label);
+    try { fs.unlinkSync(plist); } catch {}
+    throw new Error(`arm: self-verify failed — ${detail}. Booted out the job; nothing left armed.`);
+  };
+  if (!launchdLabelLoaded(label)) {
+    failArm('job did not appear in launchctl list after bootstrap');
+  }
+  // One real heartbeat tick must return valid JSON with a known action. We run
+  // the SAME CLI (this file) via the resolved node, with the same env the tick
+  // would see, so PATH/cwd problems surface here, not silently at 2am.
+  const hb = spawnSync(process.execPath, [fileURLToPath(import.meta.url), 'heartbeat', '--room', room_id, '--role', role], {
+    cwd: SKILL_DIR,
+    env: { ...process.env, CLAWROOM_STATE_DIR: stateDir },
+    encoding: 'utf8',
+  });
+  let hbJson;
+  try {
+    hbJson = JSON.parse((hb.stdout || '').trim());
+  } catch {
+    failArm(`heartbeat tick did not return valid JSON (stderr: ${(hb.stderr || '').trim().slice(0, 160)})`);
+  }
+  const VALID_ACTIONS = new Set(['wake_agent', 'noop', 'notify_owner', 'cancel']);
+  if (!hbJson || hbJson.ok !== true || !VALID_ACTIONS.has(hbJson.action)) {
+    failArm(`heartbeat tick returned an error or unknown action: ${JSON.stringify(hbJson)}`);
+  }
+
+  // (10) Success JSON (for the AGENT, never shown to the owner). No tokens.
+  printJson({
+    ok: true,
+    armed: true,
+    label,
+    interval,
+    room: room_id,
+    role,
+    wake_log: wakeLog,
+  });
+}
+
+async function cmdDisarm() {
+  // disarm is not platform-guarded as hard as arm: booting out a label / rming
+  // a dir is harmless on any platform, and we want disarm to always be runnable
+  // to clean up. launchctl simply no-ops if absent.
+  const room_id = required('room');
+  const role = requiredRole();
+  const label = armLabel(room_id, role);
+  const base = armBaseDir(room_id, role);
+  const plist = plistPath(label);
+
+  // Boot out (idempotent — no error if not loaded). macOS only; on other
+  // platforms spawnSync just fails to find launchctl, which we ignore.
+  if (process.platform === 'darwin') launchdBootout(label);
+  // Remove the plist + the per-room base. rm is idempotent (no error if gone).
+  try { fs.unlinkSync(plist); } catch {}
+  try { fs.rmSync(base, { recursive: true, force: true }); } catch {}
+
+  printJson({ ok: true, disarmed: true, label, room: room_id, role });
+}
+
 async function cmdClose() {
   const room_id = required('room');
   const role = requiredRole();
@@ -944,6 +1256,8 @@ Subcommands:
   poll          --room --role [--after N] [--wait S] [--no-state]
   watch         --room --role [--include-self] [--once]
   heartbeat     --room --role [--wait S] [--lease-ttl S] [--exit-code-mode]
+  arm           --room --role [--runtime claude|codex] [--agent-cwd DIR] [--interval 60] [--lease-ttl 600]
+  disarm        --room --role
   close         --room --role --draft-file PATH
   resume        --room --role [--debug]
   lint          --room --role (--text TEXT | --before-close --draft-file PATH)
