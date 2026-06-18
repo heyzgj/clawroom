@@ -47,6 +47,7 @@ import {
   setWakeLease,
   setPendingOwnerAsk,
   resolveOwnerAsk,
+  clearOwnerAnsweredWake,
   pendingAskTimedOut,
   stateFingerprint,
 } from '../lib/state.mjs';
@@ -61,9 +62,11 @@ import {
   DEFAULT_WAKE_LEASE_TTL_SECONDS,
   STATE_DIR,
   makeWatchEvent,
+  ownerAskTimeoutSentinel,
+  ownerAnsweredSentinel,
 } from '../lib/types.mjs';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -259,6 +262,12 @@ async function cmdPost() {
   if (Number.isFinite(postedId) && postedId > state.last_event_cursor) {
     setCursor(state, postedId);
   }
+  // Consume the owner-answered wake signal: the agent woke on owner_answered and
+  // has now posted its reply, so the signal is spent — clear it (merge-write,
+  // so a concurrent heartbeat lease survives) to stop the heartbeat re-waking.
+  if (state.owner_answered_wake) {
+    clearOwnerAnsweredWake(state);
+  }
   printJson({ ok: true, id: postedId, attempts: result.attempts });
 }
 
@@ -321,7 +330,8 @@ async function cmdWatch() {
 //   {"ok":true,"action":...,"reason":...,"room":...,"role":...,"event_id":N}
 //   action ∈ {wake_agent, noop, notify_owner, cancel}
 //   reason ∈ {peer_event, peer_close, no_new_event, self_event, wake_inflight,
-//             pending_owner_ask, owner_ask_timeout, mutual_close, ttl}
+//             pending_owner_ask, owner_ask_timeout, owner_answered,
+//             mutual_close, ttl}
 //
 // FAIL CLOSED on a body-leaking relay (invariant 9): every raw /events item is
 // run through makeWatchEvent (which throws on any disallowed field like `text`);
@@ -417,6 +427,30 @@ async function cmdHeartbeat() {
     const until = new Date(now + leaseTtlSeconds * 1000).toISOString();
     setWakeLease(state, sentinel, until);
     emit(decide('wake_agent', 'owner_ask_timeout', sentinel));
+    return;
+  }
+
+  // (b3) The OWNER ANSWERED (approve OR reject) out-of-band via owner-reply,
+  // which cleared pending_owner_ask and set owner_answered_wake. pending is now
+  // gone so we fall through (b) above. But the peer is just waiting for our
+  // reply — there is NO new peer event — so the relay-poll branch (c) below
+  // would noop forever, leaving the owner's answer recorded-but-unacted and the
+  // room silently stalled. Wake the agent to ACT on the answer. Still DUMB: we
+  // read only the state flag's question_id (no message body, no decision
+  // semantics here — the agent reads the recorded approval itself). Dedupe on a
+  // STABLE RESERVED SENTINEL keyed off the question_id, matched EXACTLY against
+  // the lease (=== sentinel), exactly like the owner_ask_timeout case. The
+  // agent clears owner_answered_wake on its next successful post/close, so this
+  // does not loop once acted on.
+  if (state.owner_answered_wake) {
+    const sentinel = ownerAnsweredSentinel(state.owner_answered_wake.question_id);
+    if (lastWakeId === sentinel && now < inflightUntil) {
+      emit(decide('noop', 'wake_inflight', sentinel));
+      return;
+    }
+    const until = new Date(now + leaseTtlSeconds * 1000).toISOString();
+    setWakeLease(state, sentinel, until);
+    emit(decide('wake_agent', 'owner_answered', sentinel));
     return;
   }
 
@@ -651,14 +685,23 @@ function launchdBootout(label) {
  * function, not a module-level const, so it is never in the temporal dead zone
  * when main() runs synchronously at module load (the bug that bit arm/disarm).
  */
-function wakePromptText() {
+function wakePromptText(room_id, role) {
   return (
-    "A new message arrived in your ClawRoom room. Poll it, read it, respond per " +
-    "SKILL.md. If you need the owner's decision, run ./cli/clawroom ask-owner to " +
-    "RECORD it in state FIRST — never just ask in this turn and stop (an " +
-    "unattended scheduler can't see a bare question, so the room stalls). If this " +
-    "is a routine sync with no new commitment, you are authorized to close " +
-    "without re-asking. Close when both sides agree.\n"
+    "You are the " + role + " agent for an ongoing ClawRoom room (room id: " + room_id + "). " +
+    "Your monitor woke you because the peer moved or the room needs attention. You are " +
+    "starting FRESH this turn with no memory of earlier turns, so reconstruct context first " +
+    "(your cwd is the ClawRoom skill directory):\n" +
+    "1. Load the room state:\n" +
+    "     ./cli/clawroom resume --room " + room_id + " --role " + role + "\n" +
+    "2. Read the FULL conversation so far AND your owner's recorded constraints:\n" +
+    "     ./cli/clawroom poll --room " + room_id + " --role " + role + " --after -1 --no-state\n" +
+    "3. Then act per SKILL.md: if the peer is owed a reply, compose and POST it, then END this " +
+    "turn — do NOT keep polling or waiting in-loop for the peer's reply; your monitor wakes you " +
+    "again when they move (staying in-loop just burns time). If you need the owner's decision, " +
+    "run ./cli/clawroom ask-owner to RECORD it in state FIRST — never ask in bare turn-text and " +
+    "stop (an unattended scheduler can't see a bare question, so the room stalls).\n" +
+    "4. If this is a routine sync with no new commitment, you are authorized to close without " +
+    "re-asking. Close only when both sides' goals are genuinely met — not prematurely.\n"
   );
 }
 
@@ -669,18 +712,25 @@ function wakePromptText() {
  * one turn.
  */
 function wakeAgentScript(runtime) {
-  const resume =
+  // Cold pickup, NOT session resume: a session is keyed to the cwd where the
+  // agent was originally launched, which an unattended scheduler cannot know
+  // or reach. So wake a FRESH agent and let it reconstruct context from room
+  // state + relay history (the wake prompt carries the room id + role and tells
+  // it to resume+poll). This is cwd/TCC-robust and matches the externalized-
+  // state design — `claude --continue` in an arm-made work dir resumed nothing.
+  const invoke =
     runtime === 'codex'
-      ? 'exec codex exec resume --last "$(cat "${CLAWROOM_WAKE_PROMPT_FILE:?}")"'
-      : 'exec claude --continue -p "$(cat "${CLAWROOM_WAKE_PROMPT_FILE:?}")" \\\n' +
+      ? 'exec codex exec "$(cat "${CLAWROOM_WAKE_PROMPT_FILE:?}")"'
+      : 'exec claude -p "$(cat "${CLAWROOM_WAKE_PROMPT_FILE:?}")" \\\n' +
         '  --model sonnet --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Glob,Grep"';
   return (
     '#!/usr/bin/env bash\n' +
-    '# Per-room agent-wake script written by `clawroom arm`. Resumes THIS agent\n' +
-    '# for ONE turn and reads the prompt from a file (no eval, no inline quoting).\n' +
+    '# Per-room agent-wake script written by `clawroom arm`. Wakes a FRESH agent\n' +
+    '# for ONE cold-pickup turn (context from room state + history, not session\n' +
+    '# resume) and reads the prompt from a file (no eval, no inline quoting).\n' +
     'set -euo pipefail\n' +
     'cd "${CLAWROOM_AGENT_CWD:?}"\n' +
-    resume + '\n'
+    invoke + '\n'
   );
 }
 
@@ -752,7 +802,10 @@ async function cmdArm() {
   const nodeDir = path.dirname(process.execPath);
   const stateDir = STATE_DIR; // inherits CLAWROOM_STATE_DIR or the ~/.clawroom-v4 default
   const base = armBaseDir(room_id, role);
-  const agentCwd = flags['agent-cwd'] ? String(flags['agent-cwd']) : path.join(base, 'work');
+  // Cold-pickup wake runs in the skill dir so ./cli/clawroom and SKILL.md
+  // resolve directly (a fresh agent reconstructs context from state+history,
+  // not a session resume — so it does NOT need the original launch cwd).
+  const agentCwd = flags['agent-cwd'] ? String(flags['agent-cwd']) : SKILL_DIR;
   const label = armLabel(room_id, role);
   const tickScript = path.join(SKILL_DIR, 'lib', 'wakeup-tick.sh');
   if (!fs.existsSync(tickScript)) {
@@ -768,7 +821,7 @@ async function cmdArm() {
   fs.mkdirSync(agentCwd, { recursive: true });
   fs.mkdirSync(stateDir, { recursive: true });
   fs.mkdirSync(path.dirname(plist), { recursive: true });
-  fs.writeFileSync(promptFile, wakePromptText(), 'utf8');
+  fs.writeFileSync(promptFile, wakePromptText(room_id, role), 'utf8');
   fs.writeFileSync(agentScript, wakeAgentScript(runtime), { mode: 0o755 });
 
   // (6) Write the launchd plist pointing at the CANONICAL bundled tick.
@@ -878,6 +931,12 @@ async function cmdClose() {
     summary: prepared.summary,
     closedraft_canonical: prepared.canonical,
   });
+  // Consume the owner-answered wake signal: if the agent woke on owner_answered
+  // and resolved by closing (rather than posting), the signal is spent — clear
+  // it (merge-write) so the heartbeat does not re-wake on a consumed answer.
+  if (state.owner_answered_wake) {
+    clearOwnerAnsweredWake(state);
+  }
   printJson({ ok: true, id: /** @type {any} */ (result.body)?.id, attempts: result.attempts });
 }
 
@@ -1206,28 +1265,6 @@ function mustToken(state) {
   const t = state.role === 'host' ? state.host_token : state.guest_token;
   if (!t) throw new Error(`state for ${state.room_id}-${state.role} has no token`);
   return t;
-}
-
-/**
- * Stable RESERVED wake-lease key for an owner_ask_timeout wake (Finding 2).
- * Maps a question_id to a deterministic NEGATIVE integer. Real /events ids are
- * always >= 0 (makeWatchEvent rejects id < 0; cursor floor is -1), so a negative
- * key can never collide with a real peer event id — the timeout wake and a real
- * peer-event wake never alias each other in the lease fields. Deterministic so a
- * second tick for the SAME still-pending timed-out ask recomputes the same key
- * and dedupes to wake_inflight. Bounded well inside safe-integer range.
- * @param {string} questionId
- * @returns {number} a negative integer in [-(2^31), -1]
- */
-function ownerAskTimeoutSentinel(questionId) {
-  let h = 0;
-  const s = String(questionId || '');
-  for (let i = 0; i < s.length; i++) {
-    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
-  }
-  // |0 yields a signed 32-bit int. Map to a strictly-negative reserved id:
-  // -1 - (h >>> 0 mod 2^31) lands in [-(2^31), -1], never 0 or positive.
-  return -1 - ((h >>> 0) % 0x80000000);
 }
 
 /**

@@ -109,6 +109,14 @@
  * @property {string | null} [wakeup_inflight_until] - heartbeat wake-lease:
  *   ISO timestamp until which the most recent wake is considered in-flight.
  *   Absent/null ⇒ no lease. After this time the same event can wake again.
+ * @property {{ question_id: string, decision: 'approve' | 'reject', answered_at: string } | null} [owner_answered_wake]
+ *   - unattended owner-approval loop wake signal. Set by `resolveOwnerAsk` when
+ *   the owner answers (approve OR reject); the heartbeat reads this flag and
+ *   wakes the agent to ACT on the answer (the peer is just waiting for our
+ *   reply, so no NEW peer event would otherwise wake it). The agent clears it
+ *   (clearOwnerAnsweredWake) after its next post/close. Absent/null ⇒ no
+ *   pending owner-answer to act on. Backward-compatible: old state files lack
+ *   it and an absent field means "no signal".
  */
 
 // ---------- constants ----------
@@ -188,6 +196,54 @@ export function makeWatchEvent(raw) {
   if (!MESSAGE_KINDS.includes(kind)) throw new Error(`makeWatchEvent: bad kind "${kind}"`);
   if (!Number.isFinite(ts)) throw new Error(`makeWatchEvent: bad ts ${obj.ts}`);
   return Object.freeze({ id, from, kind, ts });
+}
+
+// ---------- heartbeat wake-lease sentinels ----------
+//
+// The wake-lease fields key a wake on an event id. Real /events ids are always
+// >= 0 (makeWatchEvent rejects id < 0; the cursor floor is -1). For wakes that
+// are NOT tied to a peer event — an owner-ask timeout, or an owner answering an
+// ask — we need STABLE RESERVED keys that (a) never collide with a real event
+// id and (b) never collide with EACH OTHER for the same question_id, so the two
+// kinds of wake can't alias in the lease. We map a question_id to a negative
+// integer in two DISJOINT, strictly-negative ranges:
+//   timeout  sentinel ∈ [-(2^31),        -1]
+//   answered sentinel ∈ [-(2^32), -(2^31)-1]   (offset by -(2^31)-1)
+// Adjacent but non-overlapping: the largest answered sentinel (-(2^31)-1) is
+// strictly below the smallest timeout sentinel (-(2^31)). Both bounded well
+// inside safe-integer range (|value| < 2^32 ≪ 2^53). Deterministic, so a second
+// tick for the SAME still-set condition recomputes the same key and dedupes to
+// wake_inflight. Lives here (shared, dep-free) so the CLI and tests use ONE
+// definition — no drift between the production formula and what tests assert.
+
+/** djb2-ish 32-bit signed hash of a question_id. @param {string} questionId */
+function sentinelHash(questionId) {
+  let h = 0;
+  const s = String(questionId || '');
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+/**
+ * Reserved wake-lease key for an owner_ask_timeout wake.
+ * @param {string} questionId
+ * @returns {number} a negative integer in [-(2^31), -1]
+ */
+export function ownerAskTimeoutSentinel(questionId) {
+  return -1 - ((sentinelHash(questionId) >>> 0) % 0x80000000);
+}
+
+/**
+ * Reserved wake-lease key for an owner_answered wake (unattended owner-approval
+ * loop close). Disjoint from — and strictly more negative than — the timeout
+ * sentinel, so the two never alias for the same question_id.
+ * @param {string} questionId
+ * @returns {number} a negative integer in [-(2^32), -(2^31)-1]
+ */
+export function ownerAnsweredSentinel(questionId) {
+  return -0x80000001 - ((sentinelHash(questionId) >>> 0) % 0x80000000);
 }
 
 /**

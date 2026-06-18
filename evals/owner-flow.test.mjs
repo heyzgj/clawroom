@@ -18,7 +18,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLI = path.resolve(__dirname, '../skill/cli/clawroom');
 
-const { initState, readState } = await import('../skill/lib/state.mjs');
+const { initState, readState, setPendingOwnerAsk, resolveOwnerAsk, clearOwnerAnsweredWake, setCursor, setWakeLease } =
+  await import('../skill/lib/state.mjs');
 const { validateAndPrepareClose } = await import('../skill/lib/close.mjs');
 const { STATE_DIR } = await import('../skill/lib/types.mjs');
 
@@ -280,4 +281,190 @@ test('owner-reply rejects --source not in APPROVAL_SOURCES', async () => {
   ]);
   assert.notEqual(r.code, 0);
   assert.match(r.stderr, /--source must be one of/);
+});
+
+// ---- owner_answered wake signal (unattended owner-approval loop close) ----
+
+function setAndResolveAsk(room, decision) {
+  const s = readState(room, 'host');
+  setPendingOwnerAsk(s, {
+    question_id: 'q1', question_text: '?', asked_at: new Date().toISOString(),
+    timeout_at: '2099-01-01T00:00:00.000Z', blocks_until: 'answered', context_snapshot: {},
+  });
+  resolveOwnerAsk(s, {
+    question_id: 'q1', decision, source: 'primary_agent_conversation',
+    ts: new Date().toISOString(), evidence: 'e',
+  });
+  return s;
+}
+
+test('resolveOwnerAsk sets owner_answered_wake on APPROVE (and clears pending)', () => {
+  const room = `t_ownerflow_${process.pid}_wake_approve`;
+  cleanState(room, 'host');
+  initState({ room_id: room, role: 'host', host_token: 'host_test' });
+  setAndResolveAsk(room, 'approve');
+  const s = readState(room, 'host');
+  assert.equal(s.pending_owner_ask, null, 'pending cleared');
+  assert.ok(s.owner_answered_wake, 'owner_answered_wake must be set');
+  assert.equal(s.owner_answered_wake.question_id, 'q1');
+  assert.equal(s.owner_answered_wake.decision, 'approve');
+  assert.equal(typeof s.owner_answered_wake.answered_at, 'string');
+});
+
+test('resolveOwnerAsk sets owner_answered_wake on REJECT too', () => {
+  const room = `t_ownerflow_${process.pid}_wake_reject`;
+  cleanState(room, 'host');
+  initState({ room_id: room, role: 'host', host_token: 'host_test' });
+  setAndResolveAsk(room, 'reject');
+  const s = readState(room, 'host');
+  assert.ok(s.owner_answered_wake, 'a reject must also set the wake signal');
+  assert.equal(s.owner_answered_wake.decision, 'reject');
+});
+
+test('clearOwnerAnsweredWake removes the signal', () => {
+  const room = `t_ownerflow_${process.pid}_wake_clear`;
+  cleanState(room, 'host');
+  initState({ room_id: room, role: 'host', host_token: 'host_test' });
+  const s = setAndResolveAsk(room, 'approve');
+  clearOwnerAnsweredWake(s);
+  const after = readState(room, 'host');
+  assert.ok(!after.owner_answered_wake, 'owner_answered_wake must be cleared (null/absent)');
+  // The recorded approval must survive — clearing the wake signal must not drop it.
+  assert.equal(after.owner_approvals.length, 1);
+  assert.equal(after.owner_approvals[0].decision, 'approve');
+});
+
+test('clearOwnerAnsweredWake merges concurrently (does NOT clobber a wake-lease written after the caller read)', () => {
+  // Mirror of the setCursor clobber regression. The agent's post/close holds a
+  // state snapshot that has owner_answered_wake set; meanwhile a scheduler-
+  // driven heartbeat writes the wake-lease fields. clearOwnerAnsweredWake must
+  // re-read the freshest state and clear ONLY owner_answered_wake, never
+  // re-persisting the stale (pre-lease) lease fields.
+  const room = `t_ownerflow_${process.pid}_wake_merge`;
+  cleanState(room, 'host');
+  initState({ room_id: room, role: 'host', host_token: 'host_test' });
+  const staleAgentSnapshot = setAndResolveAsk(room, 'approve'); // has owner_answered_wake set, lease unset
+
+  // Concurrent heartbeat lands a wake-lease AND a cursor bump after the agent's read.
+  const heartbeatView = readState(room, 'host');
+  setWakeLease(heartbeatView, -3553, '2099-01-01T00:00:00.000Z');
+  const cursorView = readState(room, 'host');
+  setCursor(cursorView, 9);
+
+  // ...then the agent's turn finishes with its STALE object.
+  clearOwnerAnsweredWake(staleAgentSnapshot);
+
+  const final = readState(room, 'host');
+  assert.ok(!final.owner_answered_wake, 'owner_answered_wake cleared');
+  assert.equal(final.last_wakeup_event_id, -3553, 'the concurrent wake-lease must survive');
+  assert.equal(final.wakeup_inflight_until, '2099-01-01T00:00:00.000Z', 'lease inflight time survives');
+  assert.equal(final.last_event_cursor, 9, 'the concurrent cursor bump must survive');
+  assert.equal(final.owner_approvals.length, 1, 'recorded approval survives');
+});
+
+test('cmdPost clears owner_answered_wake after a successful post (signal consumed, no re-wake loop)', async () => {
+  const room = `t_ownerflow_${process.pid}_post_clears`;
+  cleanState(room, 'host');
+  initState({ room_id: room, role: 'host', host_token: 'host_test' });
+
+  // Mock relay that echoes a posted message id.
+  const http = await import('node:http');
+  const { server, url } = await new Promise((resolve) => {
+    const s = http.createServer((req, res) => {
+      if (!req.headers['authorization']?.startsWith('Bearer ')) { res.writeHead(401); res.end('{}'); return; }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 4, from: 'host', kind: 'message', ts: Date.now(), text: 'echo' }));
+    });
+    s.listen(0, '127.0.0.1', () => resolve({ server: s, url: `http://127.0.0.1:${/** @type {any} */ (s.address()).port}` }));
+  });
+
+  try {
+    // Owner asked then answered → pending cleared, owner_answered_wake set.
+    setAndResolveAsk(room, 'approve');
+    assert.ok(readState(room, 'host').owner_answered_wake, 'precondition: wake signal set');
+
+    // The agent (woken on owner_answered) posts its reply. pending is null so the
+    // post is NOT blocked; on success the wake signal must be consumed.
+    const r = await runCli(['post', '--room', room, '--role', 'host', '--text', 'sharing the owner-approved plan', '--relay', url]);
+    assert.equal(r.code, 0, `post should succeed; stderr=${r.stderr}`);
+    const after = readState(room, 'host');
+    assert.ok(!after.owner_answered_wake, 'owner_answered_wake must be cleared after a successful post');
+    assert.equal(after.owner_approvals.length, 1, 'the recorded approval still survives the clear');
+  } finally {
+    server.close();
+  }
+});
+
+test('cmdClose clears owner_answered_wake after a successful close', async () => {
+  const room = `t_ownerflow_${process.pid}_close_clears`;
+  cleanState(room, 'host');
+  initState({ room_id: room, role: 'host', host_token: 'host_test' });
+
+  // Owner asked then approved → owner_answered_wake set, approval recorded.
+  setAndResolveAsk(room, 'approve');
+  const state = readState(room, 'host');
+  assert.ok(state.owner_answered_wake, 'precondition: wake signal set');
+
+  // Build a minimal agreement draft whose single approval mirrors the recorded
+  // state approval exactly (so validateAndPrepareClose accepts it).
+  const approval = state.owner_approvals[0];
+  const draft = {
+    outcome: 'agreement',
+    agreed_terms: [{ term: 'plan', value: 'go', provenance: 'owner_reply:q1' }],
+    unresolved_items: [],
+    owner_constraints: [],
+    peer_commitments: [],
+    owner_approvals: [{
+      question_id: 'q1', decision: 'approve', source: 'primary_agent_conversation',
+      ts: approval.ts, evidence: approval.evidence,
+    }],
+    next_steps: [],
+    owner_summary: 'Owner approved the plan; closing with agreement.',
+  };
+  const draftPath = path.join(STATE_DIR, `${room}-draft.json`);
+  fs.writeFileSync(draftPath, JSON.stringify(draft));
+
+  // Mock relay that accepts the close.
+  const http = await import('node:http');
+  const { server, url } = await new Promise((resolve) => {
+    const s = http.createServer((req, res) => {
+      if (!req.headers['authorization']?.startsWith('Bearer ')) { res.writeHead(401); res.end('{}'); return; }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 7, kind: 'close', ts: Date.now() }));
+    });
+    s.listen(0, '127.0.0.1', () => resolve({ server: s, url: `http://127.0.0.1:${/** @type {any} */ (s.address()).port}` }));
+  });
+
+  try {
+    const r = await runCli(['close', '--room', room, '--role', 'host', '--draft-file', draftPath, '--relay', url]);
+    assert.equal(r.code, 0, `close should succeed; stderr=${r.stderr}`);
+    const after = readState(room, 'host');
+    assert.ok(!after.owner_answered_wake, 'owner_answered_wake must be cleared after a successful close');
+  } finally {
+    server.close();
+  }
+});
+
+test('backward-compat: a state file WITHOUT owner_answered_wake still validates/reads (resumeRoom + writeState)', () => {
+  // initState never writes owner_answered_wake, so a freshly created state file
+  // exercises the absent-field path. It must read back cleanly (validateRoomState
+  // treats the field as optional, exactly like the wake-lease fields), and a
+  // re-write must not invent the field.
+  const room = `t_ownerflow_${process.pid}_backcompat`;
+  cleanState(room, 'host');
+  const created = initState({ room_id: room, role: 'host', host_token: 'host_test' });
+  assert.equal(created.owner_answered_wake, undefined, 'initState does not set owner_answered_wake');
+  // Read back (calls validateRoomState internally) — must not throw.
+  const read = readState(room, 'host');
+  assert.ok(read, 'state without owner_answered_wake must read cleanly');
+  assert.equal(read.owner_answered_wake, undefined);
+  // Simulate an OLD on-disk file that predates the feature: strip any wake/lease
+  // fields and confirm validation still accepts it.
+  const raw = JSON.parse(fs.readFileSync(path.join(STATE_DIR, `${room}-host.state.json`), 'utf8'));
+  delete raw.owner_answered_wake;
+  delete raw.last_wakeup_event_id;
+  delete raw.wakeup_inflight_until;
+  fs.writeFileSync(path.join(STATE_DIR, `${room}-host.state.json`), JSON.stringify(raw, null, 2));
+  const reread = readState(room, 'host');
+  assert.ok(reread, 'an old-shape state file (no wake fields) must still validate');
 });

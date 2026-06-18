@@ -66,6 +66,19 @@ function validateRoomState(raw) {
   ) {
     throw new Error('state: bad wakeup_inflight_until');
   }
+  // Owner-answered wake signal (unattended owner-approval loop). Optional +
+  // backward-compatible exactly like the wake-lease fields above: state files
+  // written before this feature have no such field and must still validate.
+  // When PRESENT, validate the shape loosely — an object carrying at least a
+  // question_id string (null clears it, same as pending_owner_ask).
+  if (s.owner_answered_wake !== undefined && s.owner_answered_wake !== null) {
+    if (
+      typeof s.owner_answered_wake !== 'object' ||
+      typeof (/** @type {Record<string, unknown>} */ (s.owner_answered_wake).question_id) !== 'string'
+    ) {
+      throw new Error('state: bad owner_answered_wake');
+    }
+  }
   return /** @type {RoomState} */ (raw);
 }
 
@@ -222,7 +235,60 @@ export function resolveOwnerAsk(state, approval) {
   }
   state.owner_approvals.push(approval);
   state.pending_owner_ask = null;
+  // Owner-answered wake signal (unattended loop close). Clearing
+  // pending_owner_ask unblocks `post`, but nothing else now wakes the agent to
+  // ACT on the owner's answer: the peer is just waiting for our reply, so the
+  // heartbeat sees no NEW peer event and would noop forever, leaving an
+  // approved-but-unposted decision stalling the room silently. We set a DUMB
+  // state flag the heartbeat reads (no message-body semantics) to wake the
+  // agent on its next tick. Set for BOTH approve AND reject — a reject also
+  // needs the agent to wake and steer toward a no-agreement/partial close.
+  // The agent clears it (clearOwnerAnsweredWake) after its next post/close so
+  // the wake does not loop.
+  state.owner_answered_wake = {
+    question_id: approval.question_id,
+    decision: approval.decision,
+    answered_at: approval.ts,
+  };
   writeState(state);
+  return state;
+}
+
+/**
+ * Clear the owner-answered wake signal. Called by the agent's next action
+ * (post / close) AFTER it has woken and acted on the owner's answer, so the
+ * heartbeat does not keep re-waking on a consumed signal.
+ *
+ * Concurrency guard — same re-read-merge pattern as setCursor / setWakeLease
+ * (invariant 13 integrity). This clear runs DURING an agent turn (cmdPost /
+ * cmdClose) that may race a scheduler-driven heartbeat writing the wake-lease
+ * fields, or the caller may hold a state snapshot read before another process
+ * wrote pending_owner_ask / approvals / cursor / lease. Blind-overwriting the
+ * stale snapshot would clobber those fields. So re-read the freshest on-disk
+ * state, clear ONLY owner_answered_wake, write that, and mirror the fields
+ * another process owns back into the caller's object. Cleared to null (same
+ * convention pending_owner_ask uses).
+ *
+ * @param {RoomState} state
+ * @returns {RoomState}
+ */
+export function clearOwnerAnsweredWake(state) {
+  state.owner_answered_wake = null;
+  const fresh = readState(state.room_id, state.role);
+  if (fresh) {
+    fresh.owner_answered_wake = null;
+    writeState(fresh);
+    // Mirror fields another process owns back into the caller's object so the
+    // caller never re-persists a stale view of them.
+    state.pending_owner_ask = fresh.pending_owner_ask;
+    state.owner_approvals = fresh.owner_approvals;
+    state.draft_close = fresh.draft_close;
+    state.last_event_cursor = fresh.last_event_cursor;
+    state.last_wakeup_event_id = fresh.last_wakeup_event_id;
+    state.wakeup_inflight_until = fresh.wakeup_inflight_until;
+  } else {
+    writeState(state);
+  }
   return state;
 }
 

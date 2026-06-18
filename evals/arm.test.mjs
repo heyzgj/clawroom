@@ -193,8 +193,15 @@ test('arm registers a launchd job, writes per-room files, self-verifies, JSON ha
     const base = baseDirFor(room);
     const prompt = fs.readFileSync(path.join(base, 'wake-prompt.txt'), 'utf8');
     assert.ok(/ask-owner to RECORD it in state FIRST/.test(prompt), 'wake prompt carries the ask-owner-first rule');
+    // Cold pickup: the woken agent has NO session to resume, so the prompt must
+    // carry the room id + role and tell it to reconstruct context from state +
+    // full room history before acting.
+    assert.ok(prompt.includes(room), 'wake prompt carries the room id (cold pickup)');
+    assert.ok(/clawroom resume --room/.test(prompt), 'wake prompt instructs resume');
+    assert.ok(/poll .*--after -1 --no-state/.test(prompt), 'wake prompt instructs full-history poll (--after -1 --no-state)');
     const agent = fs.readFileSync(path.join(base, 'wake-agent.sh'), 'utf8');
-    assert.ok(/claude --continue -p "\$\(cat "\$\{CLAWROOM_WAKE_PROMPT_FILE/.test(agent), 'wake-agent reads the prompt from a FILE (no inline quoting)');
+    assert.ok(/claude -p "\$\(cat "\$\{CLAWROOM_WAKE_PROMPT_FILE/.test(agent), 'wake-agent reads the prompt from a FILE (no inline quoting)');
+    assert.ok(!/--continue/.test(agent), 'cold pickup: wake-agent must NOT use --continue (session resume is cwd-fragile + session-bound)');
     // No `eval` COMMAND (match at a command position, not the word in a comment).
     assert.ok(!/(^|\n|;|&&|\|\|)\s*eval\b/.test(agent), 'no eval command in wake-agent.sh');
 
@@ -203,6 +210,7 @@ test('arm registers a launchd job, writes per-room files, self-verifies, JSON ha
     assert.ok(plistXml.includes(path.join(STAGE_SKILL, 'lib', 'wakeup-tick.sh')), 'plist ProgramArguments points at the bundled tick');
     assert.ok(plistXml.includes(path.dirname(process.execPath)), 'plist PATH includes the node dir');
     assert.ok(!/host_.*_tok|Bearer/.test(plistXml), 'plist carries no token');
+    assert.ok(!/CLAWROOM_AGENT_CWD<\/key>\s*<string>[^<]*\/work</.test(plistXml), 'cold pickup: wake-agent cwd is the skill dir, not an empty work subdir');
   } finally {
     await runStaged(['disarm', '--room', room, '--role', 'host']);
     server.close();

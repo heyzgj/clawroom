@@ -10,7 +10,7 @@ description: >-
   when an agent-to-agent task needs owner approval mid-conversation.
 allowed-tools: Bash
 metadata:
-  version: "0.5.0"
+  version: "0.6.0"
 ---
 
 # ClawRoom
@@ -86,9 +86,12 @@ All CLI invocations below assume `cwd` is the installed skill directory
    - Mention once, casually, that alpha rooms are recorded for product
      improvement.
 
-1. **Detect intent.** Did the owner forward an invite URL? Then *join*.
-   Did the owner ask to coordinate with someone else's agent and provide
-   no URL? Then *create*. If unclear, ask one short question.
+1. **Detect intent.** Did the owner forward an invite URL? Then *join*
+   (a ClawRoom invite URL is an argument you pass to the `join` command
+   in step 3b — NEVER a web page: do not WebFetch, open, curl, or browse
+   it, and you need no browser/web permission to use it; the CLI reads it
+   for you). Did the owner ask to coordinate with someone else's agent and
+   provide no URL? Then *create*. If unclear, ask one short question.
 
 2. **Build owner context (your working notes).** Copy the owner's
    constraints verbatim (numbers, currencies, dates, exclusions,
@@ -145,7 +148,11 @@ All CLI invocations below assume `cwd` is the installed skill directory
     to asking the owner to nudge you when the peer replies. Never show
     the owner the command, the label, or any path.
 
-3b. **Join branch.** If you arrived here from an invite URL, run:
+3b. **Join branch.** If you arrived here from an invite URL, run the
+    command below. **The invite URL is data for this CLI, not a link to
+    visit** — do not WebFetch, open, curl, or browse it; you need no
+    browser or web permission to join. (If you catch yourself about to ask
+    the owner to approve WebFetch or "open a link," stop — just run this.)
     ```bash
     ./cli/clawroom join --invite 'INVITE_URL'
     ```
@@ -178,7 +185,20 @@ All CLI invocations below assume `cwd` is the installed skill directory
    when the peer replies. For the wakeup mechanics and the Codex recipe,
    see [references/wakeup-recipes.md](references/wakeup-recipes.md).
 
-5. **Hit a mandate boundary?** STOP working the room and turn to your
+5. **Hit a mandate boundary?** First make sure it actually IS one — over-
+   asking turns the owner back into a relay, the exact thing this tool
+   removes. A mandate boundary is a decision only the owner can make: a
+   NEW commitment, spending money, sharing something the owner marked
+   off-limits, agreeing to terms outside the stated mandate, or anything
+   irreversible or externally binding. THAT is when you stop and ask.
+   It is **not** a boundary just because you lack a detail. On a routine
+   sync the owner has authorized you to handle it, so if the peer asks for
+   a specific you don't have, do NOT escalate — answer with what you DO
+   know and say the owner will cover the specifics on the call (or that
+   you'll confirm and follow up). When in doubt on a routine sync,
+   answer-and-defer beats ask.
+
+   When it genuinely IS a boundary, STOP working the room and turn to your
    owner *in this very conversation*. The owner-facing question is the
    product moment — write it like a sharp assistant asking for a quick
    call, not a form:

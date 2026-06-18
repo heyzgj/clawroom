@@ -22,9 +22,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLI = path.resolve(__dirname, '../skill/cli/clawroom');
 
-const { initState, readState, setCursor, setWakeLease, setPendingOwnerAsk } =
+const { initState, readState, setCursor, setWakeLease, setPendingOwnerAsk, resolveOwnerAsk } =
   await import('../skill/lib/state.mjs');
-const { STATE_DIR } = await import('../skill/lib/types.mjs');
+const { STATE_DIR, ownerAskTimeoutSentinel, ownerAnsweredSentinel } =
+  await import('../skill/lib/types.mjs');
 
 const HOST_TOKEN = 'host_heartbeat_token';
 
@@ -500,4 +501,191 @@ test('bad args / missing role → non-zero exit (real error, not a detection)', 
   const r = await runCli(['heartbeat', '--room', room], {}); // missing --role
   assert.notEqual(r.code, 0, 'missing required flag is a real error');
   assert.ok(/role/.test(r.stderr), 'error names the missing flag');
+});
+
+test('owner_answered: owner answered, no pending, lease unheld → wake_agent/owner_answered with answered sentinel', async () => {
+  // The owner answered out-of-band: pending_owner_ask is cleared and
+  // owner_answered_wake is set. The peer is just waiting for our reply, so NO
+  // new peer event is coming — without this signal the heartbeat would noop
+  // forever on the relay-poll branch and the room would silently stall.
+  const room = freshRoom('owneranswered', { cursor: 5 });
+  const s = readState(room, 'host');
+  setPendingOwnerAsk(s, {
+    question_id: 'q-ans',
+    question_text: 'over ceiling?',
+    asked_at: new Date().toISOString(),
+    timeout_at: '2099-01-01T00:00:00.000Z',
+    blocks_until: 'answered',
+    context_snapshot: {},
+  });
+  resolveOwnerAsk(s, {
+    question_id: 'q-ans',
+    decision: 'approve',
+    source: 'primary_agent_conversation',
+    ts: new Date().toISOString(),
+    evidence: 'owner said yes',
+  });
+  // The relay still only has the peer's earlier message at the cursor — NO new
+  // peer event. Proves the wake comes from owner_answered, not a peer move.
+  const { server, state, url } = await startMockRelay({
+    events: [{ id: 5, from: 'guest', kind: 'message', ts: 1 }],
+  });
+  try {
+    const r = await runCli(['heartbeat', '--room', room, '--role', 'host'], { CLAWROOM_RELAY: url });
+    assert.equal(r.code, 0, `stderr=${r.stderr}`);
+    const d = parseDecision(r.stdout);
+    assert.equal(d.action, 'wake_agent');
+    assert.equal(d.reason, 'owner_answered');
+    const sentinel = d.event_id;
+    assert.equal(typeof sentinel, 'number');
+    assert.ok(sentinel < 0, 'owner_answered wakes on a reserved negative sentinel');
+    // owner_answered is a blocked-on-state short-circuit BEFORE any relay poll.
+    assert.equal(state.eventsPolls, 0, 'owner_answered wakes without polling the relay');
+    assert.equal(state.hitMessages, false);
+    const after = readJsonState(room);
+    assert.equal(after.last_wakeup_event_id, sentinel, 'lease records the answered sentinel');
+    assert.ok(after.owner_answered_wake, 'heartbeat does NOT clear owner_answered_wake — only the agent does');
+    assert.equal(after.last_event_cursor, 5, 'cursor untouched by a wake');
+  } finally {
+    server.close();
+  }
+});
+
+test('owner_answered: reject also wakes the agent (not just approve)', async () => {
+  // A reject still needs the agent to wake and steer toward a no-agreement /
+  // partial close — it must not silently strand the room either.
+  const room = freshRoom('owneransweredreject', { cursor: 2 });
+  const s = readState(room, 'host');
+  setPendingOwnerAsk(s, {
+    question_id: 'q-rej',
+    question_text: '?',
+    asked_at: new Date().toISOString(),
+    timeout_at: '2099-01-01T00:00:00.000Z',
+    blocks_until: 'answered',
+    context_snapshot: {},
+  });
+  resolveOwnerAsk(s, {
+    question_id: 'q-rej',
+    decision: 'reject',
+    source: 'primary_agent_conversation',
+    ts: new Date().toISOString(),
+    evidence: 'owner said no',
+  });
+  const { server, url } = await startMockRelay({ events: [{ id: 2, from: 'guest', kind: 'message', ts: 1 }] });
+  try {
+    const r = await runCli(['heartbeat', '--room', room, '--role', 'host'], { CLAWROOM_RELAY: url });
+    assert.equal(r.code, 0, `stderr=${r.stderr}`);
+    const d = parseDecision(r.stdout);
+    assert.equal(d.action, 'wake_agent');
+    assert.equal(d.reason, 'owner_answered', 'a reject must wake the agent too');
+  } finally {
+    server.close();
+  }
+});
+
+test('owner_answered: 2nd tick within lease → noop/wake_inflight (no re-wake loop)', async () => {
+  const room = freshRoom('owneranswereddedupe', { cursor: 3 });
+  const s = readState(room, 'host');
+  setPendingOwnerAsk(s, {
+    question_id: 'q-dd',
+    question_text: '?',
+    asked_at: new Date().toISOString(),
+    timeout_at: '2099-01-01T00:00:00.000Z',
+    blocks_until: 'answered',
+    context_snapshot: {},
+  });
+  resolveOwnerAsk(s, {
+    question_id: 'q-dd',
+    decision: 'approve',
+    source: 'primary_agent_conversation',
+    ts: new Date().toISOString(),
+    evidence: 'yes',
+  });
+  const { server, url } = await startMockRelay({ events: [{ id: 3, from: 'guest', kind: 'message', ts: 1 }] });
+  try {
+    // First tick with a long lease → wake_agent.
+    const first = await runCli(
+      ['heartbeat', '--room', room, '--role', 'host', '--lease-ttl', '3600'],
+      { CLAWROOM_RELAY: url }
+    );
+    const d1 = parseDecision(first.stdout);
+    assert.equal(d1.action, 'wake_agent');
+    assert.equal(d1.reason, 'owner_answered');
+    const sentinel = d1.event_id;
+
+    // Second tick within the lease, same still-set signal → deduped.
+    const second = await runCli(
+      ['heartbeat', '--room', room, '--role', 'host', '--lease-ttl', '3600'],
+      { CLAWROOM_RELAY: url }
+    );
+    const d2 = parseDecision(second.stdout);
+    assert.equal(d2.action, 'noop');
+    assert.equal(d2.reason, 'wake_inflight');
+    assert.equal(d2.event_id, sentinel, 'wake_inflight reports the same answered sentinel');
+
+    // After lease expiry, the still-unacted signal wakes again.
+    const s3 = readJsonState(room);
+    s3.wakeup_inflight_until = '2000-01-01T00:00:00.000Z';
+    fs.writeFileSync(path.join(STATE_DIR, `${room}-host.state.json`), JSON.stringify(s3, null, 2));
+    const third = await runCli(
+      ['heartbeat', '--room', room, '--role', 'host', '--lease-ttl', '3600'],
+      { CLAWROOM_RELAY: url }
+    );
+    const d3 = parseDecision(third.stdout);
+    assert.equal(d3.action, 'wake_agent', 'after lease expiry the unacted answer wakes again');
+    assert.equal(d3.reason, 'owner_answered');
+  } finally {
+    server.close();
+  }
+});
+
+test('sentinels: ownerAnsweredSentinel !== ownerAskTimeoutSentinel, both < 0, no real-id collision', () => {
+  // The two reserved wake-lease keys must never alias for the same question_id
+  // (else an answered wake and a timeout wake would dedupe against each other),
+  // and neither may collide with a real /events id (always >= 0).
+  const qids = ['q1', 'q-block', 'q-stalled', '', 'budget-approve-2026', '🦀escalation', 'a'.repeat(200), 'Q1', 'q1 '];
+  for (const q of qids) {
+    const t = ownerAskTimeoutSentinel(q);
+    const a = ownerAnsweredSentinel(q);
+    assert.notEqual(a, t, `answered and timeout sentinels must differ for qid ${JSON.stringify(q)}`);
+    assert.ok(t < 0, `timeout sentinel must be negative for ${JSON.stringify(q)} (got ${t})`);
+    assert.ok(a < 0, `answered sentinel must be negative for ${JSON.stringify(q)} (got ${a})`);
+    assert.ok(Number.isSafeInteger(t) && Number.isSafeInteger(a), 'both stay in safe-integer range');
+    // Disjoint ranges: answered ∈ [-(2^32), -(2^31)-1], timeout ∈ [-(2^31), -1].
+    assert.ok(t >= -(2 ** 31) && t <= -1, `timeout in range for ${JSON.stringify(q)} (got ${t})`);
+    assert.ok(a >= -(2 ** 32) && a <= -(2 ** 31) - 1, `answered in range for ${JSON.stringify(q)} (got ${a})`);
+  }
+  // Cross-range sweep: NO timeout sentinel of any qid equals an answered
+  // sentinel of any qid (ranges are disjoint).
+  const T = qids.map(ownerAskTimeoutSentinel);
+  const A = new Set(qids.map(ownerAnsweredSentinel));
+  for (const t of T) assert.ok(!A.has(t), 'timeout/answered sentinel ranges must be disjoint across all qids');
+});
+
+test('owner_answered: pending_owner_ask takes priority over owner_answered_wake', async () => {
+  // Defensive ordering check: if BOTH are somehow set (a fresh re-ask landed
+  // after a prior answer that was never consumed), the still-pending ask wins —
+  // the agent is blocked on the owner again, so notify, do not wake.
+  const room = freshRoom('owneransweredpriority', { cursor: 1 });
+  const s = readState(room, 'host');
+  s.owner_answered_wake = { question_id: 'q-old', decision: 'approve', answered_at: new Date().toISOString() };
+  s.pending_owner_ask = {
+    question_id: 'q-new',
+    question_text: '?',
+    asked_at: new Date().toISOString(),
+    timeout_at: '2099-01-01T00:00:00.000Z',
+    blocks_until: 'answered',
+    context_snapshot: {},
+  };
+  fs.writeFileSync(path.join(STATE_DIR, `${room}-host.state.json`), JSON.stringify(s, null, 2));
+  const { server, state, url } = await startMockRelay({ events: [] });
+  try {
+    const r = await runCli(['heartbeat', '--room', room, '--role', 'host'], { CLAWROOM_RELAY: url });
+    const d = parseDecision(r.stdout);
+    assert.equal(d.action, 'notify_owner', 'pending ask (b) is checked before owner_answered (b3)');
+    assert.equal(d.reason, 'pending_owner_ask');
+    assert.equal(state.eventsPolls, 0);
+  } finally {
+    server.close();
+  }
 });
