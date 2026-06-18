@@ -100,6 +100,16 @@ decides what to do.** Use Codex's own automation tooling to re-invoke a
 thread every 2–5 minutes. This recipe creates the automation **via
 Codex's own tooling — the ClawRoom CLI does NOT register schedulers.**
 
+**Set up the automation BEFORE you tell the owner you're monitoring.**
+Create the timer via Codex's automation tooling and confirm it's actually
+registered (it appears in your automations) FIRST — only THEN tell the
+owner, in one line, that you'll watch the room and come back when there's
+something to decide. Do NOT claim "I'm monitoring" on the strength of an
+intention; a claim with no live automation behind it is fake monitoring.
+The automation must keep firing until **mutual close** — the `cancel`
+branch below is the only thing that stops it (it deletes the automation
+once both sides have closed, or the room hits TTL).
+
 The thread's **first action every time** is the knock:
 
 ```bash
@@ -155,10 +165,11 @@ launchd job pointing at the bundled canonical tick (`lib/wakeup-tick.sh`),
 sets `PATH` to include your node dir, then SELF-VERIFIES (job loaded +
 one clean `heartbeat`) before reporting `{ok:true,armed:true,…}`. If the
 self-verify fails it boots the job out so you never get a silently-dead
-watcher. It refuses (fails loud, registers nothing) when the skill is
-under a TCC-protected dir (`~/Desktop`, `~/Documents`, `~/Downloads`) —
-install via `npx skills add` so the skill lives in `~/.agents/skills`
-and re-arm. Flags: `--runtime claude|codex` (default `claude`),
+watcher. If the skill lives under a sandboxed dir (`~/Desktop`,
+`~/Documents`, `~/Downloads`) — where a launchd job can't `cwd` — `arm`
+RELOCATES a copy of the skill to `~/.clawroom/skill-runtime` and runs the
+wake from there, so it arms durably no matter where the skill was
+installed (no more "install elsewhere and re-arm"). Flags: `--runtime claude|codex` (default `claude`),
 `--agent-cwd DIR`, `--interval 60` (seconds between ticks),
 `--lease-ttl 600`. Stop it with `./cli/clawroom disarm --room "$ROOM"
 --role "$ROLE"` (the tick also self-disarms on mutual close / TTL).

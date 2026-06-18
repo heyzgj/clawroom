@@ -66,7 +66,7 @@ import {
   ownerAnsweredSentinel,
 } from '../lib/types.mjs';
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -619,27 +619,51 @@ function skillDir() {
   return path.resolve(__dirname, '..');
 }
 
+/** Read the version: field from a SKILL.md frontmatter. Null if unreadable. */
+function readSkillVersion(skillMdPath) {
+  try {
+    const m = fs.readFileSync(skillMdPath, 'utf8').match(/version:\s*["']?([0-9][0-9.]*)/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
 /**
- * TCC guard (critical). A launchd background job CANNOT cwd into ~/Desktop,
- * ~/Documents, or ~/Downloads — macOS denies it (EPERM uv_cwd) unless Full Disk
- * Access is granted. So if the skill is installed under one of those, the tick
- * would die silently every fire. We FAIL LOUD and register NOTHING, telling the
- * agent to install via `npx skills add` (which lands in ~/.agents/skills) and
- * re-arm. Match by path prefix against the user's home TCC dirs.
+ * The skill dir the launchd job + woken agent actually run from. A launchd
+ * background job CANNOT cwd into ~/Desktop, ~/Documents, or ~/Downloads (macOS
+ * denies it, EPERM uv_cwd) — but real projects live under exactly those. So
+ * rather than REFUSE to arm there (which silently degraded the user to a
+ * session-bound, dies-on-close fallback), we RELOCATE a copy of the skill to a
+ * stable non-Desktop runtime dir (~/.clawroom/skill-runtime) and launchd from
+ * THERE. The original install stays put. The cold-pickup wake needs no project
+ * context — it reconstructs everything from state + relay history — so running
+ * from the copy is safe and equally durable. When the skill is already outside
+ * TCC dirs it's used in place. Throws only if the relocate can't be written.
  */
-function assertSkillNotUnderTcc(dir) {
+function resolveRuntimeSkillDir(dir) {
   const home = os.homedir();
   const tccDirs = ['Desktop', 'Documents', 'Downloads'].map((d) => path.join(home, d));
   const resolved = path.resolve(dir);
-  for (const tcc of tccDirs) {
-    if (resolved === tcc || resolved.startsWith(tcc + path.sep)) {
-      throw new Error(
-        `arm: skill is under a TCC-protected dir (${resolved}); a launchd job ` +
-        `cannot cwd there, so the wakeup would die silently every fire. ` +
-        `Install via \`npx skills add heyzgj/clawroom\` (lands in ~/.agents/skills) and re-arm.`
-      );
+  const underTcc = tccDirs.some((tcc) => resolved === tcc || resolved.startsWith(tcc + path.sep));
+  if (!underTcc) return resolved;
+  const runtime = path.join(home, '.clawroom', 'skill-runtime');
+  // Refresh only when missing or version-stale — never re-copy under a live tick
+  // for no reason. Copy just the executable + doc surface.
+  const srcVer = readSkillVersion(path.join(resolved, 'SKILL.md'));
+  const dstVer = readSkillVersion(path.join(runtime, 'SKILL.md'));
+  const stale = !fs.existsSync(path.join(runtime, 'cli', 'clawroom')) || !srcVer || dstVer !== srcVer;
+  if (stale) {
+    try {
+      fs.rmSync(runtime, { recursive: true, force: true });
+      fs.mkdirSync(runtime, { recursive: true });
+      for (const item of ['cli', 'lib', 'references', 'SKILL.md']) {
+        const s = path.join(resolved, item);
+        if (fs.existsSync(s)) fs.cpSync(s, path.join(runtime, item), { recursive: true });
+      }
+    } catch (e) {
+      throw new Error(`arm: could not relocate the skill out of a TCC dir to ${runtime}: ${e.message}`);
     }
   }
+  return runtime;
 }
 
 /** Per-room base dir: $HOME/.clawroom/<room>-<role>/ (separate from STATE_DIR). */
@@ -796,18 +820,22 @@ async function cmdArm() {
 
   // (2) Resolve paths.
   const SKILL_DIR = skillDir();
-  // (3) TCC guard — FAIL LOUD before registering anything.
-  assertSkillNotUnderTcc(SKILL_DIR);
+  // (3) Resolve the RUNTIME skill dir. A launchd job can't cwd into ~/Desktop
+  // etc.; if the skill lives there we relocate a copy OUT and run from it —
+  // never refuse (refusing silently degraded users to a session-bound fallback
+  // that dies on close). After this, the wake is equally durable wherever the
+  // skill was installed.
+  const RUNTIME_SKILL_DIR = resolveRuntimeSkillDir(SKILL_DIR);
 
   const nodeDir = path.dirname(process.execPath);
   const stateDir = STATE_DIR; // inherits CLAWROOM_STATE_DIR or the ~/.clawroom-v4 default
   const base = armBaseDir(room_id, role);
-  // Cold-pickup wake runs in the skill dir so ./cli/clawroom and SKILL.md
-  // resolve directly (a fresh agent reconstructs context from state+history,
-  // not a session resume — so it does NOT need the original launch cwd).
-  const agentCwd = flags['agent-cwd'] ? String(flags['agent-cwd']) : SKILL_DIR;
+  // Cold-pickup wake runs in the (runtime) skill dir so ./cli/clawroom and
+  // SKILL.md resolve directly (a fresh agent reconstructs context from
+  // state+history, not a session resume — so it does NOT need the launch cwd).
+  const agentCwd = flags['agent-cwd'] ? String(flags['agent-cwd']) : RUNTIME_SKILL_DIR;
   const label = armLabel(room_id, role);
-  const tickScript = path.join(SKILL_DIR, 'lib', 'wakeup-tick.sh');
+  const tickScript = path.join(RUNTIME_SKILL_DIR, 'lib', 'wakeup-tick.sh');
   if (!fs.existsSync(tickScript)) {
     throw new Error(`arm: bundled tick missing at ${tickScript} — broken install`);
   }
@@ -827,7 +855,7 @@ async function cmdArm() {
   // (6) Write the launchd plist pointing at the CANONICAL bundled tick.
   const plistXml = buildPlist({
     label, tickScript, nodeDir, room_id, role,
-    skill_dir: SKILL_DIR, stateDir, wakeLog, agentScript, agentCwd, promptFile, interval,
+    skill_dir: RUNTIME_SKILL_DIR, stateDir, wakeLog, agentScript, agentCwd, promptFile, interval,
   });
   fs.writeFileSync(plist, plistXml, 'utf8');
 
@@ -859,7 +887,7 @@ async function cmdArm() {
   // the SAME CLI (this file) via the resolved node, with the same env the tick
   // would see, so PATH/cwd problems surface here, not silently at 2am.
   const hb = spawnSync(process.execPath, [fileURLToPath(import.meta.url), 'heartbeat', '--room', room_id, '--role', role], {
-    cwd: SKILL_DIR,
+    cwd: RUNTIME_SKILL_DIR,
     env: { ...process.env, CLAWROOM_STATE_DIR: stateDir },
     encoding: 'utf8',
   });

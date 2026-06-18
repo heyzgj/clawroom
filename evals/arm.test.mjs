@@ -300,36 +300,33 @@ test('arm fails loud when the room state is missing (arm runs AFTER create/join)
   }
 });
 
-test('TCC guard: arming from a skill under ~/Desktop fails loud and registers NOTHING', async () => {
+test('TCC relocate: arming from a skill under ~/Desktop relocates out + arms durably (no degrade)', async () => {
   // Run the REPO checkout's CLI (it lives under ~/Desktop in this dev env). arm
   // derives SKILL_DIR from the CLI's own path, so this exercises the real TCC
-  // guard. We seed state via the repo state dir override and assert: non-zero
-  // exit, the guard message, and no launchd job / plist created.
+  // path. NEW behavior: instead of refusing (which silently degraded users to a
+  // session-bound fallback), arm RELOCATES a copy of the skill to a non-Desktop
+  // runtime dir and launchd's from there. Assert: success, a real job, and the
+  // wake runs from ~/.clawroom/skill-runtime — never under ~/Desktop.
   const home = os.homedir();
   const underTcc =
     REPO_SKILL === path.join(home, 'Desktop') ||
     REPO_SKILL.startsWith(path.join(home, 'Desktop') + path.sep) ||
     REPO_SKILL.startsWith(path.join(home, 'Documents') + path.sep) ||
     REPO_SKILL.startsWith(path.join(home, 'Downloads') + path.sep);
-  if (!underTcc) {
-    // The checkout isn't under a TCC dir in this environment; the guard can't be
-    // exercised against the real CLI here. Skip rather than give a false pass.
-    return;
-  }
+  if (!underTcc) return; // can't exercise the relocate against this checkout
   const room = roomId('tcc');
   const label = labelFor(room);
-  createdLabels.add(label); // in case of a bug, the sweep still cleans it
+  createdLabels.add(label);
   const tccStateDir = path.join(STAGE_ROOT, 'tcc-state');
   fs.mkdirSync(tccStateDir, { recursive: true });
-  // Seed a state file so arm gets PAST the state-exists check and reaches the
-  // TCC guard (we must prove the guard fires, not the missing-state check). The
-  // repo CLI we invoke below reads STATE_DIR from CLAWROOM_STATE_DIR=tccStateDir,
-  // so writing the file there directly is all we need.
+  const { server, url } = await startMockRelay();
   const now = new Date().toISOString();
+  // relay:url in state so arm's self-verify heartbeat hits the mock (returns []),
+  // not the real relay (the fake room would 404 + retry for minutes).
   fs.writeFileSync(
     path.join(tccStateDir, `${room}-host.state.json`),
     JSON.stringify({
-      room_id: room, role: 'host', last_event_cursor: -1, pending_owner_ask: null,
+      room_id: room, role: 'host', relay: url, last_event_cursor: -1, pending_owner_ask: null,
       owner_approvals: [], draft_close: null, started_at: now, last_seen_at: now,
       last_wakeup_event_id: 0, wakeup_inflight_until: null, host_token: `host_${room}_tok`,
     }, null, 2),
@@ -337,16 +334,33 @@ test('TCC guard: arming from a skill under ~/Desktop fails loud and registers NO
   );
 
   const repoCli = path.join(REPO_SKILL, 'cli', 'clawroom');
-  const r = spawnSync(repoCli, ['arm', '--room', room, '--role', 'host'], {
-    cwd: REPO_SKILL,
-    env: { ...process.env, CLAWROOM_STATE_DIR: tccStateDir },
-    encoding: 'utf8',
+  const armEnv = { ...process.env, CLAWROOM_STATE_DIR: tccStateDir, CLAWROOM_RELAY: url };
+  // Async spawn (NOT spawnSync) so the in-process mock relay keeps answering
+  // while arm's self-verify heartbeat polls it — spawnSync blocks this process's
+  // event loop, so the mock could never respond and the heartbeat would hang.
+  const runRepo = (args) => new Promise((resolve) => {
+    const child = spawn(repoCli, args, { cwd: REPO_SKILL, env: armEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => (stdout += d));
+    child.stderr.on('data', (d) => (stderr += d));
+    child.on('exit', (code) => resolve({ code, stdout, stderr }));
   });
-  assert.notEqual(r.status, 0, 'arm under a TCC dir must fail');
-  assert.ok(/TCC-protected/.test(r.stderr), 'error explains the TCC restriction');
-  assert.ok(/npx skills add/.test(r.stderr), 'error tells the agent how to fix it');
-  if (darwin) assert.ok(!launchdLoaded(label), 'TCC guard must register NO job');
-  assert.ok(!fs.existsSync(plistFor(label)), 'TCC guard must write NO plist');
-  // And it must not have created the per-room base under the real HOME.
-  assert.ok(!fs.existsSync(baseDirFor(room)), 'TCC guard must write NO per-room files');
+  const r = await runRepo(['arm', '--room', room, '--role', 'host']);
+  try {
+    assert.equal(r.code, 0, 'arm under a TCC dir must RELOCATE + succeed, not refuse: ' + r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.armed, true, 'armed:true after relocate');
+    if (darwin) assert.ok(launchdLoaded(label), 'a real launchd job is registered after relocate');
+    const runtime = path.join(home, '.clawroom', 'skill-runtime');
+    assert.ok(fs.existsSync(path.join(runtime, 'cli', 'clawroom')), 'skill relocated to ~/.clawroom/skill-runtime');
+    assert.ok(fs.existsSync(path.join(runtime, 'lib', 'wakeup-tick.sh')), 'relocated copy carries the tick');
+    if (darwin) {
+      const plistXml = fs.readFileSync(plistFor(label), 'utf8');
+      assert.ok(plistXml.includes(runtime), 'plist runs the wake from the relocated non-Desktop copy');
+      assert.ok(!/CLAWROOM_AGENT_CWD<\/key>\s*<string>[^<]*\/Desktop\//.test(plistXml), 'wake cwd is NOT under ~/Desktop');
+    }
+  } finally {
+    await runRepo(['disarm', '--room', room, '--role', 'host']);
+    server.close();
+  }
 });

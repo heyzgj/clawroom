@@ -85,7 +85,7 @@ RUN="$HOME/.clawroom-dogfood/coldstart-${TS}-$$"
 mkdir -p "$RUN"
 LEDGER="$RUN/harness-ledger.log"
 : > "$LEDGER"
-SKILL_COPY="$RUN/skill"               # the non-Desktop stale-checked skill copy
+SKILL_COPY="${COLDSTART_SKILL_DIR:-$RUN/skill}"   # stale-checked skill copy; override to a ~/Desktop path to exercise the arm relocate
 # Per-run state dir lives under the run dir too, so it is co-located with the
 # skill copy and survives (never scrubbed) for forensic scoring. The AGENT's
 # arm/heartbeat inherit this via CLAWROOM_STATE_DIR.
@@ -198,16 +198,24 @@ precondition_stale_skill() {
   # repo so the run uses a frozen snapshot, not a live-edited tree.
   cp -R "$REPO/skill/." "$SKILL_COPY/"
 
-  # (a) TCC assertion: the copy must NOT be under a TCC-protected dir.
+  # (a) TCC assertion: the copy must NOT be under a TCC-protected dir — UNLESS
+  # we're deliberately staging there via COLDSTART_SKILL_DIR to exercise arm's
+  # RELOCATE (arm copies the skill out to ~/.clawroom/skill-runtime and runs the
+  # wake from there, so a Desktop install no longer breaks the wake). The runtime
+  # rule-11 check later confirms the agents armed from the relocated non-TCC dir.
   local resolved; resolved="$(cd "$SKILL_COPY" && pwd -P)"
-  for tcc in "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
-    case "$resolved/" in
-      "$tcc/"*)
-        log "ABORT: skill copy is under TCC dir $tcc ($resolved) — a launchd job armed by the agent could not cwd there."
-        echo "RESULT: INCONCLUSIVE — stale skill: copy under TCC-protected dir"
-        exit "$EXIT_INCONCLUSIVE" ;;
-    esac
-  done
+  if [ -z "${COLDSTART_SKILL_DIR:-}" ]; then
+    for tcc in "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
+      case "$resolved/" in
+        "$tcc/"*)
+          log "ABORT: skill copy is under TCC dir $tcc ($resolved) — a launchd job armed by the agent could not cwd there."
+          echo "RESULT: INCONCLUSIVE — stale skill: copy under TCC-protected dir"
+          exit "$EXIT_INCONCLUSIVE" ;;
+      esac
+    done
+  else
+    log "relocate-test mode: skill copy under $resolved (TCC) — arm is expected to relocate out to ~/.clawroom/skill-runtime."
+  fi
 
   # (b) content-hash equality: copy must match the repo (current build).
   local repo_hash copy_hash

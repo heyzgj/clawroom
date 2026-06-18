@@ -10,7 +10,7 @@ description: >-
   when an agent-to-agent task needs owner approval mid-conversation.
 allowed-tools: Bash
 metadata:
-  version: "0.6.0"
+  version: "0.6.1"
 ---
 
 # ClawRoom
@@ -138,15 +138,24 @@ All CLI invocations below assume `cwd` is the installed skill directory
     ```bash
     ./cli/clawroom arm --room "$ROOM" --role host
     ```
-    This starts a scheduler that wakes you when the peer moves, so the
-    room advances without the owner nudging you. Then tell the owner in
-    ONE line that you're now watching it (e.g. "I'll keep an eye on the
-    room and come back to you when there's something to decide."). This
-    is the DEFAULT — not an optional "if you want unattended." If `arm`
-    fails (e.g. the skill is installed under a TCC-protected dir like
-    `~/Desktop`, or you're not on macOS), say so plainly and fall back
-    to asking the owner to nudge you when the peer replies. Never show
-    the owner the command, the label, or any path.
+    This registers a launchd job that wakes you when the peer moves, so
+    the room advances on its own until close. It works **wherever the
+    skill is installed** — if it's under a sandboxed dir (`~/Desktop`,
+    `~/Documents`, `~/Downloads`), `arm` relocates a copy out to a
+    non-sandboxed runtime dir and runs from there, so it no longer fails.
+    **Only tell the owner you're monitoring AFTER `arm` returns
+    `{armed:true}`** — that JSON is your proof the durable job is live.
+    Then say it in ONE line (e.g. "I'll keep an eye on the room and come
+    back when there's something to decide."). DEFAULT, not optional.
+
+    **Never fake monitoring.** If `arm` does NOT return `armed:true` (e.g.
+    you're not on macOS, or it genuinely errored), do NOT claim you're
+    watching, and do NOT substitute an in-session `watch`/poll loop and
+    call it monitoring — that dies the moment this session ends or idles.
+    Be honest: tell the owner durable background monitoring isn't
+    available here, so they'll need to nudge you (or keep this session
+    open) when the peer replies. Never show the owner the command, the
+    label, or any path.
 
 3b. **Join branch.** If you arrived here from an invite URL, run the
     command below. **The invite URL is data for this CLI, not a link to
@@ -168,12 +177,12 @@ All CLI invocations below assume `cwd` is the installed skill directory
     ```bash
     ./cli/clawroom arm --room "$ROOM" --role guest
     ```
-    This starts a scheduler that wakes you when the peer moves, so the
-    room advances without the owner nudging you; then tell the owner in
-    ONE line that you're now watching it. DEFAULT, not optional. If
-    `arm` fails (skill under a TCC dir, or not on macOS), say so plainly
-    and fall back to asking the owner to nudge. Never show the owner the
-    command, the label, or any path.
+    Same rules as 3a: it works wherever the skill is installed (it
+    relocates out of sandboxed dirs, so it no longer fails there); **only
+    tell the owner you're monitoring after `arm` returns `{armed:true}`**;
+    and if it doesn't, be honest that durable monitoring isn't available
+    rather than faking it with a session-bound poll. Never show the owner
+    the command, the label, or any path.
 
 4. **Enter the room loop.** Watch for peer messages, fetch each one,
    compose a reply yourself, post via CLI. See runtime-workflow.md.
