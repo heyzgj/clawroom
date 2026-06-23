@@ -101,19 +101,12 @@
  * @property {string} last_seen_at
  * @property {string} [topic]
  * @property {string} [goal]
- * @property {number} [last_wakeup_event_id] - heartbeat wake-lease: the peer
- *   event id that most recently triggered a wake_agent. Absent ⇒ 0. Owned by
- *   `setWakeLease`; never touched by post/poll/close. Dedupe key so a second
- *   heartbeat for the same event returns noop/wake_inflight instead of
- *   re-waking the agent.
- * @property {string | null} [wakeup_inflight_until] - heartbeat wake-lease:
- *   ISO timestamp until which the most recent wake is considered in-flight.
- *   Absent/null ⇒ no lease. After this time the same event can wake again.
  * @property {{ question_id: string, decision: 'approve' | 'reject', answered_at: string } | null} [owner_answered_wake]
- *   - unattended owner-approval loop wake signal. Set by `resolveOwnerAsk` when
- *   the owner answers (approve OR reject); the heartbeat reads this flag and
- *   wakes the agent to ACT on the answer (the peer is just waiting for our
- *   reply, so no NEW peer event would otherwise wake it). The agent clears it
+ *   - owner-answered detector. Set by `resolveOwnerAsk` when the owner answers
+ *   (approve OR reject) out-of-band via owner-reply. It flags that the agent
+ *   OWES an action with no new peer event to trigger it (the peer is just
+ *   waiting for our reply), so a `resume` / scheduled wake surfaces it and the
+ *   agent acts on the recorded answer. The agent clears it
  *   (clearOwnerAnsweredWake) after its next post/close. Absent/null ⇒ no
  *   pending owner-answer to act on. Backward-compatible: old state files lack
  *   it and an absent field means "no signal".
@@ -145,20 +138,6 @@ export const DEFAULT_RELAY_URL = 'https://api.clawroom.cc';
 export const DEFAULT_LONG_POLL_WAIT_SECONDS = 20;
 export const DEFAULT_RETRY_ATTEMPTS = 4;
 export const DEFAULT_RETRY_BASE_MS = 250;
-
-// Room TTL mirror of the relay's DEFAULT_MAX_THREAD_MS (worker.ts: 72h
-// default / 7d ceiling). The relay is the authority — an expired room
-// answers 410 thread_expired and the heartbeat treats that as cancel/ttl.
-// This client-side value lets `heartbeat` predict expiry from
-// state.started_at WITHOUT a relay round-trip when the relay can't be
-// reached, and matches the default so the prediction agrees with the relay.
-export const DEFAULT_MAX_THREAD_MS = 72 * 60 * 60 * 1000;
-
-// Heartbeat wake-lease TTL. After waking the primary agent for a peer event,
-// suppress re-waking for the SAME (or older) event for this long, so a
-// scheduler firing every few minutes does not stack duplicate wakes while
-// the agent is still working that turn. Overridable per-call via --lease-ttl.
-export const DEFAULT_WAKE_LEASE_TTL_SECONDS = 600;
 
 // State file location. Override via CLAWROOM_STATE_DIR for tests.
 export const STATE_DIR = process.env.CLAWROOM_STATE_DIR
@@ -196,54 +175,6 @@ export function makeWatchEvent(raw) {
   if (!MESSAGE_KINDS.includes(kind)) throw new Error(`makeWatchEvent: bad kind "${kind}"`);
   if (!Number.isFinite(ts)) throw new Error(`makeWatchEvent: bad ts ${obj.ts}`);
   return Object.freeze({ id, from, kind, ts });
-}
-
-// ---------- heartbeat wake-lease sentinels ----------
-//
-// The wake-lease fields key a wake on an event id. Real /events ids are always
-// >= 0 (makeWatchEvent rejects id < 0; the cursor floor is -1). For wakes that
-// are NOT tied to a peer event — an owner-ask timeout, or an owner answering an
-// ask — we need STABLE RESERVED keys that (a) never collide with a real event
-// id and (b) never collide with EACH OTHER for the same question_id, so the two
-// kinds of wake can't alias in the lease. We map a question_id to a negative
-// integer in two DISJOINT, strictly-negative ranges:
-//   timeout  sentinel ∈ [-(2^31),        -1]
-//   answered sentinel ∈ [-(2^32), -(2^31)-1]   (offset by -(2^31)-1)
-// Adjacent but non-overlapping: the largest answered sentinel (-(2^31)-1) is
-// strictly below the smallest timeout sentinel (-(2^31)). Both bounded well
-// inside safe-integer range (|value| < 2^32 ≪ 2^53). Deterministic, so a second
-// tick for the SAME still-set condition recomputes the same key and dedupes to
-// wake_inflight. Lives here (shared, dep-free) so the CLI and tests use ONE
-// definition — no drift between the production formula and what tests assert.
-
-/** djb2-ish 32-bit signed hash of a question_id. @param {string} questionId */
-function sentinelHash(questionId) {
-  let h = 0;
-  const s = String(questionId || '');
-  for (let i = 0; i < s.length; i++) {
-    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
-  }
-  return h;
-}
-
-/**
- * Reserved wake-lease key for an owner_ask_timeout wake.
- * @param {string} questionId
- * @returns {number} a negative integer in [-(2^31), -1]
- */
-export function ownerAskTimeoutSentinel(questionId) {
-  return -1 - ((sentinelHash(questionId) >>> 0) % 0x80000000);
-}
-
-/**
- * Reserved wake-lease key for an owner_answered wake (unattended owner-approval
- * loop close). Disjoint from — and strictly more negative than — the timeout
- * sentinel, so the two never alias for the same question_id.
- * @param {string} questionId
- * @returns {number} a negative integer in [-(2^32), -(2^31)-1]
- */
-export function ownerAnsweredSentinel(questionId) {
-  return -0x80000001 - ((sentinelHash(questionId) >>> 0) % 0x80000000);
 }
 
 /**

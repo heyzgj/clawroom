@@ -30,3 +30,6 @@ skills/deploy-clawroom-relay/
 # session state from Claude Code; never publish.
 .claude/
 evals/e2e/runs/
+
+# npx skills install lockfile (local artifact)
+skills-lock.json

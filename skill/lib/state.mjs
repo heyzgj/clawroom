@@ -52,20 +52,6 @@ function validateRoomState(raw) {
   if (s.draft_close !== null && (typeof s.draft_close !== 'object' || !s.draft_close)) {
     throw new Error('state: bad draft_close');
   }
-  // Heartbeat wake-lease fields (Phase 6.5). Optional + backward-compatible:
-  // state files written before this feature have neither, and an absent field
-  // is read as 0 / null by the heartbeat. We only reject a field that is
-  // PRESENT but the wrong type — never require it to exist.
-  if (s.last_wakeup_event_id !== undefined && typeof s.last_wakeup_event_id !== 'number') {
-    throw new Error('state: bad last_wakeup_event_id');
-  }
-  if (
-    s.wakeup_inflight_until !== undefined &&
-    s.wakeup_inflight_until !== null &&
-    typeof s.wakeup_inflight_until !== 'string'
-  ) {
-    throw new Error('state: bad wakeup_inflight_until');
-  }
   // Owner-answered wake signal (unattended owner-approval loop). Optional +
   // backward-compatible exactly like the wake-lease fields above: state files
   // written before this feature have no such field and must still validate.
@@ -124,8 +110,6 @@ export function initState({ room_id, role, host_token, guest_token, topic, goal,
     draft_close: null,
     started_at: nowIso(),
     last_seen_at: nowIso(),
-    last_wakeup_event_id: 0,
-    wakeup_inflight_until: null,
     topic,
     goal,
     ...(relay ? { relay } : {}),
@@ -256,18 +240,18 @@ export function resolveOwnerAsk(state, approval) {
 
 /**
  * Clear the owner-answered wake signal. Called by the agent's next action
- * (post / close) AFTER it has woken and acted on the owner's answer, so the
- * heartbeat does not keep re-waking on a consumed signal.
+ * (post / close) AFTER it has acted on the owner's out-of-band answer, so a
+ * later resume / scheduled wake does not flag an already-acted-on answer as
+ * still-owed.
  *
- * Concurrency guard — same re-read-merge pattern as setCursor / setWakeLease
- * (invariant 13 integrity). This clear runs DURING an agent turn (cmdPost /
- * cmdClose) that may race a scheduler-driven heartbeat writing the wake-lease
- * fields, or the caller may hold a state snapshot read before another process
- * wrote pending_owner_ask / approvals / cursor / lease. Blind-overwriting the
- * stale snapshot would clobber those fields. So re-read the freshest on-disk
- * state, clear ONLY owner_answered_wake, write that, and mirror the fields
- * another process owns back into the caller's object. Cleared to null (same
- * convention pending_owner_ask uses).
+ * Concurrency guard — same re-read-merge pattern as setCursor (invariant 13
+ * integrity). This clear runs DURING an agent turn (cmdPost / cmdClose); the
+ * caller may hold a state snapshot read before another process wrote
+ * pending_owner_ask / approvals / cursor. Blind-overwriting the stale snapshot
+ * would clobber those fields. So re-read the freshest on-disk state, clear ONLY
+ * owner_answered_wake, write that, and mirror the fields another process owns
+ * back into the caller's object. Cleared to null (same convention
+ * pending_owner_ask uses).
  *
  * @param {RoomState} state
  * @returns {RoomState}
@@ -284,8 +268,6 @@ export function clearOwnerAnsweredWake(state) {
     state.owner_approvals = fresh.owner_approvals;
     state.draft_close = fresh.draft_close;
     state.last_event_cursor = fresh.last_event_cursor;
-    state.last_wakeup_event_id = fresh.last_wakeup_event_id;
-    state.wakeup_inflight_until = fresh.wakeup_inflight_until;
   } else {
     writeState(state);
   }
@@ -340,50 +322,6 @@ export function setCursor(state, cursor) {
     state.pending_owner_ask = fresh.pending_owner_ask;
     state.owner_approvals = fresh.owner_approvals;
     state.draft_close = fresh.draft_close;
-  } else {
-    writeState(state);
-  }
-}
-
-/**
- * Record a heartbeat wake-lease: the peer event id we just woke the agent for,
- * and the ISO time until which that wake is considered in-flight. Writes ONLY
- * these two fields.
- *
- * Concurrency guard — same pattern as setCursor (invariant 13 integrity).
- * `heartbeat` is a DUMB door-knock that runs out-of-band from the agent's own
- * turn: a scheduler may fire it the same moment the primary agent is mid-turn
- * writing pending_owner_ask / owner_approvals / draft_close / last_event_cursor
- * with its OWN (possibly newer) state snapshot. If heartbeat wrote its stale
- * snapshot wholesale it would CLOBBER those fields. So we re-read the freshest
- * on-disk state, apply ONLY the two lease fields, write that, and mirror the
- * other process's fields back into the caller's object. heartbeat itself NEVER
- * advances last_event_cursor — that stays whatever the agent set.
- *
- * @param {RoomState} state
- * @param {number} eventId   - the peer event id this wake is for
- * @param {string} untilIso  - ISO timestamp the lease is in-flight until
- */
-export function setWakeLease(state, eventId, untilIso) {
-  if (typeof eventId !== 'number' || !Number.isFinite(eventId)) {
-    throw new Error('state: setWakeLease bad eventId');
-  }
-  if (typeof untilIso !== 'string' || Number.isNaN(Date.parse(untilIso))) {
-    throw new Error('state: setWakeLease bad untilIso');
-  }
-  state.last_wakeup_event_id = eventId;
-  state.wakeup_inflight_until = untilIso;
-  const fresh = readState(state.room_id, state.role);
-  if (fresh) {
-    fresh.last_wakeup_event_id = eventId;
-    fresh.wakeup_inflight_until = untilIso;
-    writeState(fresh);
-    // Mirror fields another process owns back into the caller's object so the
-    // caller never re-persists a stale view of them.
-    state.pending_owner_ask = fresh.pending_owner_ask;
-    state.owner_approvals = fresh.owner_approvals;
-    state.draft_close = fresh.draft_close;
-    state.last_event_cursor = fresh.last_event_cursor;
   } else {
     writeState(state);
   }

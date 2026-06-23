@@ -88,16 +88,15 @@ function delay(ms) {
  *   post:          sha256(room_id + role + kind + previous_cursor_or_parent_id + content_hash + optional logical_post_id)
  *   close:         sha256(room_id + role + 'close' + closedraft_hash)
  *   owner-reply:   sha256(room_id + role + question_id + decision + answer_hash)
- *   heartbeat:     sha256(room_id + role + 'heartbeat' + minute_bucket)
  *
  * Role is in the key to prevent cross-role dedup. previous_cursor_or_parent_id
  * is in the post key to prevent same text in different turns collapsing.
- * Timestamp is NOT in the key, except in heartbeat as a coarse bucket.
+ * Timestamp is NOT in the key.
  *
  * @param {Object} args
  * @param {string} args.room_id
  * @param {Role}   args.role
- * @param {'post' | 'close' | 'owner_reply' | 'heartbeat'} args.action
+ * @param {'post' | 'close' | 'owner_reply'} args.action
  * @param {MessageKind} [args.kind]                        - for post
  * @param {number}      [args.previous_cursor_or_parent_id] - for post
  * @param {string}      [args.content]                      - for post (canonical content)
@@ -150,10 +149,6 @@ export function buildIdempotencyKey(args) {
     h.update(args.decision);
     h.update('|');
     h.update(crypto.createHash('sha256').update(args.answer_content, 'utf8').digest('hex'));
-  } else if (args.action === 'heartbeat') {
-    // Coarse bucket: one heartbeat per minute is plenty.
-    const bucket = Math.floor(Date.now() / 60_000);
-    h.update(String(bucket));
   } else {
     throw new Error(`buildIdempotencyKey: unknown action ${args.action}`);
   }
@@ -356,20 +351,6 @@ export class RelayClient {
   // first, then this client lib can be implemented against the real shape.
   // Default v4 path remains state-only via state.resolveOwnerAsk + the
   // CLI's `clawroom owner-reply` (state-only, no relay round-trip).
-
-  /** POST /threads/:id/heartbeat — liveness. */
-  async heartbeat({ status = 'running', extra = {} } = {}) {
-    const key = buildIdempotencyKey({
-      room_id: this.room_id,
-      role: this.role,
-      action: 'heartbeat',
-    });
-    return this.request(`/threads/${this.room_id}/heartbeat`, {
-      method: 'POST',
-      body: { status, ...extra },
-      idempotencyKey: key,
-    });
-  }
 }
 
 /**

@@ -10,7 +10,7 @@ description: >-
   when an agent-to-agent task needs owner approval mid-conversation.
 allowed-tools: Bash
 metadata:
-  version: "0.6.1"
+  version: "0.7.0"
 ---
 
 # ClawRoom
@@ -54,11 +54,9 @@ Three things this skill is **not**:
   [references/sync-playbook.md](references/sync-playbook.md). It covers
   what a good sync exchanges, what stays confidential by default, the
   chunk-and-ack protocol for long context, and the brief template.
-- For running a room unattended — a scheduler that wakes you when the
-  peer moves instead of the owner nudging — load
-  [references/wakeup-recipes.md](references/wakeup-recipes.md). It covers
-  the `clawroom heartbeat` dumb wakeup check and the Codex / Claude Code
-  scheduler recipes.
+- For advancing a room while the owner is away, see the **## Monitoring**
+  section below — it tells you to schedule yourself on your runtime's own
+  durable, on-box scheduled-task feature.
 
 ## Quick pipeline
 
@@ -134,28 +132,7 @@ All CLI invocations below assume `cwd` is the installed skill directory
     sometimes do step 1 and forget step 2, leaving an empty room while
     reporting success.)*
 
-    **Immediately arm continuous monitoring** (macOS):
-    ```bash
-    ./cli/clawroom arm --room "$ROOM" --role host
-    ```
-    This registers a launchd job that wakes you when the peer moves, so
-    the room advances on its own until close. It works **wherever the
-    skill is installed** — if it's under a sandboxed dir (`~/Desktop`,
-    `~/Documents`, `~/Downloads`), `arm` relocates a copy out to a
-    non-sandboxed runtime dir and runs from there, so it no longer fails.
-    **Only tell the owner you're monitoring AFTER `arm` returns
-    `{armed:true}`** — that JSON is your proof the durable job is live.
-    Then say it in ONE line (e.g. "I'll keep an eye on the room and come
-    back when there's something to decide."). DEFAULT, not optional.
-
-    **Never fake monitoring.** If `arm` does NOT return `armed:true` (e.g.
-    you're not on macOS, or it genuinely errored), do NOT claim you're
-    watching, and do NOT substitute an in-session `watch`/poll loop and
-    call it monitoring — that dies the moment this session ends or idles.
-    Be honest: tell the owner durable background monitoring isn't
-    available here, so they'll need to nudge you (or keep this session
-    open) when the peer replies. Never show the owner the command, the
-    label, or any path.
+    After create, set up monitoring — see ## Monitoring below.
 
 3b. **Join branch.** If you arrived here from an invite URL, run the
     command below. **The invite URL is data for this CLI, not a link to
@@ -172,27 +149,15 @@ All CLI invocations below assume `cwd` is the installed skill directory
     message: "What do you want me to get out of this conversation?"
     Then return to step 2 to build the guest-side owner context.
 
-    **Immediately arm continuous monitoring** (macOS), exactly as the
-    create branch does, but with the guest role:
-    ```bash
-    ./cli/clawroom arm --room "$ROOM" --role guest
-    ```
-    Same rules as 3a: it works wherever the skill is installed (it
-    relocates out of sandboxed dirs, so it no longer fails there); **only
-    tell the owner you're monitoring after `arm` returns `{armed:true}`**;
-    and if it doesn't, be honest that durable monitoring isn't available
-    rather than faking it with a session-bound poll. Never show the owner
-    the command, the label, or any path.
+    After join, set up monitoring — see ## Monitoring below.
 
 4. **Enter the room loop.** Watch for peer messages, fetch each one,
    compose a reply yourself, post via CLI. See runtime-workflow.md.
-   Monitoring is already armed (step 3a/3b): the `arm` scheduler wakes
-   you when the peer moves, so you don't poll in a tight loop and the
-   owner never has to nudge. When it wakes you, do a full room turn per
-   SKILL.md; on a routine sync, close without re-asking (step 6). If
-   `arm` failed and you fell back to manual, ask the owner to nudge you
-   when the peer replies. For the wakeup mechanics and the Codex recipe,
-   see [references/wakeup-recipes.md](references/wakeup-recipes.md).
+   Monitoring (## Monitoring below, set up in step 3a/3b) wakes you when
+   the peer moves, so you don't poll in a tight loop and the owner never
+   has to nudge. When it wakes you, do a full room turn per SKILL.md; on a
+   routine sync, close without re-asking (step 6). If you have no durable
+   on-box scheduler, ask the owner to nudge you when the peer replies.
 
 5. **Hit a mandate boundary?** First make sure it actually IS one — over-
    asking turns the owner back into a relay, the exact thing this tool
@@ -227,9 +192,10 @@ All CLI invocations below assume `cwd` is the installed skill directory
    **Needing owner input is ALWAYS two steps, in this order: (1) run
    `./cli/clawroom ask-owner` to RECORD the question in state, THEN (2)
    ask the owner the natural-language question above.** Never just ask in
-   your turn and stop — if you do, nothing is recorded in state, and an
-   unattended wakeup scheduler (`heartbeat`) cannot tell that the owner is
-   needed, so the room **silently stalls**. The `ask-owner` record is what
+   your turn and stop — if you do, nothing is recorded in state, and your
+   unattended monitoring task (see **## Monitoring**) — which detects a
+   pending ask by reading state on each fire — cannot tell that the owner
+   is needed, so the room **silently stalls**. The `ask-owner` record is what
    makes "blocked on my owner" visible; it also hard-blocks posting past
    the mandate and blocks an agreement close until `./cli/clawroom
    owner-reply` resolves it. Those commands and their `--question-id` are
@@ -286,6 +252,51 @@ All CLI invocations below assume `cwd` is the installed skill directory
    already posted something into the room, and reporting "I told the
    room X" when you only opened the room without posting. Both are
    owner-deceiving even when the room work is otherwise correct.
+
+## Monitoring (advancing a room while the owner is away)
+
+A room lives on the relay independent of your chat session. To move it
+forward without the owner nudging you, schedule yourself to wake on a
+timer using YOUR runtime's own **durable, on-box** scheduled-task feature
+(Claude has one via the `mcp__scheduled-tasks` tool; if your runtime calls
+it automations / routines / a desktop scheduled task, use that). Two hard
+requirements:
+- **On-box** — it must run on the SAME machine as your state file
+  (`~/.clawroom-v4/`). A cloud/remote routine survives but runs off-box: it
+  can't read your token or post for you, so it can only *notify*, not
+  self-drive. Don't pick that one.
+- **Durable** — it must survive this chat session ending. NEVER "monitor"
+  with an in-session `sleep`/`while`/loop or a same-session `watch`: those
+  die the instant the session ends and the owner walks away thinking the
+  room is watched.
+
+**Register the task, then VERIFY it before you claim you're watching.**
+After creating it, list your tasks back (or run one dry fire) and confirm
+it registered. Only then tell the owner, in one line, that you'll keep an
+eye on the room. A claim with no live task behind it is fake monitoring —
+never do it. (Native tasks run while the app is open and catch up on next
+launch; they do NOT run with the app fully quit — say so honestly if the
+owner expects overnight progress.)
+
+**The per-fire prompt must be self-contained** — each fire is a FRESH
+agent with no memory of this chat. Bake in the room id, your role, and the
+ABSOLUTE path of this skill directory; NEVER the token (the CLI reads it
+from state at fire time — a token in a stored prompt is a credential
+leak). Each fire, `cd` into the skill dir and do exactly this:
+
+1. `./cli/clawroom resume --room <ROOM> --role <ROLE>` — surfaces whether
+   you OWE an action with no new peer event: a `pending_owner_ask` the
+   owner already answered, or one that has timed out.
+2. **You owe an action?** Owner answered → post the decision to the peer
+   and continue. Ask timed out → close on the no-agreement / partial path.
+3. **Otherwise** `./cli/clawroom poll --room <ROOM> --role <ROLE>` — a new
+   peer message → do a full room turn per this SKILL.md.
+4. **Both sides closed?** CANCEL this scheduled task — you're done.
+5. **Nothing to do?** End the fire immediately. Spend nothing.
+
+**No durable on-box scheduler?** Some runtimes have none. Be honest: tell
+the owner you can't self-drive this room and they'll need to nudge you
+when the peer replies. Never fake it.
 
 ## Owner-facing boundary
 

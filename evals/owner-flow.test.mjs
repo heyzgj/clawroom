@@ -18,7 +18,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CLI = path.resolve(__dirname, '../skill/cli/clawroom');
 
-const { initState, readState, setPendingOwnerAsk, resolveOwnerAsk, clearOwnerAnsweredWake, setCursor, setWakeLease } =
+const { initState, readState, setPendingOwnerAsk, resolveOwnerAsk, clearOwnerAnsweredWake, setCursor } =
   await import('../skill/lib/state.mjs');
 const { validateAndPrepareClose } = await import('../skill/lib/close.mjs');
 const { STATE_DIR } = await import('../skill/lib/types.mjs');
@@ -334,20 +334,18 @@ test('clearOwnerAnsweredWake removes the signal', () => {
   assert.equal(after.owner_approvals[0].decision, 'approve');
 });
 
-test('clearOwnerAnsweredWake merges concurrently (does NOT clobber a wake-lease written after the caller read)', () => {
+test('clearOwnerAnsweredWake merges concurrently (does NOT clobber a cursor bump written after the caller read)', () => {
   // Mirror of the setCursor clobber regression. The agent's post/close holds a
-  // state snapshot that has owner_answered_wake set; meanwhile a scheduler-
-  // driven heartbeat writes the wake-lease fields. clearOwnerAnsweredWake must
-  // re-read the freshest state and clear ONLY owner_answered_wake, never
-  // re-persisting the stale (pre-lease) lease fields.
+  // state snapshot that has owner_answered_wake set; meanwhile another in-turn
+  // CLI process advances the cursor. clearOwnerAnsweredWake must re-read the
+  // freshest state and clear ONLY owner_answered_wake, never re-persisting the
+  // stale (pre-bump) cursor.
   const room = `t_ownerflow_${process.pid}_wake_merge`;
   cleanState(room, 'host');
   initState({ room_id: room, role: 'host', host_token: 'host_test' });
-  const staleAgentSnapshot = setAndResolveAsk(room, 'approve'); // has owner_answered_wake set, lease unset
+  const staleAgentSnapshot = setAndResolveAsk(room, 'approve'); // has owner_answered_wake set
 
-  // Concurrent heartbeat lands a wake-lease AND a cursor bump after the agent's read.
-  const heartbeatView = readState(room, 'host');
-  setWakeLease(heartbeatView, -3553, '2099-01-01T00:00:00.000Z');
+  // A concurrent process lands a cursor bump after the agent's read.
   const cursorView = readState(room, 'host');
   setCursor(cursorView, 9);
 
@@ -356,8 +354,6 @@ test('clearOwnerAnsweredWake merges concurrently (does NOT clobber a wake-lease 
 
   const final = readState(room, 'host');
   assert.ok(!final.owner_answered_wake, 'owner_answered_wake cleared');
-  assert.equal(final.last_wakeup_event_id, -3553, 'the concurrent wake-lease must survive');
-  assert.equal(final.wakeup_inflight_until, '2099-01-01T00:00:00.000Z', 'lease inflight time survives');
   assert.equal(final.last_event_cursor, 9, 'the concurrent cursor bump must survive');
   assert.equal(final.owner_approvals.length, 1, 'recorded approval survives');
 });
@@ -448,8 +444,7 @@ test('cmdClose clears owner_answered_wake after a successful close', async () =>
 test('backward-compat: a state file WITHOUT owner_answered_wake still validates/reads (resumeRoom + writeState)', () => {
   // initState never writes owner_answered_wake, so a freshly created state file
   // exercises the absent-field path. It must read back cleanly (validateRoomState
-  // treats the field as optional, exactly like the wake-lease fields), and a
-  // re-write must not invent the field.
+  // treats the field as optional), and a re-write must not invent the field.
   const room = `t_ownerflow_${process.pid}_backcompat`;
   cleanState(room, 'host');
   const created = initState({ room_id: room, role: 'host', host_token: 'host_test' });
@@ -458,13 +453,11 @@ test('backward-compat: a state file WITHOUT owner_answered_wake still validates/
   const read = readState(room, 'host');
   assert.ok(read, 'state without owner_answered_wake must read cleanly');
   assert.equal(read.owner_answered_wake, undefined);
-  // Simulate an OLD on-disk file that predates the feature: strip any wake/lease
-  // fields and confirm validation still accepts it.
+  // Simulate an OLD on-disk file that predates the feature: strip the optional
+  // owner_answered_wake field and confirm validation still accepts it.
   const raw = JSON.parse(fs.readFileSync(path.join(STATE_DIR, `${room}-host.state.json`), 'utf8'));
   delete raw.owner_answered_wake;
-  delete raw.last_wakeup_event_id;
-  delete raw.wakeup_inflight_until;
   fs.writeFileSync(path.join(STATE_DIR, `${room}-host.state.json`), JSON.stringify(raw, null, 2));
   const reread = readState(room, 'host');
-  assert.ok(reread, 'an old-shape state file (no wake fields) must still validate');
+  assert.ok(reread, 'an old-shape state file (no owner_answered_wake) must still validate');
 });
