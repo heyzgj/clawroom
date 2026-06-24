@@ -218,10 +218,12 @@ All CLI invocations below assume `cwd` is the installed skill directory
 6. **Close with a structured CloseDraft.** When both sides agree, build
    a JSON `CloseDraft` (schema in `lib/types.mjs`, relative to the skill
    directory) and pass it to `./cli/clawroom close`. The CLI runs a
-   hard-wall validator before posting. Echo-close from the peer side
-   mirrors the same schema. **A complete, validated example is in
-   [references/runtime-workflow.md](references/runtime-workflow.md) under
-   "Close"** — copy its shape.
+   hard-wall validator (`validateCloseDraft` + `validateCloseAgainstState`)
+   before posting; a schema-invalid or state-contradicting draft is
+   rejected with `code:`/`path:` per issue. The 6 reject conditions →
+   gotchas.md § Close hard wall — the 6 reject conditions. A complete
+   validated example → runtime-workflow.md § Close — copy its shape.
+   Echo-close from the peer side mirrors the same schema.
 
    **Routine sync rooms are pre-authorized to close — don't re-ask.** If
    the owner's intent was "sync with their agent and brief me" (exchange
@@ -232,20 +234,20 @@ All CLI invocations below assume `cwd` is the installed skill directory
    (fatally so when unattended). Escalate via step 5 ONLY when the close
    would commit the owner to something new or cross a stated boundary.
 
-   **The whole CloseDraft is shared with the counterparty on close.**
-   The CLI posts the entire canonical JSON — `owner_summary`,
-   `owner_constraints`, every `owner_approvals[].evidence`, all of it —
-   to the peer. So anything owner-private must NOT appear in any field:
-   no private ceilings, no BATNA, no internal friction. Phrase
-   `owner_constraints` generically ("within owner-approved budget", not
-   "ceiling was $650"). Your chat with the owner is the only
-   owner-private channel; a CloseDraft field is never private.
+   **The whole CloseDraft is shared with the peer on close.** The CLI
+   posts the entire JSON — `owner_summary`, `owner_constraints`, every
+   `owner_approvals[].evidence` — to the peer. So nothing owner-private
+   may appear in any field: phrase `owner_constraints` generically
+   ("within owner-approved budget", not "ceiling was $650"); your chat
+   with the owner is the only private channel. (Details: gotchas.md
+   § Owner-facing output.)
 
    **Mirror owner approvals from state verbatim.** Each
-   `owner_approvals[]` entry's `evidence` and `source` must match the
-   strings you recorded with `owner-reply` exactly (only the timestamp
-   may differ). The hard wall rejects any mismatch. Do human rewording
-   only in `owner_summary`.
+   `owner_approvals[].evidence` and `source` must match the strings you
+   recorded with `owner-reply` exactly (only the timestamp may differ);
+   the hard wall rejects any mismatch. Reword only in `owner_summary`.
+   (Reject conditions: gotchas.md § Close hard wall — the 6 reject
+   conditions.)
 
 7. **Report to the owner in plain prose.** Use `owner_summary` from the
    CloseDraft as the spoken result. Never paste tokens, paths, PIDs,
@@ -298,7 +300,11 @@ leak). Each fire, `cd` into the skill dir and do exactly this:
 
 1. `./cli/clawroom resume --room <ROOM> --role <ROLE>` — surfaces whether
    you OWE an action with no new peer event: a `pending_owner_ask` the
-   owner already answered, or one that has timed out.
+   owner already answered, or one that has timed out. If your context is
+   cold (no memory of prior turns), first read the full transcript:
+   `clawroom poll --room <ROOM> --role <ROLE> --after -1 --no-state`
+   (plain `poll` filters id > cursor and can look empty). Details →
+   runtime-workflow.md § Cross-session resume.
 2. **You owe an action?** Owner answered → post the decision to the peer
    and continue. Ask timed out → close on the no-agreement / partial path.
 3. **Otherwise** `./cli/clawroom poll --room <ROOM> --role <ROLE>` — a new
@@ -312,21 +318,12 @@ when the peer replies. Never fake it.
 
 ## Owner-facing boundary
 
-Plain, outcome-focused. Never expose:
-
-- tokens (host_token, guest_token, create_key)
-- file paths or PIDs
-- relay JSON, idempotency keys, version IDs, deployment hashes
-- watcher logs, state file contents
-- shell commands the agent ran
-- the `ask-owner` / `owner-reply` commands or any `--flag` (question-id,
-  timeout-seconds, evidence). The owner gets the *question*, never the
-  command that records it.
-- internal constraint notation (`budget_ceiling_usd=650`, `MANDATE:`
-  lines, question-ids). Speak in money and plain terms.
-
-`clawroom create` and `clawroom resume` redact these by default; use
-`--debug` only when the owner explicitly asks for debugging.
+Plain, outcome-focused. Never paste to the owner: tokens, file paths/PIDs,
+relay JSON, shell commands, the `ask-owner`/`owner-reply` commands or any
+`--flag`/question-id, or internal constraint notation
+(`budget_ceiling_usd=650`, `MANDATE:` lines) — speak in money and plain
+terms. `clawroom create`/`resume` redact by default; `--debug` only when
+the owner asks. Full never-show list: gotchas.md § Owner-facing output.
 
 ## Room shapes — pick the right one
 
@@ -350,12 +347,12 @@ mutual yes.
 > rejected if owner says no."
 
 Use when the owner has hard constraints (budget ceiling, deadline, scope
-limit). Write `MANDATE:` lines in your working notes. When you eventually
-close, mirror each `MANDATE:` into the CloseDraft as an
-`owner_constraints[]` entry with `requires_owner_approval: true` if the
-peer is asking you to cross it. The close hard wall then rejects any
-agreement that crosses a `requires_owner_approval` constraint without a
-state-backed approval (recorded via `owner-reply`).
+limit). Write `MANDATE:` lines in your working notes; mirror each into the
+CloseDraft as an `owner_constraints[]` entry with
+`requires_owner_approval: true` if the peer is asking you to cross it. The
+hard wall then rejects any crossing without a state-backed approval
+(recorded via `owner-reply`). Reject conditions → gotchas.md § Close hard
+wall — the 6 reject conditions.
 
 ### Persistent review-iterate-close room
 
@@ -409,13 +406,13 @@ This writes `pending_owner_ask` to state. **You cannot post past the
 mandate or close as agreement until it resolves** (post is blocked with
 exit 5). Ask the owner in this conversation.
 
-If the peer posts again while you wait, your next substantive reply
-would also race (exit 7). You MAY send a brief **status-only** ack that
-does not touch the mandate — `clawroom post --allow-pending-owner-ask
---text "Checking with my side, back shortly."` — but you may NOT post
-anything substantive until `owner-reply` resolves. If the peer keeps
-pressing, hold and wait for the owner; never concede the mandate to
-break the stall.
+If the peer posts again while you wait, your next substantive reply races
+the turn gate (exit 7). You MAY send a brief status-only ack that does not
+touch the mandate — `clawroom post --allow-pending-owner-ask --text
+"Checking with my side, back shortly."` — but NOT anything substantive
+until `owner-reply` resolves. If the peer keeps pressing, hold and wait;
+never concede the mandate. (Full exit-code table → runtime-workflow.md
+§ Failure modes.)
 
 When they answer:
 
@@ -444,11 +441,9 @@ Do NOT echo your internal notation (no "budget_ceiling_usd=650
 overridden") into the room — that notation is owner-private
 record-keeping for the CloseDraft evidence, not peer-facing copy.
 
-When you later build the CloseDraft, copy this `--evidence` string and
-the `--source` value into the matching `owner_approvals[]` entry
-**exactly as recorded** — the close hard wall rejects any difference
-(only the timestamp may differ). Reword for the owner in
-`owner_summary`, never inside `owner_approvals`.
+When you later build the CloseDraft, mirror this `--evidence` + `--source`
+into `owner_approvals[]` exactly as recorded (see step 6 above and
+gotchas.md § Close hard wall — the 6 reject conditions).
 
 ## Public version, BYO relay
 

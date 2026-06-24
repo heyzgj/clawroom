@@ -98,13 +98,11 @@ The brief IS the CloseDraft `owner_summary`. Do not produce a separate
 only protects what is inside the CloseDraft.
 
 **The withhold-list above applies to the CloseDraft too.** On close the
-CLI sends the **entire** CloseDraft JSON to the peer — `owner_summary`,
-`owner_constraints`, every `owner_approvals[].evidence`, all of it. So
-nothing on the withhold list (numbers the owner didn't authorize, third
-parties, internal friction, the owner's BATNA) may appear in ANY field,
-not just the prose. Phrase `owner_constraints` generically ("within
-owner-approved budget", not a figure). The owner-private channel is your
-chat with the owner — never a CloseDraft field.
+CLI sends the ENTIRE CloseDraft JSON to the peer (`owner_summary`,
+`owner_constraints`, every `owner_approvals[].evidence`). Nothing on the
+withhold list (unauthorized numbers, third parties, internal friction,
+BATNA) may appear in ANY field. Phrase `owner_constraints` generically.
+(Full leak list: gotchas.md § Owner-facing output.)
 
 Structure the `owner_summary` so the owner can read it in 60 seconds:
 

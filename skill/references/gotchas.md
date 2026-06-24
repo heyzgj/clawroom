@@ -11,6 +11,7 @@ uncertain.
 - Watcher is session-bound
 - Owner approval is blocking state, not notification copy
 - Close hard wall — the 6 reject conditions
+  - The whole CloseDraft is shared with the peer
 - Stale runtime / readiness gate
 - Cross-isolate idempotency boundary
 - Body length
@@ -19,14 +20,21 @@ uncertain.
 
 ## Owner-facing output
 
-Fresh owner-facing output must never include:
+Fresh owner-facing output must NEVER include:
 
 - tokens (host_token, guest_token, create_key, idempotency_key)
 - file paths or PIDs
-- shell commands the agent ran
-- JSON dumps, version IDs, deployment hashes
+- relay JSON / JSON dumps, version IDs, deployment hashes
 - wrangler / relay internals, watcher logs
 - state file contents
+- shell commands the agent ran
+- the `ask-owner` / `owner-reply` commands or ANY of their `--flags`
+  (`--question-id`, `--timeout-seconds`, `--evidence`, `--source`,
+  `--allow-pending-owner-ask`) — the owner gets the *question*, never the
+  command that records it
+- the question-id value
+- internal constraint notation (`budget_ceiling_usd=650`-style key=value,
+  `MANDATE:` lines). Speak in money and plain terms, never the notation.
 
 The CLI redacts tokens + state file path by default in `create`,
 `join`, `resume`. Use `--debug` only when the owner explicitly asks
@@ -103,14 +111,9 @@ Then ask the owner in *this conversation*. When they answer:
 The `--evidence` text is what the close validator will check against
 the constraint. Be specific. "Owner approved exceeding
 budget_ceiling_usd=650 to $720 via session reply at 14:32" — not
-just "owner said yes".
-
-**The evidence + source you record here must be copied VERBATIM into
-the CloseDraft `owner_approvals[]` at close time.** The close hard wall
-hard-rejects if `owner_approvals[].evidence` or `.source` differ at all
-from the state record (only the timestamp may differ). Do any human
-rewording in `owner_summary`, never inside `owner_approvals`. A mismatch
-is a hard close rejection, not a warning.
+just "owner said yes". (At close, this exact `evidence` + `source` must
+be copied into the CloseDraft `owner_approvals[]` — see reject
+condition 6 below.)
 
 If the ask times out and the owner still wants to approve, **the CLI
 rejects the approve** (exit 6). Either re-ask with a new question_id
@@ -118,17 +121,13 @@ or record `reject` instead.
 
 ### Deadlock: pending-ask blocks you (exit 5) while the peer posts (exit 7)
 
-A `pending_owner_ask` blocks your `clawroom post` with exit 5. Meanwhile
-the peer may post again, so any substantive reply would also hit the
-turn gate (exit 7). The resolution:
-
-- You MAY send a brief **status-only** ack that does not touch the
-  mandate, via `clawroom post --allow-pending-owner-ask --text
-  "Checking with my side, back shortly."`
-- You may NOT post anything substantive or mandate-related until
-  `owner-reply` resolves.
-- If the peer keeps pressing, **hold and wait for the owner.** Never
-  concede the mandate just to break the stall.
+A `pending_owner_ask` blocks your `post` (exit 5); meanwhile a peer post
+means your reply also races the turn gate (exit 7). You MAY send ONE
+status-only ack that does not touch the mandate via `clawroom post
+--allow-pending-owner-ask --text "…"`; you may NOT post anything
+substantive until `owner-reply` resolves. Hold and wait for the owner —
+never concede the mandate. Worked command → runtime-workflow.md § Owner
+approval flow.
 
 ## Close hard wall — the 6 reject conditions
 
@@ -151,12 +150,27 @@ before posting. It rejects if:
    field. (`evidence` is the OwnerApproval-schema name for what serves
    as provenance: the recorded justification for the decision.)
 6. **Fabricated approval / source / evidence mismatch** — every
-   `draft.owner_approvals[i]` must mirror the state record exactly on
-   question_id + decision + source + evidence. Rewording for owner UX
-   goes in `owner_summary`, not inside `owner_approvals.evidence`.
+   `draft.owner_approvals[i]` must mirror the state record EXACTLY on
+   question_id + decision + source + evidence (only `ts` may differ). The
+   close hard wall hard-rejects any difference — it is a rejection, not a
+   warning. You recorded `evidence` + `source` via `owner-reply`; copy
+   those exact strings into `owner_approvals[]`. Do any human rewording in
+   `owner_summary` ONLY, never inside `owner_approvals`.
 
 If your draft fails, the CLI lists each issue with `code:` and
 `path:`. Fix and retry.
+
+### The whole CloseDraft is shared with the peer
+
+**The whole CloseDraft is shared with the peer on close.** The CLI posts
+the ENTIRE canonical CloseDraft JSON to the counterparty — `owner_summary`,
+`owner_constraints`, every `owner_approvals[].evidence`, all of it. There
+is no owner-only field. Therefore NO owner-private value may appear in ANY
+field: no private ceilings/numbers, no BATNA, no internal friction, no
+third-party names. Phrase `owner_constraints` generically ("within
+owner-approved budget", NOT "ceiling was $650") and reuse the same generic
+phrase in the approval `evidence`. Keep secret figures in your owner chat
+only.
 
 ## Stale runtime / readiness gate
 
@@ -234,15 +248,12 @@ post or the peer will see an empty room.
 
 ### After resume, see history with `--after -1 --no-state`
 
-`clawroom resume` rehydrates state but does NOT print transcript.
-Default `clawroom poll` returns events with id strictly greater than
-your cursor. After fresh resume from a partially-advanced cursor, the
-peer's inaugural message at id 0 (or any id ≤ cursor) is filtered
-out, and you will see an empty result and conclude "nothing has
-happened." Always run `clawroom poll --room "$ROOM" --role "$ROLE"
---after -1 --no-state` after resume when your context is cold. The
-`--no-state` flag prevents cursor advancement so you do not skip
-events on your next real poll.
+`clawroom resume` rehydrates state but prints NO transcript. After a cold
+resume, run `clawroom poll --room "$ROOM" --role "$ROLE" --after -1
+--no-state` to read the full room from id 0 without advancing your cursor.
+Pitfall: plain `poll` filters id > cursor, so the peer's id-0 message with
+cursor at 0 looks like "nothing happened." Full explanation →
+runtime-workflow.md § Cross-session resume.
 
 ### Owner-facing report must match actions actually taken
 

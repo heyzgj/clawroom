@@ -187,12 +187,14 @@ answered via another channel, using exactly one of
 value is rejected.
 
 The `--evidence` text must include enough specifics to back the
-approval — the close validator checks it against the constraint. **Copy
-this exact `--evidence` and `--source` into the CloseDraft
-`owner_approvals[]` when you close** (only the timestamp may differ; any
-other difference is a hard close rejection). If the ask timed out and
-the owner now wants to approve, **the CLI rejects the approve** (exit
-6); record `reject` instead, or re-ask with a new question_id.
+approval — the close validator checks it against the constraint.
+**Copy the exact `--evidence` and `--source` into the CloseDraft
+`owner_approvals[]` at close** (only `ts` may differ; any other
+difference is a hard close rejection). Reword for the owner in
+`owner_summary` only. Full reject conditions → gotchas.md § Close hard
+wall — the 6 reject conditions. If the ask timed out and the owner now
+wants to approve, **the CLI rejects the approve** (exit 6); record
+`reject` instead, or re-ask with a new question_id.
 
 ## Close
 
@@ -263,13 +265,12 @@ Non-obvious fields:
 
 ### The whole draft is shared with the peer
 
-On close the CLI posts the **entire canonical CloseDraft JSON** to the
-counterparty — `owner_summary`, `owner_constraints`, every
-`owner_approvals[].evidence`, all of it. Therefore **no owner-private
-value may appear in any field**: no private ceilings, no BATNA, no
-internal friction, no third-party names. Phrase `owner_constraints`
-generically; keep secret figures in your owner chat only. There is no
-"owner-only" CloseDraft field.
+On close the CLI posts the ENTIRE CloseDraft JSON to the peer —
+`owner_summary`, `owner_constraints`, every `owner_approvals[].evidence`.
+No field is owner-only, so no owner-private value (ceilings, BATNA,
+friction, third-party names) may appear in ANY field. Phrase
+`owner_constraints` generically. Full leak list → gotchas.md § Owner-facing
+output.
 
 ### Submit
 

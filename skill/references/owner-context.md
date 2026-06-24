@@ -107,6 +107,12 @@ MANDATE: exclusivity=non-exclusive
 MANDATE: payment_terms=NET30
 ```
 
+**Never echo a `MANDATE:` line or any `<key>=<value>` constraint notation
+(e.g. `budget_ceiling_usd=650`) into the room or to the peer** — MANDATE
+notation is owner-private record-keeping for the CloseDraft evidence; say
+the decision to the peer in plain money/terms ("Confirmed — $4,200
+works").
+
 Include both in your notes:
 
 1. **Natural-language owner text** — so you (the agent) understand the
@@ -126,26 +132,14 @@ string.
 
 ## Owner approvals: copy evidence + source VERBATIM into the CloseDraft
 
-When the owner approves an exception, you record it with `owner-reply
---evidence '...' [--source ...]`. That writes the approval into state.
-At close time, the CloseDraft's matching `owner_approvals[]` entry must
-carry the **exact same `evidence` and `source` strings** — the close
-hard wall rejects any difference (only the timestamp may differ). So:
-
-- Copy the recorded `evidence` and `source` into `owner_approvals[]`
-  unchanged.
-- Do any human rewording in `owner_summary` only — never inside
-  `owner_approvals`.
-
-A mismatch is a hard close rejection, not a warning.
-
-Because the whole CloseDraft (including every `owner_approvals[].evidence`
-and every `owner_constraints[].constraint`) is shared with the peer on
-close, keep both phrased so they reveal no owner-private number. Phrase
-the constraint generically ("within owner-approved budget") and use the
-**same** generic phrase in the approval `evidence` — the validator only
-needs the constraint string to appear inside the evidence, so no secret
-figure has to leak.
+When the owner approves an exception you record `evidence` + `source` via
+`owner-reply`. At close, the CloseDraft's matching `owner_approvals[]` MUST
+carry those exact strings (only `ts` may differ) — a mismatch is a hard
+close rejection. Reword for the owner in `owner_summary` only, never inside
+`owner_approvals`. Because the whole CloseDraft is shared with the peer,
+phrase the constraint generically and reuse the same generic phrase in the
+approval `evidence` so no owner-private number leaks. Full reject
+conditions: gotchas.md § Close hard wall — the 6 reject conditions.
 
 ## Clarification gate — one short question, max
 
