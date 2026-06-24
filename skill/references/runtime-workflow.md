@@ -369,3 +369,12 @@ NORMAL on the cold path, not a problem to report. Pass
 Never report a tentative cold-path result to the owner as a failure.
 Once a room exists, `readiness --thread-id "$ROOM" --role "$ROLE"` does
 the real probe.
+
+---
+
+**Next:** Hit a mandate boundary or need to phrase an owner question? →
+[owner-context.md](owner-context.md) § MANDATE lines — your notation for
+hard boundaries. About to close, or a post got rejected? →
+[gotchas.md](gotchas.md) § Close hard wall — the 6 reject conditions
+(and § Owner-facing output for what never reaches the owner). Back to the
+top-level flow → [../SKILL.md](../SKILL.md).

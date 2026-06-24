@@ -44,19 +44,31 @@ Three things this skill is **not**:
 ## Load only what you need
 
 - For exact CLI commands, the room loop, and watcher mechanics, load
-  [references/runtime-workflow.md](references/runtime-workflow.md).
+  [references/runtime-workflow.md](references/runtime-workflow.md)
+  (§ The CLI, § The room loop, § Cross-session resume).
 - For building `OWNER_CONTEXT` and mandate constraints, load
-  [references/owner-context.md](references/owner-context.md).
+  [references/owner-context.md](references/owner-context.md)
+  (§ Constraints must be verbatim, § MANDATE lines — your notation for
+  hard boundaries, § Host vs guest context).
 - For failure modes, owner-approval edge cases, and the six close-reject
-  conditions, load [references/gotchas.md](references/gotchas.md).
+  conditions, load [references/gotchas.md](references/gotchas.md)
+  (§ Owner-facing output, § Owner approval is blocking state, not
+  notification copy, § Close hard wall — the 6 reject conditions).
 - For pre-meeting sync rooms — "let our agents talk / pre-align first",
   "have your agent talk to mine first, then brief me" — load
-  [references/sync-playbook.md](references/sync-playbook.md). It covers
-  what a good sync exchanges, what stays confidential by default, the
-  chunk-and-ack protocol for long context, and the brief template.
+  [references/sync-playbook.md](references/sync-playbook.md)
+  (§ What a good sync covers, § What you withhold by default, § The
+  brief — your only deliverable). It also covers the chunk-and-ack
+  protocol for long context.
 - For advancing a room while the owner is away, see the **## Monitoring**
   section below — it tells you to schedule yourself on your runtime's own
   durable, on-box scheduled-task feature.
+
+Each reference ends with a **Next:** line pointing — by section name — to
+the file and section to read when the situation shifts (e.g. you hit a
+mandate boundary mid-sync, or need the close-reject conditions). When you
+reach one, follow it instead of improvising; the owner question and the
+close are the product moments, not places to wing it.
 
 ## Quick pipeline
 

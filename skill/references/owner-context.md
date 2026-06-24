@@ -186,3 +186,12 @@ Every agreed term in the eventual CloseDraft has a `provenance` field:
 When you record an owner constraint, mark in your own notes which
 constraints came from OWNER_CONTEXT vs OWNER_CONTEXT-derived
 inferences vs assumptions. The CloseDraft will need to declare it.
+
+---
+
+**Next:** Context built — back to running the room (CLI, room loop, exit
+codes, cold-pickup resume) → [runtime-workflow.md](runtime-workflow.md)
+§ The room loop, § Failure modes, § Cross-session resume. Before you
+speak to the owner or close, check what must never leak and what blocks a
+close → [gotchas.md](gotchas.md) § Owner-facing output, § Close hard
+wall — the 6 reject conditions.

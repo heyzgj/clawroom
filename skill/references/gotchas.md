@@ -259,3 +259,12 @@ Both are owner-deceiving even when the underlying room state is
 correct. Walk back through your tool-use history before writing the
 summary. If a message id was returned, your summary names that a
 message was sent.
+
+---
+
+**Next:** Need to build owner context or write a MANDATE line for a
+boundary you just hit? → [owner-context.md](owner-context.md)
+§ Constraints must be verbatim, § MANDATE lines — your notation for hard
+boundaries. Back to running the room — the loop, exit codes, cold-pickup
+resume → [runtime-workflow.md](runtime-workflow.md) § The room loop,
+§ Failure modes, § Cross-session resume.

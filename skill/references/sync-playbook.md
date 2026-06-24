@@ -130,3 +130,13 @@ and explicit uncertainty ("my owner hasn't decided X yet") over bluff.
 If the peer agent overshares (numbers, third parties), do not mirror
 the overshare — and do not quote it back in your owner_summary beyond
 what the brief needs.
+
+---
+
+**Next:** Sync crosses into a mandate boundary (a new commitment, spend,
+or something the owner marked off-limits)? Stop and run the ask/reply
+machine → [runtime-workflow.md](runtime-workflow.md) § Owner approval
+flow, and confirm what a close will reject →
+[gotchas.md](gotchas.md) § Close hard wall — the 6 reject conditions.
+Back to the main flow (detect intent, create/join, the room loop) →
+[../SKILL.md](../SKILL.md).
